@@ -1,0 +1,18 @@
+// use prisma-next
+
+model Order {
+  id           Int      @id @default(autoincrement())
+
+  ebayOrderId  String?  @unique
+  item         String
+
+  salePrice    Decimal
+  ebayFees     Decimal
+  productCost  Decimal?
+
+  status       String   @default("COST_NEEDED")
+
+  orderDate    TimestamptzString @default(now())
+  createdAt    TimestamptzString @default(now())
+  updatedAt    temporal.updatedAtString()
+}

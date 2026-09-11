@@ -1,6 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+type ApiOrder = {
+  id: number;
+  item: string;
+  salePrice: string;
+  ebayFees: string;
+  productCost: string | null;
+  status: string;
+};
 
 type Order = {
   id: number;
@@ -10,36 +19,46 @@ type Order = {
   productCost: string;
 };
 
-const startingOrders: Order[] = [
-  {
-    id: 1,
-    item: "Real Madrid Ronaldo #7 Jersey",
-    salePrice: 54.99,
-    ebayFees: 8.17,
-    productCost: "18.00",
-  },
-  {
-    id: 2,
-    item: "Barcelona Messi #10 Jersey",
-    salePrice: 49.99,
-    ebayFees: 7.42,
-    productCost: "17.50",
-  },
-  {
-    id: 3,
-    item: "Arsenal Henry #14 Jersey",
-    salePrice: 59.99,
-    ebayFees: 8.85,
-    productCost: "",
-  },
-];
-
 function money(value: number) {
   return `$${value.toFixed(2)}`;
 }
 
 export default function Home() {
-  const [orders, setOrders] = useState<Order[]>(startingOrders);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadOrders() {
+      try {
+        const response = await fetch("/api/orders");
+
+        if (!response.ok) {
+          throw new Error("Failed to load orders");
+        }
+
+        const data: ApiOrder[] = await response.json();
+
+        const formattedOrders: Order[] = data.map((order) => ({
+          id: order.id,
+          item: order.item,
+          salePrice: Number(order.salePrice),
+          ebayFees: Number(order.ebayFees),
+          productCost:
+            order.productCost === null
+              ? ""
+              : Number(order.productCost).toFixed(2),
+        }));
+
+        setOrders(formattedOrders);
+      } catch (error) {
+        console.error("Could not load orders:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadOrders();
+  }, []);
 
   function updateProductCost(id: number, value: string) {
     setOrders((currentOrders) =>
@@ -72,7 +91,8 @@ export default function Home() {
       return total + (Number.isFinite(cost) ? cost : 0);
     }, 0);
 
-    const netProfit = totalRevenue - totalFees - totalProductCosts;
+    const netProfit =
+      totalRevenue - totalFees - totalProductCosts;
 
     return {
       totalRevenue,
@@ -158,119 +178,134 @@ export default function Home() {
             </button>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px]">
-              <thead>
-                <tr className="border-b border-slate-400 text-left text-slate-500">
-                  <th className="pb-4 font-semibold">Item</th>
-                  <th className="pb-4 font-semibold">
-                    Sale Price
-                  </th>
-                  <th className="pb-4 font-semibold">
-                    eBay Fees
-                  </th>
-                  <th className="pb-4 font-semibold">
-                    Product Cost
-                  </th>
-                  <th className="pb-4 font-semibold">
-                    Profit
-                  </th>
-                  <th className="pb-4 font-semibold">
-                    Status
-                  </th>
-                </tr>
-              </thead>
+          {loading ? (
+            <p className="py-10 text-center text-slate-500">
+              Loading orders...
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[900px]">
+                <thead>
+                  <tr className="border-b border-slate-400 text-left text-slate-500">
+                    <th className="pb-4 font-semibold">
+                      Item
+                    </th>
 
-              <tbody>
-                {orders.map((order) => {
-                  const hasCost =
-                    order.productCost.trim() !== "";
+                    <th className="pb-4 font-semibold">
+                      Sale Price
+                    </th>
 
-                  const parsedCost = Number(order.productCost);
+                    <th className="pb-4 font-semibold">
+                      eBay Fees
+                    </th>
 
-                  const productCost =
-                    hasCost && Number.isFinite(parsedCost)
-                      ? parsedCost
-                      : 0;
+                    <th className="pb-4 font-semibold">
+                      Product Cost
+                    </th>
 
-                  const profit =
-                    order.salePrice -
-                    order.ebayFees -
-                    productCost;
+                    <th className="pb-4 font-semibold">
+                      Profit
+                    </th>
 
-                  return (
-                    <tr
-                      key={order.id}
-                      className="border-b border-slate-300 last:border-b-0"
-                    >
-                      <td className="py-5 pr-6 font-medium">
-                        {order.item}
-                      </td>
+                    <th className="pb-4 font-semibold">
+                      Status
+                    </th>
+                  </tr>
+                </thead>
 
-                      <td className="py-5 pr-6">
-                        {money(order.salePrice)}
-                      </td>
+                <tbody>
+                  {orders.map((order) => {
+                    const hasCost =
+                      order.productCost.trim() !== "";
 
-                      <td className="py-5 pr-6">
-                        {money(order.ebayFees)}
-                      </td>
+                    const parsedCost =
+                      Number(order.productCost);
 
-                      <td className="py-5 pr-6">
-                        <div className="flex items-center gap-2">
-                          <span>$</span>
+                    const productCost =
+                      hasCost &&
+                      Number.isFinite(parsedCost)
+                        ? parsedCost
+                        : 0;
 
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={order.productCost}
-                            placeholder="0.00"
-                            onChange={(event) =>
-                              updateProductCost(
-                                order.id,
-                                event.target.value
-                              )
-                            }
-                            className="w-28 rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                          />
-                        </div>
-                      </td>
+                    const profit =
+                      order.salePrice -
+                      order.ebayFees -
+                      productCost;
 
-                      <td className="py-5 pr-6">
-                        {hasCost ? (
-                          <span
-                            className={
-                              profit >= 0
-                                ? "font-bold text-green-600"
-                                : "font-bold text-red-600"
-                            }
-                          >
-                            {money(profit)}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">
-                            Pending
-                          </span>
-                        )}
-                      </td>
+                    return (
+                      <tr
+                        key={order.id}
+                        className="border-b border-slate-300 last:border-b-0"
+                      >
+                        <td className="py-5 pr-6 font-medium">
+                          {order.item}
+                        </td>
 
-                      <td className="py-5">
-                        {hasCost ? (
-                          <span className="rounded-full bg-green-100 px-3 py-1 text-sm font-medium text-green-700">
-                            Completed
-                          </span>
-                        ) : (
-                          <span className="rounded-full bg-yellow-100 px-3 py-1 text-sm font-medium text-yellow-700">
-                            Cost Needed
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        <td className="py-5 pr-6">
+                          {money(order.salePrice)}
+                        </td>
+
+                        <td className="py-5 pr-6">
+                          {money(order.ebayFees)}
+                        </td>
+
+                        <td className="py-5 pr-6">
+                          <div className="flex items-center gap-2">
+                            <span>$</span>
+
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={order.productCost}
+                              placeholder="0.00"
+                              onChange={(event) =>
+                                updateProductCost(
+                                  order.id,
+                                  event.target.value
+                                )
+                              }
+                              className="w-28 rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                            />
+                          </div>
+                        </td>
+
+                        <td className="py-5 pr-6">
+                          {hasCost ? (
+                            <span
+                              className={
+                                profit >= 0
+                                  ? "font-bold text-green-600"
+                                  : "font-bold text-red-600"
+                              }
+                            >
+                              {money(profit)}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">
+                              Pending
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="py-5">
+                          {hasCost ? (
+                            <span className="rounded-full bg-green-100 px-3 py-1 text-sm font-medium text-green-700">
+                              Completed
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-yellow-100 px-3 py-1 text-sm font-medium text-yellow-700">
+                              Cost Needed
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </main>
