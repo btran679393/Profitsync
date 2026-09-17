@@ -2,21 +2,24 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-type ApiOrder = {
-  id: number;
-  item: string;
-  salePrice: string;
-  ebayFees: string;
-  productCost: string | null;
-  status: string;
-};
-
 type Order = {
   id: number;
+  ebayOrderId: string | null;
   item: string;
   salePrice: number;
   ebayFees: number;
   productCost: string;
+  status: string;
+};
+
+type ApiOrder = {
+  id: number;
+  ebayOrderId: string | null;
+  item: string;
+  salePrice: string | number;
+  ebayFees: string | number;
+  productCost: string | number | null;
+  status: string;
 };
 
 function money(value: number) {
@@ -26,6 +29,7 @@ function money(value: number) {
 export default function Home() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [savingId, setSavingId] = useState<number | null>(null);
 
   useEffect(() => {
     async function loadOrders() {
@@ -40,18 +44,20 @@ export default function Home() {
 
         const formattedOrders: Order[] = data.map((order) => ({
           id: order.id,
+          ebayOrderId: order.ebayOrderId,
           item: order.item,
           salePrice: Number(order.salePrice),
           ebayFees: Number(order.ebayFees),
           productCost:
             order.productCost === null
               ? ""
-              : Number(order.productCost).toFixed(2),
+              : String(order.productCost),
+          status: order.status,
         }));
 
         setOrders(formattedOrders);
       } catch (error) {
-        console.error("Could not load orders:", error);
+        console.error("Error loading orders:", error);
       } finally {
         setLoading(false);
       }
@@ -73,6 +79,54 @@ export default function Home() {
     );
   }
 
+  async function saveProductCost(id: number, value: string) {
+    if (value.trim() === "") {
+      return;
+    }
+
+    const productCost = Number(value);
+
+    if (!Number.isFinite(productCost) || productCost < 0) {
+      return;
+    }
+
+    try {
+      setSavingId(id);
+
+      const response = await fetch(`/api/orders/${id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          productCost,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to save product cost");
+      }
+
+      setOrders((currentOrders) =>
+        currentOrders.map((order) =>
+          order.id === id
+            ? {
+                ...order,
+                productCost: productCost.toFixed(2),
+                status: "COMPLETED",
+              }
+            : order
+        )
+      );
+
+      console.log("Product cost saved successfully.");
+    } catch (error) {
+      console.error("Error saving product cost:", error);
+    } finally {
+      setSavingId(null);
+    }
+  }
+
   const totals = useMemo(() => {
     const totalRevenue = orders.reduce(
       (total, order) => total + order.salePrice,
@@ -86,7 +140,9 @@ export default function Home() {
 
     const totalProductCosts = orders.reduce((total, order) => {
       const cost =
-        order.productCost === "" ? 0 : Number(order.productCost);
+        order.productCost.trim() === ""
+          ? 0
+          : Number(order.productCost);
 
       return total + (Number.isFinite(cost) ? cost : 0);
     }, 0);
@@ -105,7 +161,6 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-gray-100 text-slate-900">
       <div className="mx-auto max-w-7xl px-6 py-10">
-        {/* Header */}
         <div className="mb-10">
           <h1 className="text-4xl font-bold tracking-tight">
             ProfitSync
@@ -116,7 +171,6 @@ export default function Home() {
           </p>
         </div>
 
-        {/* Summary Cards */}
         <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-2xl bg-white p-6 shadow-sm">
             <p className="text-slate-500">Total Revenue</p>
@@ -157,7 +211,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Recent Orders */}
         <div className="mt-10 rounded-2xl bg-white p-6 shadow-sm">
           <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -179,9 +232,9 @@ export default function Home() {
           </div>
 
           {loading ? (
-            <p className="py-10 text-center text-slate-500">
+            <div className="py-10 text-center text-slate-500">
               Loading orders...
-            </p>
+            </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[900px]">
@@ -232,6 +285,9 @@ export default function Home() {
                       order.ebayFees -
                       productCost;
 
+                    const isSaving =
+                      savingId === order.id;
+
                     return (
                       <tr
                         key={order.id}
@@ -265,8 +321,20 @@ export default function Home() {
                                   event.target.value
                                 )
                               }
+                              onBlur={(event) =>
+                                saveProductCost(
+                                  order.id,
+                                  event.target.value
+                                )
+                              }
                               className="w-28 rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                             />
+
+                            {isSaving && (
+                              <span className="text-sm text-slate-400">
+                                Saving...
+                              </span>
+                            )}
                           </div>
                         </td>
 
