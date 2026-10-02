@@ -1,0 +1,41 @@
+[
+  {
+    "id": "table.ebayConnection",
+    "label": "Create table \"ebayConnection\"",
+    "summary": "Creates table \"ebayConnection\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "table",
+        "name": "ebayConnection"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure table \"ebayConnection\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"ebayConnection\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create table \"ebayConnection\"",
+        "sql": "CREATE TABLE \"public\".\"ebayConnection\" (\n  \"accessToken\" text NOT NULL,\n  \"accessTokenExpiresAt\" timestamptz NOT NULL,\n  \"createdAt\" timestamptz DEFAULT (now()) NOT NULL,\n  \"id\" SERIAL NOT NULL,\n  \"refreshToken\" text NOT NULL,\n  \"refreshTokenExpiresAt\" timestamptz NOT NULL,\n  \"updatedAt\" timestamptz NOT NULL,\n  PRIMARY KEY (\"id\")\n)",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify table \"ebayConnection\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"ebayConnection\""
+        ]
+      }
+    ]
+  }
+]

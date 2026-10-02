@@ -16,3 +16,15 @@ model Order {
   createdAt    TimestamptzString @default(now())
   updatedAt    temporal.updatedAtString()
 }
+model EbayConnection {
+  id                    Int        @id @default(autoincrement())
+
+  accessToken           String
+  refreshToken          String
+
+  accessTokenExpiresAt  TimestamptzString
+  refreshTokenExpiresAt TimestamptzString
+
+  createdAt             TimestamptzString @default(now())
+  updatedAt             temporal.updatedAtString()
+}
