@@ -33,7 +33,7 @@ import type {
 } from '@prisma/orm-postgres/contract/types';
 
 export type StorageHash =
-  StorageHashBase<'f47439617a2f9c09efe41ba4b03a6971ef7ac5751d8faf3081598178bb8d864b'>;
+  StorageHashBase<'d0d15772aa5170e8672e143053b7a1ba2b503ba80e4b7c65c642b16ddea2ae2d'>;
 export type ExecutionHash =
   ExecutionHashBase<'fe29687f147172d6282cffa83f304852ecf3cd1fef2d6382f486c4db82ea2f30'>;
 export type ProfileHash =
@@ -255,6 +255,7 @@ export type FieldOutputTypes = {
     readonly Order: {
       readonly id: CodecTypes['pg/int4@1']['output'];
       readonly ebayOrderId: CodecTypes['pg/text@1']['output'] | null;
+      readonly ebayUserId: CodecTypes['pg/text@1']['output'] | null;
       readonly item: CodecTypes['pg/text@1']['output'];
       readonly salePrice: CodecTypes['pg/numeric@1']['output'];
       readonly ebayFees: CodecTypes['pg/numeric@1']['output'];
@@ -282,6 +283,7 @@ export type FieldInputTypes = {
     readonly Order: {
       readonly id: CodecTypes['pg/int4@1']['input'];
       readonly ebayOrderId: CodecTypes['pg/text@1']['input'] | null;
+      readonly ebayUserId: CodecTypes['pg/text@1']['input'] | null;
       readonly item: CodecTypes['pg/text@1']['input'];
       readonly salePrice: CodecTypes['pg/numeric@1']['input'];
       readonly ebayFees: CodecTypes['pg/numeric@1']['input'];
@@ -310,6 +312,7 @@ export type StorageColumnTypes = {
       readonly createdAt: CodecTypes['pg/timestamptz-string@1']['output'];
       readonly ebayFees: CodecTypes['pg/numeric@1']['output'];
       readonly ebayOrderId: CodecTypes['pg/text@1']['output'] | null;
+      readonly ebayUserId: CodecTypes['pg/text@1']['output'] | null;
       readonly id: CodecTypes['pg/int4@1']['output'];
       readonly item: CodecTypes['pg/text@1']['output'];
       readonly orderDate: CodecTypes['pg/timestamptz-string@1']['output'];
@@ -337,6 +340,7 @@ export type StorageColumnInputTypes = {
       readonly createdAt: CodecTypes['pg/timestamptz-string@1']['input'];
       readonly ebayFees: CodecTypes['pg/numeric@1']['input'];
       readonly ebayOrderId: CodecTypes['pg/text@1']['input'] | null;
+      readonly ebayUserId: CodecTypes['pg/text@1']['input'] | null;
       readonly id: CodecTypes['pg/int4@1']['input'];
       readonly item: CodecTypes['pg/text@1']['input'];
       readonly orderDate: CodecTypes['pg/timestamptz-string@1']['input'];
@@ -439,6 +443,11 @@ type ContractBase = Omit<
                   };
                 };
                 readonly ebayOrderId: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'pg/text@1';
+                  readonly nullable: true;
+                };
+                readonly ebayUserId: {
                   readonly nativeType: 'text';
                   readonly codecId: 'pg/text@1';
                   readonly nullable: true;
@@ -594,6 +603,10 @@ type ContractBase = Omit<
                 readonly nullable: true;
                 readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
               };
+              readonly ebayUserId: {
+                readonly nullable: true;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
               readonly item: {
                 readonly nullable: false;
                 readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
@@ -643,6 +656,7 @@ type ContractBase = Omit<
               readonly fields: {
                 readonly id: { readonly column: 'id' };
                 readonly ebayOrderId: { readonly column: 'ebayOrderId' };
+                readonly ebayUserId: { readonly column: 'ebayUserId' };
                 readonly item: { readonly column: 'item' };
                 readonly salePrice: { readonly column: 'salePrice' };
                 readonly ebayFees: { readonly column: 'ebayFees' };

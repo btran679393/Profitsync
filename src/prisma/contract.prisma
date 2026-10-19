@@ -1,9 +1,11 @@
+
 // use prisma-next
 
 model Order {
   id           Int      @id @default(autoincrement())
 
   ebayOrderId  String?  @unique
+  ebayUserId   String?
   item         String
 
   salePrice    Decimal

@@ -12,9 +12,13 @@ type EbayTokenResponse = {
   error_description?: string;
 };
 
+type EbayUserResponse = {
+  userId?: string;
+};
+
 export async function GET(request: NextRequest) {
   try {
-    // Determine which eBay environment we're using.
+    // STEP 1: Determine the eBay environment.
     const environment =
       process.env.EBAY_ENVIRONMENT === "PRODUCTION"
         ? "PRODUCTION"
@@ -29,7 +33,6 @@ export async function GET(request: NextRequest) {
         ? "https://api.ebay.com"
         : "https://api.sandbox.ebay.com";
 
-    // Check that all required environment variables exist.
     if (!clientId || !clientSecret || !ruName) {
       return NextResponse.json(
         { error: "Missing eBay OAuth configuration" },
@@ -37,15 +40,14 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Retrieve the authorization code and state from eBay.
+    // STEP 2: Verify the OAuth state.
     const code = request.nextUrl.searchParams.get("code");
-    const returnedState = request.nextUrl.searchParams.get("state");
+    const returnedState =
+      request.nextUrl.searchParams.get("state");
 
-    // Retrieve the state saved when authorization began.
     const savedState =
       request.cookies.get("ebay_oauth_state")?.value;
 
-    // Reject requests with missing or mismatched state values.
     if (
       !returnedState ||
       !savedState ||
@@ -57,7 +59,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Check that eBay returned an authorization code.
     if (!code) {
       return NextResponse.json(
         { error: "eBay did not return an authorization code" },
@@ -65,20 +66,18 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Encode the Client ID and Client Secret for authentication.
+    // STEP 3: Exchange the authorization code for tokens.
     const credentials = Buffer.from(
       `${clientId}:${clientSecret}`
     ).toString("base64");
 
-    // Prepare the authorization code exchange.
     const body = new URLSearchParams({
       grant_type: "authorization_code",
       code,
       redirect_uri: ruName,
     });
 
-    // Exchange the authorization code for access and refresh tokens.
-    const response = await fetch(
+    const tokenResponse = await fetch(
       `${ebayApiBase}/identity/v1/oauth2/token`,
       {
         method: "POST",
@@ -92,12 +91,17 @@ export async function GET(request: NextRequest) {
     );
 
     const tokenData: EbayTokenResponse =
-      await response.json();
+      await tokenResponse.json();
 
-    // Handle errors returned by eBay.
-    if (!response.ok) {
+    if (
+      !tokenResponse.ok ||
+      !tokenData.access_token ||
+      !tokenData.refresh_token ||
+      !tokenData.expires_in ||
+      !tokenData.refresh_token_expires_in
+    ) {
       console.error("eBay token exchange failed:", {
-        status: response.status,
+        status: tokenResponse.status,
         error: tokenData.error,
         description: tokenData.error_description,
       });
@@ -108,26 +112,52 @@ export async function GET(request: NextRequest) {
           details:
             tokenData.error_description ||
             tokenData.error ||
-            "Unknown eBay OAuth error",
+            "Missing token information",
         },
-        { status: response.status }
+        { status: 502 }
       );
     }
 
-    // Verify that eBay returned all required token information.
-    if (
-      !tokenData.access_token ||
-      !tokenData.refresh_token ||
-      !tokenData.expires_in ||
-      !tokenData.refresh_token_expires_in
-    ) {
+    // STEP 4: Retrieve the connected eBay user's ID.
+    const userResponse = await fetch(
+      `${ebayApiBase}/commerce/identity/v1/user/`,
+      {
+        headers: {
+          Authorization: `Bearer ${tokenData.access_token}`,
+          Accept: "application/json",
+        },
+        cache: "no-store",
+      }
+    );
+
+    if (!userResponse.ok) {
+      console.error(
+        "Failed to retrieve eBay user identity:",
+        userResponse.status
+      );
+
       return NextResponse.json(
-        { error: "eBay did not return the expected tokens" },
-        { status: 500 }
+        {
+          error: "eBay connected, but user identity lookup failed.",
+          status: userResponse.status,
+        },
+        { status: 502 }
       );
     }
 
-    // Calculate token expiration dates.
+    const userData: EbayUserResponse =
+      await userResponse.json();
+
+    if (!userData.userId) {
+      return NextResponse.json(
+        { error: "eBay did not return a user ID." },
+        { status: 502 }
+      );
+    }
+
+    const ebayUserId = userData.userId;
+
+    // STEP 5: Calculate token expiration dates.
     const accessTokenExpiresAt = new Date(
       Date.now() + tokenData.expires_in * 1000
     ).toISOString();
@@ -137,52 +167,54 @@ export async function GET(request: NextRequest) {
         tokenData.refresh_token_expires_in * 1000
     ).toISOString();
 
-    // Retrieve existing eBay connections.
+    // STEP 6: Find the existing account connection.
     const existingConnections =
       await db.orm.public.EbayConnection.all();
 
-    // Find the connection for the current environment.
     const existingConnection = existingConnections.find(
-      (connection) => connection.environment === environment
+      (connection) =>
+        connection.environment === environment &&
+        connection.ebayUserId === ebayUserId
     );
 
+    // STEP 7: Save the account and its tokens.
     if (existingConnection) {
-      // Update the existing Sandbox or Production connection.
       await db.orm.public.EbayConnection
         .where({ id: existingConnection.id })
         .update({
+          ebayUserId,
+          environment,
           accessToken: tokenData.access_token,
           refreshToken: tokenData.refresh_token,
           accessTokenExpiresAt,
           refreshTokenExpiresAt,
-          environment,
         });
     } else {
-      // Create a new connection for this environment.
       await db.orm.public.EbayConnection.create({
+        ebayUserId,
+        environment,
         accessToken: tokenData.access_token,
         refreshToken: tokenData.refresh_token,
         accessTokenExpiresAt,
         refreshTokenExpiresAt,
-        environment,
       });
     }
 
     console.log(
-      `eBay ${environment} account connected and tokens saved successfully.`
+      `eBay ${environment} account connected successfully.`
     );
 
-    // Return a success message without exposing tokens.
+    // STEP 8: Return success without exposing tokens.
     const successResponse = NextResponse.json({
       success: true,
       message: `eBay ${environment} account connected successfully.`,
       environment,
+      ebayUserId,
       accessTokenExpiresIn: tokenData.expires_in,
       refreshTokenExpiresIn:
         tokenData.refresh_token_expires_in,
     });
 
-    // Remove the OAuth state cookie after successful authorization.
     successResponse.cookies.delete("ebay_oauth_state");
 
     return successResponse;
@@ -191,7 +223,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(
       {
-        error: "Something went wrong while connecting eBay",
+        error: "Something went wrong while connecting eBay.",
       },
       { status: 500 }
     );

@@ -32,22 +32,63 @@ type EbayOrdersResponse = {
 
 export async function POST() {
   try {
-    // STEP 1: Find the saved eBay connection
+    // STEP 1: Determine which eBay environment to use.
+    const environment =
+      process.env.EBAY_ENVIRONMENT === "PRODUCTION"
+        ? "PRODUCTION"
+        : "SANDBOX";
+
+    const ebayApiBase =
+      environment === "PRODUCTION"
+        ? "https://api.ebay.com"
+        : "https://api.sandbox.ebay.com";
+
+    // STEP 2: Find the connected eBay account.
     const connections =
       await db.orm.public.EbayConnection.all();
 
-    if (connections.length === 0) {
+    const matchingConnections = connections.filter(
+      (connection) =>
+        connection.environment === environment &&
+        Boolean(connection.ebayUserId)
+    );
+
+    if (matchingConnections.length === 0) {
       return NextResponse.json(
-        { error: "No eBay account connected." },
+        {
+          error: "No identified eBay account connected.",
+          message:
+            "Please reconnect your eBay account before syncing orders.",
+        },
         { status: 401 }
       );
     }
 
-    const connection = connections[0];
+    // Never silently choose between multiple seller accounts.
+    if (matchingConnections.length > 1) {
+      return NextResponse.json(
+        {
+          error: "Multiple eBay accounts connected.",
+          message:
+            "Account selection must be configured before syncing.",
+        },
+        { status: 409 }
+      );
+    }
+
+    const connection = matchingConnections[0];
+    const ebayUserId = connection.ebayUserId;
+
+    if (!ebayUserId) {
+      return NextResponse.json(
+        { error: "Connected eBay account has no user ID." },
+        { status: 401 }
+      );
+    }
 
     let accessToken = connection.accessToken;
 
-    // STEP 2: Check whether the access token is expiring
+    // STEP 3: Check the access token expiration.
     const accessTokenExpiresAt = new Date(
       connection.accessTokenExpiresAt
     ).getTime();
@@ -56,7 +97,7 @@ export async function POST() {
       !Number.isFinite(accessTokenExpiresAt) ||
       accessTokenExpiresAt <= Date.now() + 60_000
     ) {
-      // STEP 3: Check the refresh token
+      // STEP 4: Verify the refresh token is still valid.
       const refreshTokenExpiresAt = new Date(
         connection.refreshTokenExpiresAt
       ).getTime();
@@ -84,7 +125,7 @@ export async function POST() {
         );
       }
 
-      // STEP 4: Prepare eBay authentication
+      // STEP 5: Prepare the token refresh request.
       const credentials = Buffer.from(
         `${clientId}:${clientSecret}`
       ).toString("base64");
@@ -96,9 +137,9 @@ export async function POST() {
           "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly",
       });
 
-      // STEP 5: Request a new access token
+      // STEP 6: Request a new access token.
       const tokenResponse = await fetch(
-        "https://api.sandbox.ebay.com/identity/v1/oauth2/token",
+        `${ebayApiBase}/identity/v1/oauth2/token`,
         {
           method: "POST",
           headers: {
@@ -140,7 +181,7 @@ export async function POST() {
         Date.now() + tokenData.expires_in * 1000
       ).toISOString();
 
-      // STEP 6: Save the refreshed token in Supabase
+      // STEP 7: Save the refreshed token.
       await db.orm.public.EbayConnection
         .where({ id: connection.id })
         .update({
@@ -148,12 +189,14 @@ export async function POST() {
           accessTokenExpiresAt: newExpiration,
         });
 
-      console.log("eBay access token refreshed successfully.");
+      console.log(
+        `eBay ${environment} access token refreshed successfully.`
+      );
     }
 
-    // STEP 7: Retrieve orders from eBay Sandbox
+    // STEP 8: Retrieve orders from the correct eBay API.
     const response = await fetch(
-      "https://api.sandbox.ebay.com/sell/fulfillment/v1/order?limit=20",
+      `${ebayApiBase}/sell/fulfillment/v1/order?limit=20`,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -182,7 +225,7 @@ export async function POST() {
 
     const ebayOrders = data.orders ?? [];
 
-    // STEP 8: Retrieve existing ProfitSync orders
+    // STEP 9: Retrieve existing ProfitSync orders.
     const existingOrders =
       await db.orm.public.Order.all();
 
@@ -195,14 +238,14 @@ export async function POST() {
     let imported = 0;
     let skipped = 0;
 
-    // STEP 9: Import only new eBay orders
+    // STEP 10: Import new eBay orders.
     for (const ebayOrder of ebayOrders) {
       if (!ebayOrder.orderId) {
         skipped++;
         continue;
       }
 
-      // Prevent duplicate orders
+      // Prevent importing the same order twice.
       if (existingIds.has(ebayOrder.orderId)) {
         skipped++;
         continue;
@@ -220,23 +263,24 @@ export async function POST() {
         continue;
       }
 
-      // Get item names from eBay
+      // Combine the titles of items in the order.
       const item =
         ebayOrder.lineItems
           ?.map((lineItem) => lineItem.title)
           .filter(Boolean)
           .join(", ") || "eBay Order";
 
-      // STEP 10: Save the order to Supabase
+      // STEP 11: Save the order with its seller ID.
       await db.orm.public.Order.create({
         ebayOrderId: ebayOrder.orderId,
+        ebayUserId,
         item,
         salePrice: Number(total).toFixed(2),
 
-        // Actual seller fees will be added later
+        // Actual eBay seller fees will be added later.
         ebayFees: "0.00",
 
-        // User enters the product cost
+        // Product cost is entered manually.
         productCost: null,
 
         status: "COST_NEEDED",
@@ -247,13 +291,13 @@ export async function POST() {
       });
 
       existingIds.add(ebayOrder.orderId);
-
       imported++;
     }
 
-    // STEP 11: Return the sync results
+    // STEP 12: Return the sync results.
     return NextResponse.json({
       success: true,
+      environment,
       found: ebayOrders.length,
       imported,
       skipped,

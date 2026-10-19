@@ -141,6 +141,13 @@
                   "kind": "scalar"
                 }
               },
+              "ebayUserId": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
               "id": {
                 "nullable": false,
                 "type": {
@@ -202,6 +209,9 @@
                 },
                 "ebayOrderId": {
                   "column": "ebayOrderId"
+                },
+                "ebayUserId": {
+                  "column": "ebayUserId"
                 },
                 "id": {
                   "column": "id"
@@ -328,6 +338,11 @@
                   "nativeType": "text",
                   "nullable": true
                 },
+                "ebayUserId": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": true
+                },
                 "id": {
                   "codecId": "pg/int4@1",
                   "default": {
@@ -397,7 +412,7 @@
         "kind": "postgres-schema"
       }
     },
-    "storageHash": "f47439617a2f9c09efe41ba4b03a6971ef7ac5751d8faf3081598178bb8d864b"
+    "storageHash": "d0d15772aa5170e8672e143053b7a1ba2b503ba80e4b7c65c642b16ddea2ae2d"
   },
   "execution": {
     "executionHash": "fe29687f147172d6282cffa83f304852ecf3cd1fef2d6382f486c4db82ea2f30",
