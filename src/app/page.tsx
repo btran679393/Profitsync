@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -22,8 +23,32 @@ type ApiOrder = {
   status: string;
 };
 
+type SyncResponse = {
+  success?: boolean;
+  found?: number;
+  imported?: number;
+  skipped?: number;
+  error?: string;
+  message?: string;
+};
+
 function money(value: number) {
   return `$${value.toFixed(2)}`;
+}
+
+function formatOrders(data: ApiOrder[]): Order[] {
+  return data.map((order) => ({
+    id: order.id,
+    ebayOrderId: order.ebayOrderId,
+    item: order.item,
+    salePrice: Number(order.salePrice),
+    ebayFees: Number(order.ebayFees),
+    productCost:
+      order.productCost === null
+        ? ""
+        : String(order.productCost),
+    status: order.status,
+  }));
 }
 
 export default function Home() {
@@ -31,39 +56,39 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<number | null>(null);
 
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState("");
+  const [syncError, setSyncError] = useState(false);
+  const [loadError, setLoadError] = useState("");
+
+  async function loadOrders() {
+    const response = await fetch("/api/orders", {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to load orders from Supabase.");
+    }
+
+    const data: ApiOrder[] = await response.json();
+
+    setOrders(formatOrders(data));
+    setLoadError("");
+  }
+
   useEffect(() => {
-    async function loadOrders() {
+    async function initialLoad() {
       try {
-        const response = await fetch("/api/orders");
-
-        if (!response.ok) {
-          throw new Error("Failed to load orders");
-        }
-
-        const data: ApiOrder[] = await response.json();
-
-        const formattedOrders: Order[] = data.map((order) => ({
-          id: order.id,
-          ebayOrderId: order.ebayOrderId,
-          item: order.item,
-          salePrice: Number(order.salePrice),
-          ebayFees: Number(order.ebayFees),
-          productCost:
-            order.productCost === null
-              ? ""
-              : String(order.productCost),
-          status: order.status,
-        }));
-
-        setOrders(formattedOrders);
+        await loadOrders();
       } catch (error) {
         console.error("Error loading orders:", error);
+        setLoadError("Unable to load orders from the database.");
       } finally {
         setLoading(false);
       }
     }
 
-    loadOrders();
+    initialLoad();
   }, []);
 
   function updateProductCost(id: number, value: string) {
@@ -122,8 +147,64 @@ export default function Home() {
       console.log("Product cost saved successfully.");
     } catch (error) {
       console.error("Error saving product cost:", error);
+      setLoadError(
+        "Failed to save product cost. Please try again."
+      );
     } finally {
       setSavingId(null);
+    }
+  }
+
+  async function syncEbayOrders() {
+    if (syncing || savingId !== null) {
+      return;
+    }
+
+    try {
+      setSyncing(true);
+      setSyncMessage("");
+      setSyncError(false);
+
+      const response = await fetch("/api/ebay/sync", {
+        method: "POST",
+        cache: "no-store",
+      });
+
+      const data: SyncResponse = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message ||
+            data.error ||
+            "Failed to sync eBay orders."
+        );
+      }
+
+      // Reload the database orders after the import
+      await loadOrders();
+
+      const imported = data.imported ?? 0;
+      const found = data.found ?? 0;
+      const skipped = data.skipped ?? 0;
+
+      setSyncMessage(
+        `Sync complete! Found ${found} eBay orders. ` +
+          `Imported ${imported} new orders. ` +
+          `Skipped ${skipped} existing or invalid orders.`
+      );
+
+      setSyncError(false);
+    } catch (error) {
+      console.error("Error syncing eBay orders:", error);
+
+      setSyncError(true);
+      setSyncMessage(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong while syncing orders."
+      );
+    } finally {
+      setSyncing(false);
     }
   }
 
@@ -208,6 +289,9 @@ export default function Home() {
             >
               {money(totals.netProfit)}
             </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Excludes any seller fees not yet imported
+            </p>
           </div>
         </div>
 
@@ -225,11 +309,39 @@ export default function Home() {
 
             <button
               type="button"
-              className="rounded-xl bg-blue-600 px-5 py-3 font-medium text-white transition hover:bg-blue-700"
+              onClick={syncEbayOrders}
+              disabled={syncing || loading || savingId !== null}
+              className={`rounded-xl px-5 py-3 font-medium text-white transition ${
+                syncing || loading || savingId !== null
+                  ? "cursor-not-allowed bg-blue-400"
+                  : "bg-blue-600 hover:bg-blue-700"
+              }`}
             >
-              Sync eBay Orders
+              {syncing ? "Syncing..." : "Sync eBay Orders"}
             </button>
           </div>
+
+          {syncMessage && (
+            <div
+              role={syncError ? "alert" : "status"}
+              className={`mb-6 rounded-xl border px-4 py-3 text-sm ${
+                syncError
+                  ? "border-red-200 bg-red-50 text-red-700"
+                  : "border-green-200 bg-green-50 text-green-700"
+              }`}
+            >
+              {syncMessage}
+            </div>
+          )}
+
+          {loadError && (
+            <div
+              role="alert"
+              className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+            >
+              {loadError}
+            </div>
+          )}
 
           {loading ? (
             <div className="py-10 text-center text-slate-500">
@@ -315,6 +427,7 @@ export default function Home() {
                               step="0.01"
                               value={order.productCost}
                               placeholder="0.00"
+                              disabled={isSaving || syncing}
                               onChange={(event) =>
                                 updateProductCost(
                                   order.id,
@@ -327,7 +440,7 @@ export default function Home() {
                                   event.target.value
                                 )
                               }
-                              className="w-28 rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                              className="w-28 rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100"
                             />
 
                             {isSaving && (
@@ -372,6 +485,13 @@ export default function Home() {
                   })}
                 </tbody>
               </table>
+
+              {orders.length === 0 && (
+                <p className="py-10 text-center text-slate-500">
+                  No orders found. Sync your eBay account to
+                  import orders.
+                </p>
+              )}
             </div>
           )}
         </div>

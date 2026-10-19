@@ -33,7 +33,7 @@ import type {
 } from '@prisma/orm-postgres/contract/types';
 
 export type StorageHash =
-  StorageHashBase<'37b45dad4e0300fa80bdfc839b74044ae8399482559a14eeb48bd3a66b6a2e4b'>;
+  StorageHashBase<'f47439617a2f9c09efe41ba4b03a6971ef7ac5751d8faf3081598178bb8d864b'>;
 export type ExecutionHash =
   ExecutionHashBase<'fe29687f147172d6282cffa83f304852ecf3cd1fef2d6382f486c4db82ea2f30'>;
 export type ProfileHash =
@@ -243,6 +243,8 @@ export type FieldOutputTypes = {
   readonly public: {
     readonly EbayConnection: {
       readonly id: CodecTypes['pg/int4@1']['output'];
+      readonly ebayUserId: CodecTypes['pg/text@1']['output'] | null;
+      readonly environment: CodecTypes['pg/text@1']['output'];
       readonly accessToken: CodecTypes['pg/text@1']['output'];
       readonly refreshToken: CodecTypes['pg/text@1']['output'];
       readonly accessTokenExpiresAt: CodecTypes['pg/timestamptz-string@1']['output'];
@@ -268,6 +270,8 @@ export type FieldInputTypes = {
   readonly public: {
     readonly EbayConnection: {
       readonly id: CodecTypes['pg/int4@1']['input'];
+      readonly ebayUserId: CodecTypes['pg/text@1']['input'] | null;
+      readonly environment: CodecTypes['pg/text@1']['input'];
       readonly accessToken: CodecTypes['pg/text@1']['input'];
       readonly refreshToken: CodecTypes['pg/text@1']['input'];
       readonly accessTokenExpiresAt: CodecTypes['pg/timestamptz-string@1']['input'];
@@ -295,6 +299,8 @@ export type StorageColumnTypes = {
       readonly accessToken: CodecTypes['pg/text@1']['output'];
       readonly accessTokenExpiresAt: CodecTypes['pg/timestamptz-string@1']['output'];
       readonly createdAt: CodecTypes['pg/timestamptz-string@1']['output'];
+      readonly ebayUserId: CodecTypes['pg/text@1']['output'] | null;
+      readonly environment: CodecTypes['pg/text@1']['output'];
       readonly id: CodecTypes['pg/int4@1']['output'];
       readonly refreshToken: CodecTypes['pg/text@1']['output'];
       readonly refreshTokenExpiresAt: CodecTypes['pg/timestamptz-string@1']['output'];
@@ -320,6 +326,8 @@ export type StorageColumnInputTypes = {
       readonly accessToken: CodecTypes['pg/text@1']['input'];
       readonly accessTokenExpiresAt: CodecTypes['pg/timestamptz-string@1']['input'];
       readonly createdAt: CodecTypes['pg/timestamptz-string@1']['input'];
+      readonly ebayUserId: CodecTypes['pg/text@1']['input'] | null;
+      readonly environment: CodecTypes['pg/text@1']['input'];
       readonly id: CodecTypes['pg/int4@1']['input'];
       readonly refreshToken: CodecTypes['pg/text@1']['input'];
       readonly refreshTokenExpiresAt: CodecTypes['pg/timestamptz-string@1']['input'];
@@ -366,6 +374,20 @@ type ContractBase = Omit<
                   readonly default: {
                     readonly kind: 'function';
                     readonly expression: 'autoincrement()';
+                  };
+                };
+                readonly ebayUserId: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'pg/text@1';
+                  readonly nullable: true;
+                };
+                readonly environment: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'pg/text@1';
+                  readonly nullable: false;
+                  readonly default: {
+                    readonly kind: 'literal';
+                    readonly value: DefaultLiteralValue<'pg/text@1', 'SANDBOX'>;
                   };
                 };
                 readonly accessToken: {
@@ -500,6 +522,14 @@ type ContractBase = Omit<
                 readonly nullable: false;
                 readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/int4@1' };
               };
+              readonly ebayUserId: {
+                readonly nullable: true;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
+              readonly environment: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
               readonly accessToken: {
                 readonly nullable: false;
                 readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
@@ -543,6 +573,8 @@ type ContractBase = Omit<
               readonly namespaceId: 'public';
               readonly fields: {
                 readonly id: { readonly column: 'id' };
+                readonly ebayUserId: { readonly column: 'ebayUserId' };
+                readonly environment: { readonly column: 'environment' };
                 readonly accessToken: { readonly column: 'accessToken' };
                 readonly refreshToken: { readonly column: 'refreshToken' };
                 readonly accessTokenExpiresAt: { readonly column: 'accessTokenExpiresAt' };

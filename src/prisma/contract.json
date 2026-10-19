@@ -40,6 +40,20 @@
                   "kind": "scalar"
                 }
               },
+              "ebayUserId": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
+              "environment": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
               "id": {
                 "nullable": false,
                 "type": {
@@ -80,6 +94,12 @@
                 },
                 "createdAt": {
                   "column": "createdAt"
+                },
+                "ebayUserId": {
+                  "column": "ebayUserId"
+                },
+                "environment": {
+                  "column": "environment"
                 },
                 "id": {
                   "column": "id"
@@ -239,6 +259,20 @@
                   "nativeType": "timestamptz",
                   "nullable": false
                 },
+                "ebayUserId": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": true
+                },
+                "environment": {
+                  "codecId": "pg/text@1",
+                  "default": {
+                    "kind": "literal",
+                    "value": "SANDBOX"
+                  },
+                  "nativeType": "text",
+                  "nullable": false
+                },
                 "id": {
                   "codecId": "pg/int4@1",
                   "default": {
@@ -363,7 +397,7 @@
         "kind": "postgres-schema"
       }
     },
-    "storageHash": "37b45dad4e0300fa80bdfc839b74044ae8399482559a14eeb48bd3a66b6a2e4b"
+    "storageHash": "f47439617a2f9c09efe41ba4b03a6971ef7ac5751d8faf3081598178bb8d864b"
   },
   "execution": {
     "executionHash": "fe29687f147172d6282cffa83f304852ecf3cd1fef2d6382f486c4db82ea2f30",
