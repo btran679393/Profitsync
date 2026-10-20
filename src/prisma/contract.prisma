@@ -4,8 +4,14 @@
 model Order {
   id           Int      @id @default(autoincrement())
 
+  // Supabase user who owns this order
+  userId       String?
+
   ebayOrderId  String?  @unique
   ebayUserId   String?
+  ebayBuyerId  String?
+  environment  String   @default("SANDBOX")
+
   item         String
 
   salePrice    Decimal
@@ -21,6 +27,9 @@ model Order {
 
 model EbayConnection {
   id                    Int        @id @default(autoincrement())
+
+  // Supabase user who owns this connection
+  userId                String?
 
   ebayUserId            String?
   environment           String     @default("SANDBOX")

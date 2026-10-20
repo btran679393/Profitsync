@@ -39,17 +39,20 @@ export async function updateSession(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
 
-  // Allow Google login and its callback without authentication.
-  const isPublicAuthRoute =
+  // Public pages that do not require a Google login.
+  const isPublicPage =
     pathname === "/login" ||
+    pathname === "/privacy" ||
+    pathname === "/privacy/" ||
     pathname.startsWith("/auth/callback");
 
   // eBay must be able to deliver account-deletion notifications.
   const isEbayWebhook =
     pathname === "/api/ebay/account-deletion";
 
-  if (!isAuthenticated && !isPublicAuthRoute && !isEbayWebhook) {
-    // API requests should receive an error, not an HTML login page.
+  // Protect all other pages and API routes.
+  if (!isAuthenticated && !isPublicPage && !isEbayWebhook) {
+    // API requests should return JSON, not an HTML login page.
     if (pathname.startsWith("/api/")) {
       return NextResponse.json(
         { error: "Authentication required." },

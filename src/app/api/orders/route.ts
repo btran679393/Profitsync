@@ -1,48 +1,79 @@
+
 import { NextResponse } from "next/server";
-import { db } from "@/prisma/db";
+import { createClient } from "@/lib/supabase/server";
+import { Pool } from "pg";
 
 export async function GET() {
-  const orders = await db.orm.public.Order.all();
+  try {
+    // Identify the currently signed-in user.
+    const supabase = await createClient();
 
-  return NextResponse.json(orders);
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    // Block requests from users who aren't signed in.
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: "Authentication required." },
+        { status: 401 }
+      );
+    }
+
+    const databaseUrl = process.env.DATABASE_URL;
+
+    if (!databaseUrl) {
+      throw new Error("DATABASE_URL is not configured.");
+    }
+
+    const pool = new Pool({
+      connectionString: databaseUrl,
+      max: 1,
+    });
+
+    try {
+      // Retrieve only this user's orders.
+      const result = await pool.query(
+        `
+        SELECT
+          id,
+          "ebayOrderId",
+          "ebayUserId",
+          "userId",
+          item,
+          "salePrice",
+          "ebayFees",
+          "productCost",
+          status,
+          "orderDate",
+          "createdAt",
+          "updatedAt"
+        FROM "order"
+        WHERE "userId" = $1
+        ORDER BY "orderDate" DESC
+        `,
+        [user.id]
+      );
+
+      return NextResponse.json(result.rows);
+    } finally {
+      await pool.end();
+    }
+  } catch (error) {
+    console.error("Failed to retrieve orders:", error);
+
+    return NextResponse.json(
+      { error: "Failed to retrieve orders." },
+      { status: 500 }
+    );
+  }
 }
 
+// Disable the old sample-order creation endpoint.
 export async function POST() {
-  const existingOrders = await db.orm.public.Order.all();
-
-  if (existingOrders.length > 0) {
-    return NextResponse.json({
-      message: "Sample orders already exist.",
-      orders: existingOrders,
-    });
-  }
-
-  const orders = await db.orm.public.Order.createAll([
-    {
-      ebayOrderId: "SAMPLE-001",
-      item: "Real Madrid Ronaldo #7 Jersey",
-      salePrice: "54.99",
-      ebayFees: "8.17",
-      productCost: "18.00",
-      status: "COMPLETED",
-    },
-    {
-      ebayOrderId: "SAMPLE-002",
-      item: "Barcelona Messi #10 Jersey",
-      salePrice: "49.99",
-      ebayFees: "7.42",
-      productCost: "17.50",
-      status: "COMPLETED",
-    },
-    {
-      ebayOrderId: "SAMPLE-003",
-      item: "Arsenal Henry #14 Jersey",
-      salePrice: "59.99",
-      ebayFees: "8.85",
-      productCost: null,
-      status: "COST_NEEDED",
-    },
-  ]);
-
-  return NextResponse.json(orders, { status: 201 });
+  return NextResponse.json(
+    { error: "Creating sample orders is disabled." },
+    { status: 405 }
+  );
 }

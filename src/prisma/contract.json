@@ -81,6 +81,13 @@
                   "codecId": "pg/timestamptz-string@1",
                   "kind": "scalar"
                 }
+              },
+              "userId": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
               }
             },
             "relations": {},
@@ -112,6 +119,9 @@
                 },
                 "updatedAt": {
                   "column": "updatedAt"
+                },
+                "userId": {
+                  "column": "userId"
                 }
               },
               "namespaceId": "public",
@@ -124,6 +134,13 @@
                 "nullable": false,
                 "type": {
                   "codecId": "pg/timestamptz-string@1",
+                  "kind": "scalar"
+                }
+              },
+              "ebayBuyerId": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/text@1",
                   "kind": "scalar"
                 }
               },
@@ -143,6 +160,13 @@
               },
               "ebayUserId": {
                 "nullable": true,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
+              "environment": {
+                "nullable": false,
                 "type": {
                   "codecId": "pg/text@1",
                   "kind": "scalar"
@@ -196,6 +220,13 @@
                   "codecId": "pg/timestamptz-string@1",
                   "kind": "scalar"
                 }
+              },
+              "userId": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
               }
             },
             "relations": {},
@@ -203,6 +234,9 @@
               "fields": {
                 "createdAt": {
                   "column": "createdAt"
+                },
+                "ebayBuyerId": {
+                  "column": "ebayBuyerId"
                 },
                 "ebayFees": {
                   "column": "ebayFees"
@@ -212,6 +246,9 @@
                 },
                 "ebayUserId": {
                   "column": "ebayUserId"
+                },
+                "environment": {
+                  "column": "environment"
                 },
                 "id": {
                   "column": "id"
@@ -233,6 +270,9 @@
                 },
                 "updatedAt": {
                   "column": "updatedAt"
+                },
+                "userId": {
+                  "column": "userId"
                 }
               },
               "namespaceId": "public",
@@ -306,6 +346,11 @@
                   "codecId": "pg/timestamptz-string@1",
                   "nativeType": "timestamptz",
                   "nullable": false
+                },
+                "userId": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": true
                 }
               },
               "foreignKeys": [],
@@ -328,6 +373,11 @@
                   "nativeType": "timestamptz",
                   "nullable": false
                 },
+                "ebayBuyerId": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": true
+                },
                 "ebayFees": {
                   "codecId": "pg/numeric@1",
                   "nativeType": "numeric",
@@ -342,6 +392,15 @@
                   "codecId": "pg/text@1",
                   "nativeType": "text",
                   "nullable": true
+                },
+                "environment": {
+                  "codecId": "pg/text@1",
+                  "default": {
+                    "kind": "literal",
+                    "value": "SANDBOX"
+                  },
+                  "nativeType": "text",
+                  "nullable": false
                 },
                 "id": {
                   "codecId": "pg/int4@1",
@@ -389,6 +448,11 @@
                   "codecId": "pg/timestamptz-string@1",
                   "nativeType": "timestamptz",
                   "nullable": false
+                },
+                "userId": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": true
                 }
               },
               "foreignKeys": [],
@@ -412,7 +476,7 @@
         "kind": "postgres-schema"
       }
     },
-    "storageHash": "d0d15772aa5170e8672e143053b7a1ba2b503ba80e4b7c65c642b16ddea2ae2d"
+    "storageHash": "a4e64187fe1de249fdce70d3ea0065f2f7ad17b7a9af96b8dd59de90ec676c32"
   },
   "execution": {
     "executionHash": "fe29687f147172d6282cffa83f304852ecf3cd1fef2d6382f486c4db82ea2f30",

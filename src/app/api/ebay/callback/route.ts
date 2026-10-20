@@ -1,13 +1,17 @@
 
+import {
+  createHmac,
+  timingSafeEqual,
+} from "crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/prisma/db";
+import { createClient } from "@/lib/supabase/server";
+import { Pool } from "pg";
 
 type EbayTokenResponse = {
   access_token?: string;
   expires_in?: number;
   refresh_token?: string;
   refresh_token_expires_in?: number;
-  token_type?: string;
   error?: string;
   error_description?: string;
 };
@@ -16,57 +20,181 @@ type EbayUserResponse = {
   userId?: string;
 };
 
+type ExistingConnection = {
+  id: number;
+  userId: string | null;
+};
+
+function safeEqual(a: string, b: string): boolean {
+  const first = Buffer.from(a);
+  const second = Buffer.from(b);
+
+  return (
+    first.length === second.length &&
+    timingSafeEqual(first, second)
+  );
+}
+
 export async function GET(request: NextRequest) {
+  // Clear the OAuth cookie after the callback.
+  const respond = (
+    body: Record<string, unknown>,
+    status = 200
+  ) => {
+    const response = NextResponse.json(body, { status });
+
+    response.cookies.delete("ebay_oauth_state");
+
+    return response;
+  };
+
   try {
-    // STEP 1: Determine the eBay environment.
+    // STEP 1: Verify the signed-in Google user.
+    const supabase = await createClient();
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return respond(
+        { error: "Please sign in to ProfitSync first." },
+        401
+      );
+    }
+
+    // STEP 2: Read the OAuth callback parameters.
+    const code = request.nextUrl.searchParams.get("code");
+    const returnedState =
+      request.nextUrl.searchParams.get("state");
+
+    const signedState =
+      request.cookies.get("ebay_oauth_state")?.value;
+
+    const stateSecret =
+      process.env.EBAY_OAUTH_STATE_SECRET;
+
+    if (!returnedState || !signedState || !stateSecret) {
+      return respond(
+        { error: "Missing or expired eBay authorization state." },
+        403
+      );
+    }
+
+    // STEP 3: Verify the signed OAuth state.
+    const parts = signedState.split(".");
+
+    if (parts.length !== 5) {
+      return respond(
+        { error: "Invalid eBay authorization state." },
+        403
+      );
+    }
+
+    const [
+      savedState,
+      savedUserId,
+      savedEnvironment,
+      expiresAtString,
+      savedSignature,
+    ] = parts;
+
+    const payload = [
+      savedState,
+      savedUserId,
+      savedEnvironment,
+      expiresAtString,
+    ].join(".");
+
+    const expectedSignature = createHmac(
+      "sha256",
+      stateSecret
+    )
+      .update(payload)
+      .digest("hex");
+
+    if (!safeEqual(savedSignature, expectedSignature)) {
+      return respond(
+        { error: "Invalid eBay authorization signature." },
+        403
+      );
+    }
+
+    if (!safeEqual(returnedState, savedState)) {
+      return respond(
+        { error: "eBay authorization state does not match." },
+        403
+      );
+    }
+
+    // Verify that the same Google user completed OAuth.
+    if (savedUserId !== user.id) {
+      return respond(
+        {
+          error:
+            "The signed-in ProfitSync account has changed. Please restart eBay authorization.",
+        },
+        403
+      );
+    }
+
+    const expiresAt = Number(expiresAtString);
+
+    if (
+      !Number.isFinite(expiresAt) ||
+      Date.now() >= expiresAt
+    ) {
+      return respond(
+        { error: "eBay authorization has expired." },
+        403
+      );
+    }
+
+    // STEP 4: Confirm the environment hasn't changed.
     const environment =
       process.env.EBAY_ENVIRONMENT === "PRODUCTION"
         ? "PRODUCTION"
         : "SANDBOX";
 
+    if (savedEnvironment !== environment) {
+      return respond(
+        { error: "eBay environment mismatch." },
+        403
+      );
+    }
+
+    if (!code) {
+      return respond(
+        { error: "eBay did not return an authorization code." },
+        400
+      );
+    }
+
+    // STEP 5: Load server configuration.
     const clientId = process.env.EBAY_CLIENT_ID;
     const clientSecret = process.env.EBAY_CLIENT_SECRET;
     const ruName = process.env.EBAY_RUNAME;
+    const databaseUrl = process.env.DATABASE_URL;
+
+    if (
+      !clientId ||
+      !clientSecret ||
+      !ruName ||
+      !databaseUrl
+    ) {
+      return respond(
+        { error: "Missing server configuration." },
+        500
+      );
+    }
 
     const ebayApiBase =
       environment === "PRODUCTION"
         ? "https://api.ebay.com"
         : "https://api.sandbox.ebay.com";
 
-    if (!clientId || !clientSecret || !ruName) {
-      return NextResponse.json(
-        { error: "Missing eBay OAuth configuration" },
-        { status: 500 }
-      );
-    }
-
-    // STEP 2: Verify the OAuth state.
-    const code = request.nextUrl.searchParams.get("code");
-    const returnedState =
-      request.nextUrl.searchParams.get("state");
-
-    const savedState =
-      request.cookies.get("ebay_oauth_state")?.value;
-
-    if (
-      !returnedState ||
-      !savedState ||
-      returnedState !== savedState
-    ) {
-      return NextResponse.json(
-        { error: "Invalid or expired eBay authorization state" },
-        { status: 403 }
-      );
-    }
-
-    if (!code) {
-      return NextResponse.json(
-        { error: "eBay did not return an authorization code" },
-        { status: 400 }
-      );
-    }
-
-    // STEP 3: Exchange the authorization code for tokens.
+    // STEP 6: Exchange the code for eBay tokens.
     const credentials = Buffer.from(
       `${clientId}:${clientSecret}`
     ).toString("base64");
@@ -82,7 +210,8 @@ export async function GET(request: NextRequest) {
       {
         method: "POST",
         headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
+          "Content-Type":
+            "application/x-www-form-urlencoded",
           Authorization: `Basic ${credentials}`,
         },
         body: body.toString(),
@@ -103,22 +232,15 @@ export async function GET(request: NextRequest) {
       console.error("eBay token exchange failed:", {
         status: tokenResponse.status,
         error: tokenData.error,
-        description: tokenData.error_description,
       });
 
-      return NextResponse.json(
-        {
-          error: "Failed to connect eBay account",
-          details:
-            tokenData.error_description ||
-            tokenData.error ||
-            "Missing token information",
-        },
-        { status: 502 }
+      return respond(
+        { error: "Failed to connect eBay account." },
+        502
       );
     }
 
-    // STEP 4: Retrieve the connected eBay user's ID.
+    // STEP 7: Retrieve the verified eBay seller identity.
     const userResponse = await fetch(
       `${ebayApiBase}/commerce/identity/v1/user/`,
       {
@@ -131,17 +253,9 @@ export async function GET(request: NextRequest) {
     );
 
     if (!userResponse.ok) {
-      console.error(
-        "Failed to retrieve eBay user identity:",
-        userResponse.status
-      );
-
-      return NextResponse.json(
-        {
-          error: "eBay connected, but user identity lookup failed.",
-          status: userResponse.status,
-        },
-        { status: 502 }
+      return respond(
+        { error: "Failed to retrieve eBay seller identity." },
+        502
       );
     }
 
@@ -149,15 +263,15 @@ export async function GET(request: NextRequest) {
       await userResponse.json();
 
     if (!userData.userId) {
-      return NextResponse.json(
-        { error: "eBay did not return a user ID." },
-        { status: 502 }
+      return respond(
+        { error: "eBay did not return a seller ID." },
+        502
       );
     }
 
     const ebayUserId = userData.userId;
 
-    // STEP 5: Calculate token expiration dates.
+    // STEP 8: Calculate token expiration dates.
     const accessTokenExpiresAt = new Date(
       Date.now() + tokenData.expires_in * 1000
     ).toISOString();
@@ -167,65 +281,141 @@ export async function GET(request: NextRequest) {
         tokenData.refresh_token_expires_in * 1000
     ).toISOString();
 
-    // STEP 6: Find the existing account connection.
-    const existingConnections =
-      await db.orm.public.EbayConnection.all();
+    // STEP 9: Save the connection securely.
+    const pool = new Pool({
+      connectionString: databaseUrl,
+      max: 1,
+    });
 
-    const existingConnection = existingConnections.find(
-      (connection) =>
-        connection.environment === environment &&
-        connection.ebayUserId === ebayUserId
-    );
+    try {
+      const client = await pool.connect();
 
-    // STEP 7: Save the account and its tokens.
-    if (existingConnection) {
-      await db.orm.public.EbayConnection
-        .where({ id: existingConnection.id })
-        .update({
-          ebayUserId,
-          environment,
-          accessToken: tokenData.access_token,
-          refreshToken: tokenData.refresh_token,
-          accessTokenExpiresAt,
-          refreshTokenExpiresAt,
-        });
-    } else {
-      await db.orm.public.EbayConnection.create({
-        ebayUserId,
-        environment,
-        accessToken: tokenData.access_token,
-        refreshToken: tokenData.refresh_token,
-        accessTokenExpiresAt,
-        refreshTokenExpiresAt,
-      });
+      try {
+        await client.query("BEGIN");
+
+        // Prevent concurrent connections for the same seller.
+        await client.query(
+          "SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))",
+          [environment, ebayUserId]
+        );
+
+        const result =
+          await client.query<ExistingConnection>(
+            `
+              SELECT id, "userId"
+              FROM public."ebayConnection"
+              WHERE environment = $1
+                AND "ebayUserId" = $2
+              FOR UPDATE
+            `,
+            [environment, ebayUserId]
+          );
+
+        if (result.rows.length > 1) {
+          await client.query("ROLLBACK");
+
+          return respond(
+            {
+              error:
+                "Duplicate eBay connections require review.",
+            },
+            409
+          );
+        }
+
+        const existing = result.rows[0];
+
+        // Reject connections belonging to another user,
+        // including legacy records with no verified owner.
+        if (existing && existing.userId !== user.id) {
+          await client.query("ROLLBACK");
+
+          return respond(
+            {
+              error:
+                "This eBay account is already connected or requires ownership verification.",
+            },
+            409
+          );
+        }
+
+        if (existing) {
+          await client.query(
+            `
+              UPDATE public."ebayConnection"
+              SET
+                "accessToken" = $1,
+                "refreshToken" = $2,
+                "accessTokenExpiresAt" = $3,
+                "refreshTokenExpiresAt" = $4,
+                "updatedAt" = NOW()
+              WHERE id = $5
+                AND "userId" = $6
+            `,
+            [
+              tokenData.access_token,
+              tokenData.refresh_token,
+              accessTokenExpiresAt,
+              refreshTokenExpiresAt,
+              existing.id,
+              user.id,
+            ]
+          );
+        } else {
+          await client.query(
+            `
+              INSERT INTO public."ebayConnection" (
+                "userId",
+                "ebayUserId",
+                environment,
+                "accessToken",
+                "refreshToken",
+                "accessTokenExpiresAt",
+                "refreshTokenExpiresAt",
+                "createdAt",
+                "updatedAt"
+              )
+              VALUES (
+                $1, $2, $3, $4, $5, $6, $7,
+                NOW(), NOW()
+              )
+            `,
+            [
+              user.id,
+              ebayUserId,
+              environment,
+              tokenData.access_token,
+              tokenData.refresh_token,
+              accessTokenExpiresAt,
+              refreshTokenExpiresAt,
+            ]
+          );
+        }
+
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    } finally {
+      await pool.end();
     }
 
-    console.log(
-      `eBay ${environment} account connected successfully.`
-    );
-
-    // STEP 8: Return success without exposing tokens.
-    const successResponse = NextResponse.json({
+    // STEP 10: Return success without exposing tokens.
+    return respond({
       success: true,
       message: `eBay ${environment} account connected successfully.`,
       environment,
       ebayUserId,
-      accessTokenExpiresIn: tokenData.expires_in,
-      refreshTokenExpiresIn:
-        tokenData.refresh_token_expires_in,
     });
-
-    successResponse.cookies.delete("ebay_oauth_state");
-
-    return successResponse;
   } catch (error) {
     console.error("eBay OAuth callback error:", error);
 
-    return NextResponse.json(
-      {
-        error: "Something went wrong while connecting eBay.",
-      },
-      { status: 500 }
+    return respond(
+      { error: "Something went wrong connecting eBay." },
+      500
     );
   }
 }
