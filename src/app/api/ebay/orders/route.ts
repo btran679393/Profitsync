@@ -35,7 +35,7 @@ export async function GET() {
       );
     }
 
-    // STEP 3: Connect to the PostgreSQL database.
+    // STEP 3: Connect to PostgreSQL.
     const pool = new Pool({
       connectionString: databaseUrl,
       max: 1,
@@ -44,7 +44,7 @@ export async function GET() {
 
     try {
       // STEP 4: Retrieve orders belonging to this user.
-      // imageUrl contains the actual eBay listing picture.
+      // Include the actual eBay listing image URL.
       const result = await pool.query(
         `
         SELECT
@@ -63,25 +63,28 @@ export async function GET() {
           "updatedAt"
         FROM public."order"
         WHERE "userId" = $1
-        ORDER BY "orderDate" DESC
+        ORDER BY "orderDate" DESC, id DESC
         `,
         [user.id]
       );
 
-      // STEP 5: Return orders, including listing images.
+      // STEP 5: Return all orders and their image URLs.
       return NextResponse.json(result.rows, {
         headers: {
           "Cache-Control": "private, no-store, max-age=0",
         },
       });
     } finally {
+      // STEP 6: Close the database connection.
       await pool.end();
     }
   } catch (error) {
     console.error("Failed to retrieve eBay orders:", error);
 
     return NextResponse.json(
-      { error: "Failed to retrieve eBay orders." },
+      {
+        error: "Failed to retrieve eBay orders.",
+      },
       { status: 500 }
     );
   }
