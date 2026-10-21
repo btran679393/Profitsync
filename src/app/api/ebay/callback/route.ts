@@ -252,7 +252,15 @@ export async function GET(request: NextRequest) {
       }
     );
 
+    // NEW: Log eBay's error details without exposing tokens.
     if (!userResponse.ok) {
+      const errorBody = await userResponse.text();
+
+      console.error("eBay seller identity request failed:", {
+        status: userResponse.status,
+        response: errorBody.slice(0, 2000),
+      });
+
       return respond(
         { error: "Failed to retrieve eBay seller identity." },
         502
