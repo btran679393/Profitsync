@@ -3,9 +3,12 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { Pool } from "pg";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
-    // Verify the user is signed in.
+    // STEP 1: Verify the ProfitSync user is signed in.
     const supabase = await createClient();
 
     const {
@@ -20,19 +23,28 @@ export async function GET() {
       );
     }
 
+    // STEP 2: Verify database configuration.
     const databaseUrl = process.env.DATABASE_URL;
 
     if (!databaseUrl) {
-      throw new Error("DATABASE_URL is not configured.");
+      console.error("DATABASE_URL is not configured.");
+
+      return NextResponse.json(
+        { error: "Database configuration unavailable." },
+        { status: 503 }
+      );
     }
 
+    // STEP 3: Connect to the PostgreSQL database.
     const pool = new Pool({
       connectionString: databaseUrl,
       max: 1,
+      connectionTimeoutMillis: 10000,
     });
 
     try {
-      // Retrieve only orders owned by this user.
+      // STEP 4: Retrieve orders belonging to this user.
+      // imageUrl contains the actual eBay listing picture.
       const result = await pool.query(
         `
         SELECT
@@ -41,6 +53,7 @@ export async function GET() {
           "ebayUserId",
           "userId",
           item,
+          "imageUrl",
           "salePrice",
           "ebayFees",
           "productCost",
@@ -48,14 +61,19 @@ export async function GET() {
           "orderDate",
           "createdAt",
           "updatedAt"
-        FROM "order"
+        FROM public."order"
         WHERE "userId" = $1
         ORDER BY "orderDate" DESC
         `,
         [user.id]
       );
 
-      return NextResponse.json(result.rows);
+      // STEP 5: Return orders, including listing images.
+      return NextResponse.json(result.rows, {
+        headers: {
+          "Cache-Control": "private, no-store, max-age=0",
+        },
+      });
     } finally {
       await pool.end();
     }

@@ -9,6 +9,7 @@ type Order = {
   id: number;
   ebayOrderId: string | null;
   item: string;
+  imageUrl: string | null;
   salePrice: number;
   ebayFees: number;
   productCost: string;
@@ -20,6 +21,7 @@ type ApiOrder = {
   id: number;
   ebayOrderId: string | null;
   item: string;
+  imageUrl?: string | null;
   salePrice: string | number;
   ebayFees: string | number;
   productCost: string | number | null;
@@ -32,6 +34,8 @@ type SyncResponse = {
   imported?: number;
   skipped?: number;
   feesUpdated?: number;
+  imagesImported?: number;
+  imagesUpdated?: number;
   error?: string;
   message?: string;
 };
@@ -63,6 +67,7 @@ function formatOrders(data: ApiOrder[]): Order[] {
       id: order.id,
       ebayOrderId: order.ebayOrderId,
       item: order.item,
+      imageUrl: order.imageUrl ?? null,
       salePrice: Number(order.salePrice),
       ebayFees: Number(order.ebayFees),
       productCost: cost,
@@ -70,6 +75,67 @@ function formatOrders(data: ApiOrder[]): Order[] {
       status: order.status,
     };
   });
+}
+
+function ListingImage({
+  imageUrl,
+  item,
+}: {
+  imageUrl: string | null;
+  item: string;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [imageUrl]);
+
+  if (!imageUrl || failed) {
+    return (
+      <div
+        className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-100"
+        aria-label="No listing image available"
+        title="No listing image available"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="25"
+          height="25"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="text-slate-400"
+          aria-hidden="true"
+        >
+          <rect
+            x="3"
+            y="3"
+            width="18"
+            height="18"
+            rx="2"
+          />
+          <circle cx="8.5" cy="8.5" r="1.5" />
+          <path d="m21 15-5-5L5 21" />
+        </svg>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <img
+        src={imageUrl}
+        alt={item}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+        className="h-full w-full object-contain"
+      />
+    </div>
+  );
 }
 
 export default function Home() {
@@ -97,6 +163,7 @@ export default function Home() {
       setLogoutError("");
 
       const supabase = createClient();
+
       const { error } = await supabase.auth.signOut();
 
       if (error) throw error;
@@ -109,9 +176,11 @@ export default function Home() {
       router.refresh();
     } catch (error) {
       console.error("Logout failed:", error);
+
       setLogoutError(
         "Unable to log out. Please try again."
       );
+
       setLoggingOut(false);
     }
   }
@@ -137,6 +206,7 @@ export default function Home() {
         await loadOrders();
       } catch (error) {
         console.error("Loading failed:", error);
+
         setLoadError(
           "Unable to load orders from the database."
         );
@@ -292,12 +362,19 @@ export default function Home() {
           `Skipped ${skipped} existing or invalid orders.` +
           (data.feesUpdated !== undefined
             ? ` Updated fees on ${data.feesUpdated} orders.`
+            : "") +
+          (data.imagesImported !== undefined
+            ? ` Added ${data.imagesImported} listing images.`
+            : "") +
+          (data.imagesUpdated !== undefined
+            ? ` Updated ${data.imagesUpdated} listing images.`
             : "")
       );
     } catch (error) {
       console.error("Sync failed:", error);
 
       setSyncError(true);
+
       setSyncMessage(
         error instanceof Error
           ? error.message
@@ -358,6 +435,7 @@ export default function Home() {
             <h1 className="text-4xl font-bold tracking-tight">
               ProfitSync
             </h1>
+
             <p className="mt-2 text-lg text-slate-600">
               Track your eBay sales, costs, and profits.
             </p>
@@ -392,6 +470,7 @@ export default function Home() {
             <p className="text-slate-500">
               Total Revenue
             </p>
+
             <p className="mt-2 text-3xl font-bold">
               {money(totals.totalRevenue)}
             </p>
@@ -401,6 +480,7 @@ export default function Home() {
             <p className="text-slate-500">
               eBay Fees
             </p>
+
             <p className="mt-2 text-3xl font-bold">
               {money(totals.totalFees)}
             </p>
@@ -410,6 +490,7 @@ export default function Home() {
             <p className="text-slate-500">
               Product Costs
             </p>
+
             <p className="mt-2 text-3xl font-bold">
               {money(totals.totalProductCosts)}
             </p>
@@ -454,6 +535,7 @@ export default function Home() {
               <h2 className="text-2xl font-bold">
                 Recent Orders
               </h2>
+
               <p className="text-slate-500">
                 Your latest eBay sales
               </p>
@@ -517,18 +599,23 @@ export default function Home() {
                     <th className="pb-4 pr-5 font-semibold">
                       Item
                     </th>
+
                     <th className="pb-4 pr-5 font-semibold">
                       Sale Price
                     </th>
+
                     <th className="pb-4 pr-5 font-semibold">
                       eBay Fees
                     </th>
+
                     <th className="pb-4 pr-5 font-semibold">
                       Product Cost
                     </th>
+
                     <th className="pb-4 pr-5 font-semibold">
                       Profit
                     </th>
+
                     <th className="pb-4 font-semibold">
                       Status
                     </th>
@@ -557,18 +644,33 @@ export default function Home() {
                         key={order.id}
                         className="border-b border-slate-300 last:border-b-0"
                       >
-                        <td className="break-words py-5 pr-6 font-medium">
-                          {order.item}
+                        {/* Listing image and title */}
+                        <td className="py-5 pr-6">
+                          <div className="flex items-center gap-4">
+                            <ListingImage
+                              imageUrl={order.imageUrl}
+                              item={order.item}
+                            />
+
+                            <div className="min-w-0">
+                              <p className="break-words font-medium leading-relaxed text-slate-900">
+                                {order.item}
+                              </p>
+                            </div>
+                          </div>
                         </td>
 
+                        {/* Sale price */}
                         <td className="whitespace-nowrap py-5 pr-5">
                           {money(order.salePrice)}
                         </td>
 
+                        {/* eBay fees */}
                         <td className="whitespace-nowrap py-5 pr-5">
                           {money(order.ebayFees)}
                         </td>
 
+                        {/* Editable product cost */}
                         <td className="py-5 pr-5">
                           <div className="flex items-center gap-2">
                             <span>$</span>
@@ -613,6 +715,7 @@ export default function Home() {
                           </div>
                         </td>
 
+                        {/* Automatically calculated profit */}
                         <td className="whitespace-nowrap py-5 pr-5">
                           {hasValidDraft ? (
                             <span
@@ -631,6 +734,7 @@ export default function Home() {
                           )}
                         </td>
 
+                        {/* Order status */}
                         <td className="py-5">
                           {hasSavedCost ? (
                             <span className="inline-block whitespace-nowrap rounded-full bg-green-100 px-3 py-1 text-sm font-medium text-green-700">
