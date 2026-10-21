@@ -1,8 +1,5 @@
 
-import {
-  createHmac,
-  randomBytes,
-} from "crypto";
+import { createHmac, randomBytes } from "crypto";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
@@ -40,17 +37,17 @@ export async function GET() {
       );
     }
 
-    // STEP 3: Define the permissions requested from eBay.
+    // STEP 3: Request order and identity permissions.
     const scopes = [
       "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly",
       "https://api.ebay.com/oauth/api_scope/commerce.identity.readonly",
     ];
 
-    // STEP 4: Generate a cryptographically random OAuth state.
+    // STEP 4: Generate a secure OAuth state.
     const state = randomBytes(32).toString("hex");
 
-    // Bind this OAuth attempt to the authenticated user,
-    // environment, and a 10-minute expiration.
+    // Bind authorization to the signed-in user,
+    // eBay environment, and a 10-minute expiration.
     const expiresAt = Date.now() + 10 * 60 * 1000;
 
     const payload = [
@@ -66,7 +63,7 @@ export async function GET() {
 
     const signedState = `${payload}.${signature}`;
 
-    // STEP 5: Prepare the eBay authorization parameters.
+    // STEP 5: Build the authorization parameters.
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: ruName,
@@ -75,7 +72,7 @@ export async function GET() {
       state,
     });
 
-    // STEP 6: Select the correct eBay authorization URL.
+    // STEP 6: Select the eBay authorization server.
     const authorizationBase =
       environment === "PRODUCTION"
         ? "https://auth.ebay.com"
@@ -84,10 +81,10 @@ export async function GET() {
     const authorizationUrl =
       `${authorizationBase}/oauth2/authorize?${params.toString()}`;
 
-    // STEP 7: Redirect the signed-in user to eBay.
+    // STEP 7: Redirect the user to eBay.
     const response = NextResponse.redirect(authorizationUrl);
 
-    // Save the signed state for verification in the callback.
+    // Store the signed state for callback verification.
     response.cookies.set("ebay_oauth_state", signedState, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",

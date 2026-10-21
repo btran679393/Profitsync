@@ -1,8 +1,5 @@
 
-import {
-  createHmac,
-  timingSafeEqual,
-} from "crypto";
+import { createHmac, timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { Pool } from "pg";
@@ -36,7 +33,6 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 export async function GET(request: NextRequest) {
-  // Clear the OAuth cookie after the callback.
   const respond = (
     body: Record<string, unknown>,
     status = 200
@@ -49,7 +45,7 @@ export async function GET(request: NextRequest) {
   };
 
   try {
-    // STEP 1: Verify the signed-in Google user.
+    // STEP 1: Verify the signed-in ProfitSync user.
     const supabase = await createClient();
 
     const {
@@ -128,7 +124,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Verify that the same Google user completed OAuth.
     if (savedUserId !== user.id) {
       return respond(
         {
@@ -151,7 +146,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // STEP 4: Confirm the environment hasn't changed.
+    // STEP 4: Verify the eBay environment.
     const environment =
       process.env.EBAY_ENVIRONMENT === "PRODUCTION"
         ? "PRODUCTION"
@@ -189,12 +184,19 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Standard eBay API host, used for OAuth tokens.
     const ebayApiBase =
       environment === "PRODUCTION"
         ? "https://api.ebay.com"
         : "https://api.sandbox.ebay.com";
 
-    // STEP 6: Exchange the code for eBay tokens.
+    // Commerce Identity API uses the apiz host.
+    const ebayIdentityBase =
+      environment === "PRODUCTION"
+        ? "https://apiz.ebay.com"
+        : "https://apiz.sandbox.ebay.com";
+
+    // STEP 6: Exchange the authorization code for tokens.
     const credentials = Buffer.from(
       `${clientId}:${clientSecret}`
     ).toString("base64");
@@ -241,29 +243,33 @@ export async function GET(request: NextRequest) {
     }
 
     // STEP 7: Retrieve the verified eBay seller identity.
-    // Updated: Removed the trailing slash from the endpoint.
-    const userResponse = await fetch(
-      `${ebayApiBase}/commerce/identity/v1/user`,
-      {
-        headers: {
-          Authorization: `Bearer ${tokenData.access_token}`,
-          Accept: "application/json",
-        },
-        cache: "no-store",
-      }
-    );
+    // FIX: Use apiz.ebay.com for the Commerce Identity API.
+    const identityUrl =
+      `${ebayIdentityBase}/commerce/identity/v1/user/`;
 
-    // Log eBay's error details without exposing OAuth tokens.
+    const userResponse = await fetch(identityUrl, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${tokenData.access_token}`,
+        Accept: "application/json",
+      },
+      cache: "no-store",
+    });
+
     if (!userResponse.ok) {
       const errorBody = await userResponse.text();
 
       console.error("eBay seller identity request failed:", {
         status: userResponse.status,
         response: errorBody.slice(0, 2000),
+        host: ebayIdentityBase,
       });
 
       return respond(
-        { error: "Failed to retrieve eBay seller identity." },
+        {
+          error:
+            "Failed to retrieve eBay seller identity.",
+        },
         502
       );
     }
@@ -271,9 +277,12 @@ export async function GET(request: NextRequest) {
     const userData: EbayUserResponse =
       await userResponse.json();
 
-    if (!userData.userId) {
+    if (
+      typeof userData.userId !== "string" ||
+      !userData.userId.trim()
+    ) {
       console.error(
-        "eBay identity response did not include userId."
+        "eBay identity response did not include a valid userId."
       );
 
       return respond(
@@ -338,8 +347,7 @@ export async function GET(request: NextRequest) {
 
         const existing = result.rows[0];
 
-        // Reject connections belonging to another user,
-        // including legacy records with no verified owner.
+        // Never overwrite another user's connection.
         if (existing && existing.userId !== user.id) {
           await client.query("ROLLBACK");
 
@@ -419,7 +427,8 @@ export async function GET(request: NextRequest) {
     // STEP 10: Return success without exposing tokens.
     return respond({
       success: true,
-      message: `eBay ${environment} account connected successfully.`,
+      message:
+        `eBay ${environment} account connected successfully.`,
       environment,
       ebayUserId,
     });
