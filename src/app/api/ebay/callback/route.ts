@@ -252,7 +252,7 @@ export async function GET(request: NextRequest) {
       }
     );
 
-    // NEW: Log eBay's error details without exposing tokens.
+    // Log eBay's error details without exposing OAuth tokens.
     if (!userResponse.ok) {
       const errorBody = await userResponse.text();
 
@@ -271,6 +271,10 @@ export async function GET(request: NextRequest) {
       await userResponse.json();
 
     if (!userData.userId) {
+      console.error(
+        "eBay identity response did not include userId."
+      );
+
       return respond(
         { error: "eBay did not return a seller ID." },
         502
