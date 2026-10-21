@@ -37,17 +37,23 @@ export async function GET() {
       );
     }
 
-    // STEP 3: Request order and identity permissions.
+    // STEP 3: Request eBay API permissions.
     const scopes = [
+      // Read seller orders.
       "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly",
+
+      // Retrieve the verified eBay seller identity.
       "https://api.ebay.com/oauth/api_scope/commerce.identity.readonly",
+
+      // NEW: Access eBay financial transactions and fees.
+      "https://api.ebay.com/oauth/api_scope/sell.finances",
     ];
 
     // STEP 4: Generate a secure OAuth state.
     const state = randomBytes(32).toString("hex");
 
     // Bind authorization to the signed-in user,
-    // eBay environment, and a 10-minute expiration.
+    // environment, and a 10-minute expiration.
     const expiresAt = Date.now() + 10 * 60 * 1000;
 
     const payload = [
@@ -84,7 +90,7 @@ export async function GET() {
     // STEP 7: Redirect the user to eBay.
     const response = NextResponse.redirect(authorizationUrl);
 
-    // Store the signed state for callback verification.
+    // Store signed state for callback verification.
     response.cookies.set("ebay_oauth_state", signedState, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
