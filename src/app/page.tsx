@@ -12,6 +12,7 @@ type Order = {
   salePrice: number;
   ebayFees: number;
   productCost: string;
+  savedProductCost: string;
   status: string;
 };
 
@@ -30,6 +31,8 @@ type SyncResponse = {
   found?: number;
   imported?: number;
   skipped?: number;
+  feesUpdated?: number;
+  feesUnavailable?: number;
   error?: string;
   message?: string;
 };
@@ -38,19 +41,38 @@ function money(value: number) {
   return `$${value.toFixed(2)}`;
 }
 
+function isValidCost(value: string) {
+  if (value.trim() === "") {
+    return false;
+  }
+
+  const number = Number(value);
+
+  return (
+    Number.isFinite(number) &&
+    number >= 0 &&
+    /^\d+(\.\d{0,2})?$/.test(value.trim())
+  );
+}
+
 function formatOrders(data: ApiOrder[]): Order[] {
-  return data.map((order) => ({
-    id: order.id,
-    ebayOrderId: order.ebayOrderId,
-    item: order.item,
-    salePrice: Number(order.salePrice),
-    ebayFees: Number(order.ebayFees),
-    productCost:
+  return data.map((order) => {
+    const cost =
       order.productCost === null
         ? ""
-        : String(order.productCost),
-    status: order.status,
-  }));
+        : String(order.productCost);
+
+    return {
+      id: order.id,
+      ebayOrderId: order.ebayOrderId,
+      item: order.item,
+      salePrice: Number(order.salePrice),
+      ebayFees: Number(order.ebayFees),
+      productCost: cost,
+      savedProductCost: cost,
+      status: order.status,
+    };
+  });
 }
 
 export default function Home() {
@@ -58,14 +80,15 @@ export default function Home() {
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
-  const [savingId, setSavingId] = useState<number | null>(null);
+  const [savingId, setSavingId] = useState<number | null>(
+    null
+  );
 
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
   const [syncError, setSyncError] = useState(false);
   const [loadError, setLoadError] = useState("");
 
-  // Logout state
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState("");
 
@@ -86,12 +109,10 @@ export default function Home() {
         throw error;
       }
 
-      // Clear this account's information from the screen.
       setOrders([]);
       setSyncMessage("");
       setLoadError("");
 
-      // Redirect to the login page.
       router.replace("/login");
       router.refresh();
     } catch (error) {
@@ -111,7 +132,9 @@ export default function Home() {
     });
 
     if (!response.ok) {
-      throw new Error("Failed to load orders from Supabase.");
+      throw new Error(
+        "Failed to load orders from Supabase."
+      );
     }
 
     const data: ApiOrder[] = await response.json();
@@ -125,8 +148,14 @@ export default function Home() {
       try {
         await loadOrders();
       } catch (error) {
-        console.error("Error loading orders:", error);
-        setLoadError("Unable to load orders from the database.");
+        console.error(
+          "Error loading orders:",
+          error
+        );
+
+        setLoadError(
+          "Unable to load orders from the database."
+        );
       } finally {
         setLoading(false);
       }
@@ -135,7 +164,10 @@ export default function Home() {
     initialLoad();
   }, []);
 
-  function updateProductCost(id: number, value: string) {
+  function updateProductCost(
+    id: number,
+    value: string
+  ) {
     setOrders((currentOrders) =>
       currentOrders.map((order) =>
         order.id === id
@@ -148,51 +180,106 @@ export default function Home() {
     );
   }
 
-  async function saveProductCost(id: number, value: string) {
-    if (value.trim() === "") {
+  async function saveProductCost(
+    id: number,
+    value: string
+  ) {
+    const currentOrder = orders.find(
+      (order) => order.id === id
+    );
+
+    if (!currentOrder || savingId !== null) {
+      return;
+    }
+
+    if (!isValidCost(value)) {
+      // Restore the last saved value if the
+      // user enters an invalid or empty cost.
+      setOrders((currentOrders) =>
+        currentOrders.map((order) =>
+          order.id === id
+            ? {
+                ...order,
+                productCost:
+                  order.savedProductCost,
+              }
+            : order
+        )
+      );
+
       return;
     }
 
     const productCost = Number(value);
 
-    if (!Number.isFinite(productCost) || productCost < 0) {
+    if (
+      currentOrder.savedProductCost !== "" &&
+      Number(currentOrder.savedProductCost) ===
+        productCost
+    ) {
       return;
     }
 
     try {
       setSavingId(id);
+      setLoadError("");
 
-      const response = await fetch(`/api/orders/${id}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          productCost,
-        }),
-      });
+      const response = await fetch(
+        `/api/orders/${id}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            productCost,
+          }),
+        }
+      );
 
       if (!response.ok) {
-        throw new Error("Failed to save product cost");
+        throw new Error(
+          "Failed to save product cost."
+        );
       }
+
+      const formattedCost =
+        productCost.toFixed(2);
 
       setOrders((currentOrders) =>
         currentOrders.map((order) =>
           order.id === id
             ? {
                 ...order,
-                productCost: productCost.toFixed(2),
+                productCost: formattedCost,
+                savedProductCost:
+                  formattedCost,
                 status: "COMPLETED",
               }
             : order
         )
       );
-
-      console.log("Product cost saved successfully.");
     } catch (error) {
-      console.error("Error saving product cost:", error);
+      console.error(
+        "Error saving product cost:",
+        error
+      );
+
       setLoadError(
         "Failed to save product cost. Please try again."
+      );
+
+      // Restore the saved value if saving fails.
+      setOrders((currentOrders) =>
+        currentOrders.map((order) =>
+          order.id === id
+            ? {
+                ...order,
+                productCost:
+                  order.savedProductCost,
+              }
+            : order
+        )
       );
     } finally {
       setSavingId(null);
@@ -200,7 +287,11 @@ export default function Home() {
   }
 
   async function syncEbayOrders() {
-    if (syncing || savingId !== null) {
+    if (
+      syncing ||
+      savingId !== null ||
+      loggingOut
+    ) {
       return;
     }
 
@@ -209,12 +300,16 @@ export default function Home() {
       setSyncMessage("");
       setSyncError(false);
 
-      const response = await fetch("/api/ebay/sync", {
-        method: "POST",
-        cache: "no-store",
-      });
+      const response = await fetch(
+        "/api/ebay/sync",
+        {
+          method: "POST",
+          cache: "no-store",
+        }
+      );
 
-      const data: SyncResponse = await response.json();
+      const data: SyncResponse =
+        await response.json();
 
       if (!response.ok || !data.success) {
         throw new Error(
@@ -224,24 +319,30 @@ export default function Home() {
         );
       }
 
-      // Reload the database orders after the import.
       await loadOrders();
 
       const imported = data.imported ?? 0;
       const found = data.found ?? 0;
       const skipped = data.skipped ?? 0;
+      const feesUpdated =
+        data.feesUpdated ?? 0;
 
       setSyncMessage(
         `Sync complete! Found ${found} eBay orders. ` +
           `Imported ${imported} new orders. ` +
-          `Skipped ${skipped} existing or invalid orders.`
+          `Skipped ${skipped} existing or invalid orders. ` +
+          `Updated fees on ${feesUpdated} existing orders.`
       );
 
       setSyncError(false);
     } catch (error) {
-      console.error("Error syncing eBay orders:", error);
+      console.error(
+        "Error syncing eBay orders:",
+        error
+      );
 
       setSyncError(true);
+
       setSyncMessage(
         error instanceof Error
           ? error.message
@@ -254,40 +355,57 @@ export default function Home() {
 
   const totals = useMemo(() => {
     const totalRevenue = orders.reduce(
-      (total, order) => total + order.salePrice,
+      (total, order) =>
+        total + order.salePrice,
       0
     );
 
     const totalFees = orders.reduce(
-      (total, order) => total + order.ebayFees,
+      (total, order) =>
+        total + order.ebayFees,
       0
     );
 
-    const totalProductCosts = orders.reduce((total, order) => {
-      const cost =
-        order.productCost.trim() === ""
-          ? 0
-          : Number(order.productCost);
+    const completedOrders = orders.filter(
+      (order) =>
+        isValidCost(order.savedProductCost)
+    );
 
-      return total + (Number.isFinite(cost) ? cost : 0);
-    }, 0);
+    const totalProductCosts =
+      completedOrders.reduce(
+        (total, order) =>
+          total +
+          Number(order.savedProductCost),
+        0
+      );
 
-    const netProfit =
-      totalRevenue - totalFees - totalProductCosts;
+    const netProfit = completedOrders.reduce(
+      (total, order) =>
+        total +
+        order.salePrice -
+        order.ebayFees -
+        Number(order.savedProductCost),
+      0
+    );
+
+    const pendingOrders =
+      orders.length - completedOrders.length;
 
     return {
       totalRevenue,
       totalFees,
       totalProductCosts,
       netProfit,
+      pendingOrders,
+      completedCount:
+        completedOrders.length,
     };
   }, [orders]);
 
   return (
     <main className="min-h-screen bg-gray-100 text-slate-900">
       <div className="mx-auto max-w-7xl px-6 py-10">
-
-        {/* Header with Logout button */}
+        {/* Header */}
         <div className="mb-10 flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-4xl font-bold tracking-tight">
@@ -302,14 +420,22 @@ export default function Home() {
           <button
             type="button"
             onClick={logout}
-            disabled={loggingOut || syncing || savingId !== null}
+            disabled={
+              loggingOut ||
+              syncing ||
+              savingId !== null
+            }
             className={`rounded-xl px-5 py-3 font-medium transition ${
-              loggingOut || syncing || savingId !== null
+              loggingOut ||
+              syncing ||
+              savingId !== null
                 ? "cursor-not-allowed bg-slate-200 text-slate-400"
                 : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
             }`}
           >
-            {loggingOut ? "Logging out..." : "Logout"}
+            {loggingOut
+              ? "Logging out..."
+              : "Logout"}
           </button>
         </div>
 
@@ -322,9 +448,12 @@ export default function Home() {
           </div>
         )}
 
+        {/* Dashboard Totals */}
         <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-2xl bg-white p-6 shadow-sm">
-            <p className="text-slate-500">Total Revenue</p>
+            <p className="text-slate-500">
+              Total Revenue
+            </p>
 
             <p className="mt-2 text-3xl font-bold">
               {money(totals.totalRevenue)}
@@ -332,7 +461,9 @@ export default function Home() {
           </div>
 
           <div className="rounded-2xl bg-white p-6 shadow-sm">
-            <p className="text-slate-500">eBay Fees</p>
+            <p className="text-slate-500">
+              eBay Fees
+            </p>
 
             <p className="mt-2 text-3xl font-bold">
               {money(totals.totalFees)}
@@ -340,7 +471,9 @@ export default function Home() {
           </div>
 
           <div className="rounded-2xl bg-white p-6 shadow-sm">
-            <p className="text-slate-500">Product Costs</p>
+            <p className="text-slate-500">
+              Product Costs
+            </p>
 
             <p className="mt-2 text-3xl font-bold">
               {money(totals.totalProductCosts)}
@@ -348,7 +481,9 @@ export default function Home() {
           </div>
 
           <div className="rounded-2xl bg-white p-6 shadow-sm">
-            <p className="text-slate-500">Net Profit</p>
+            <p className="text-slate-500">
+              Net Profit
+            </p>
 
             <p
               className={`mt-2 text-3xl font-bold ${
@@ -361,11 +496,25 @@ export default function Home() {
             </p>
 
             <p className="mt-1 text-xs text-slate-500">
-              Excludes any seller fees not yet imported
+              Based on{" "}
+              {totals.completedCount}{" "}
+              completed orders
+            </p>
+
+            {totals.pendingOrders > 0 && (
+              <p className="mt-1 text-xs text-amber-600">
+                {totals.pendingOrders}{" "}
+                orders still need product costs
+              </p>
+            )}
+
+            <p className="mt-1 text-xs text-slate-500">
+              Excludes seller fees not yet imported
             </p>
           </div>
         </div>
 
+        {/* Recent Orders */}
         <div className="mt-10 rounded-2xl bg-white p-6 shadow-sm">
           <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -396,13 +545,19 @@ export default function Home() {
                   : "bg-blue-600 hover:bg-blue-700"
               }`}
             >
-              {syncing ? "Syncing..." : "Sync eBay Orders"}
+              {syncing
+                ? "Syncing..."
+                : "Sync eBay Orders"}
             </button>
           </div>
 
           {syncMessage && (
             <div
-              role={syncError ? "alert" : "status"}
+              role={
+                syncError
+                  ? "alert"
+                  : "status"
+              }
               className={`mb-6 rounded-xl border px-4 py-3 text-sm ${
                 syncError
                   ? "border-red-200 bg-red-50 text-red-700"
@@ -459,47 +614,49 @@ export default function Home() {
 
                 <tbody>
                   {orders.map((order) => {
-                    const hasCost =
-                      order.productCost.trim() !== "";
+                    const hasSavedCost =
+                      isValidCost(
+                        order.savedProductCost
+                      );
 
-                    const parsedCost =
-                      Number(order.productCost);
+                    const validDraftCost =
+                      isValidCost(
+                        order.productCost
+                      );
 
-                    const productCost =
-                      hasCost &&
-                      Number.isFinite(parsedCost)
-                        ? parsedCost
-                        : 0;
+                    const isSaving =
+                      savingId === order.id;
 
                     const profit =
                       order.salePrice -
                       order.ebayFees -
-                      productCost;
-
-                    const isSaving =
-                      savingId === order.id;
+                      Number(order.productCost);
 
                     return (
                       <tr
                         key={order.id}
                         className="border-b border-slate-300 last:border-b-0"
                       >
+                        {/* Item */}
                         <td className="py-5 pr-6 font-medium">
                           {order.item}
                         </td>
 
+                        {/* Sale Price */}
                         <td className="py-5 pr-6">
-                          {money(order.salePrice)}
+                          {money(
+                            order.salePrice
+                          )}
                         </td>
 
+                        {/* eBay Fees */}
                         <td className="py-5 pr-6">
-                          {money(order.ebayFees)}
+                          {money(
+                            order.ebayFees
+                          )}
                         </td>
 
-                        <td className="py-5 pr-6">
-                          {money(order.productCost === "" ? 0 : order.ebayFees)}
-                        </td>
-
+                        {/* Editable Product Cost */}
                         <td className="py-5 pr-6">
                           <div className="flex items-center gap-2">
                             <span>$</span>
@@ -508,8 +665,11 @@ export default function Home() {
                               type="number"
                               min="0"
                               step="0.01"
-                              value={order.productCost}
+                              value={
+                                order.productCost
+                              }
                               placeholder="0.00"
+                              aria-label={`Product cost for ${order.item}`}
                               disabled={
                                 isSaving ||
                                 syncing ||
@@ -527,6 +687,14 @@ export default function Home() {
                                   event.target.value
                                 )
                               }
+                              onKeyDown={(event) => {
+                                if (
+                                  event.key ===
+                                  "Enter"
+                                ) {
+                                  event.currentTarget.blur();
+                                }
+                              }}
                               className="w-28 rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100"
                             />
 
@@ -538,8 +706,9 @@ export default function Home() {
                           </div>
                         </td>
 
+                        {/* Automatically Calculated Profit */}
                         <td className="py-5 pr-6">
-                          {hasCost ? (
+                          {validDraftCost ? (
                             <span
                               className={
                                 profit >= 0
@@ -556,8 +725,9 @@ export default function Home() {
                           )}
                         </td>
 
+                        {/* Order Status */}
                         <td className="py-5">
-                          {hasCost ? (
+                          {hasSavedCost ? (
                             <span className="rounded-full bg-green-100 px-3 py-1 text-sm font-medium text-green-700">
                               Completed
                             </span>
@@ -575,8 +745,8 @@ export default function Home() {
 
               {orders.length === 0 && (
                 <p className="py-10 text-center text-slate-500">
-                  No orders found. Sync your eBay account to
-                  import orders.
+                  No orders found. Sync your eBay
+                  account to import orders.
                 </p>
               )}
             </div>
