@@ -22,12 +22,6 @@ type EbayDeletionNotification = {
   };
 };
 
-function getEnvironment(): EbayEnvironment {
-  return process.env.EBAY_ENVIRONMENT === "PRODUCTION"
-    ? "PRODUCTION"
-    : "SANDBOX";
-}
-
 function hashIdentifier(
   identifier: string,
   identifierType: "userId" | "username",
@@ -116,11 +110,18 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const clientId = process.env.EBAY_CLIENT_ID;
-  const clientSecret = process.env.EBAY_CLIENT_SECRET;
+  // IMPORTANT:
+  // eBay Production sends notifications to this endpoint.
+  // Use Production credentials for signature verification.
+  //
+  // The regular order-sync route continues using
+  // EBAY_ENVIRONMENT, which remains SANDBOX for now.
+  const clientId = process.env.EBAY_PRODUCTION_CLIENT_ID;
+  const clientSecret = process.env.EBAY_PRODUCTION_CLIENT_SECRET;
   const hashSecret = process.env.EBAY_DELETION_HASH_SECRET;
   const databaseUrl = process.env.DATABASE_URL;
-  const environment = getEnvironment();
+
+  const environment: EbayEnvironment = "PRODUCTION";
 
   if (!clientId || !clientSecret || !hashSecret || !databaseUrl) {
     console.error("Missing account deletion configuration.");
@@ -131,7 +132,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Verify the notification using eBay's public key.
+  // Verify the notification using eBay's Production public key.
   try {
     const isValid = await validateSignature(
       message,
@@ -231,7 +232,7 @@ export async function POST(request: NextRequest) {
     await client.query("BEGIN");
 
     // Lock every identifier in a consistent order.
-    // The sync route will use the same locks to prevent
+    // The sync route uses matching locks to prevent
     // deleted orders from being reimported.
     for (const identifierHash of [...identifierHashes].sort()) {
       await client.query(
@@ -259,7 +260,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Collect both identifiers supplied by eBay.
-    // Username and immutable user ID are not necessarily identical.
+    // Username and immutable user ID may be different.
     const identifiers = Array.from(
       new Set(
         [ebayUserId, username].filter(
@@ -268,7 +269,7 @@ export async function POST(request: NextRequest) {
       )
     );
 
-    // Delete entire orders where the deleted account is the buyer.
+    // Delete orders where the deleted account is the buyer.
     const buyerDeletion = await client.query(
       `
       DELETE FROM public."order"
@@ -278,7 +279,7 @@ export async function POST(request: NextRequest) {
       [environment, identifiers]
     );
 
-    // Delete entire orders where the deleted account is the seller.
+    // Delete orders where the deleted account is the seller.
     const sellerDeletion = await client.query(
       `
       DELETE FROM public."order"
@@ -311,8 +312,7 @@ export async function POST(request: NextRequest) {
       [environment, accountHash]
     );
 
-    // Save all available identifier hashes.
-    // The sync route will check these before importing orders.
+    // Save identifier hashes for future import protection.
     for (const identifierHash of identifierHashes) {
       await client.query(
         `
