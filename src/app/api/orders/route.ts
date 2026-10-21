@@ -3,9 +3,14 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { Pool } from "pg";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 export async function GET() {
+  let pool: Pool | null = null;
+
   try {
-    // Identify the currently signed-in user.
+    // STEP 1: Authenticate the ProfitSync user.
     const supabase = await createClient();
 
     const {
@@ -13,67 +18,90 @@ export async function GET() {
       error: authError,
     } = await supabase.auth.getUser();
 
-    // Block requests from users who aren't signed in.
     if (authError || !user) {
       return NextResponse.json(
-        { error: "Authentication required." },
-        { status: 401 }
+        {
+          error: "Authentication required.",
+        },
+        {
+          status: 401,
+        }
       );
     }
 
+    // STEP 2: Verify database configuration.
     const databaseUrl = process.env.DATABASE_URL;
 
     if (!databaseUrl) {
-      throw new Error("DATABASE_URL is not configured.");
+      console.error("DATABASE_URL is not configured.");
+
+      return NextResponse.json(
+        {
+          error: "Database configuration unavailable.",
+        },
+        {
+          status: 503,
+        }
+      );
     }
 
-    const pool = new Pool({
+    // STEP 3: Connect to PostgreSQL.
+    pool = new Pool({
       connectionString: databaseUrl,
       max: 1,
+      connectionTimeoutMillis: 10000,
+      idleTimeoutMillis: 10000,
     });
 
-    try {
-      // Retrieve only this user's orders.
-      const result = await pool.query(
-        `
-        SELECT
-          id,
-          "ebayOrderId",
-          "ebayUserId",
-          "userId",
-          item,
-          "salePrice",
-          "ebayFees",
-          "productCost",
-          status,
-          "orderDate",
-          "createdAt",
-          "updatedAt"
-        FROM "order"
-        WHERE "userId" = $1
-        ORDER BY "orderDate" DESC
-        `,
-        [user.id]
-      );
+    // STEP 4: Retrieve this user's orders.
+    // Include the actual eBay listing image URL.
+    const result = await pool.query(
+      `
+      SELECT
+        id,
+        "ebayOrderId",
+        "ebayUserId",
+        "userId",
+        item,
+        "imageUrl",
+        "salePrice",
+        "ebayFees",
+        "productCost",
+        status,
+        "orderDate",
+        "createdAt",
+        "updatedAt"
+      FROM public."order"
+      WHERE "userId" = $1
+      ORDER BY "orderDate" DESC, id DESC
+      `,
+      [user.id]
+    );
 
-      return NextResponse.json(result.rows);
-    } finally {
-      await pool.end();
-    }
+    // STEP 5: Return orders and listing images.
+    return NextResponse.json(result.rows, {
+      headers: {
+        "Cache-Control": "private, no-store, max-age=0",
+      },
+    });
   } catch (error) {
-    console.error("Failed to retrieve orders:", error);
+    console.error(
+      "Failed to retrieve ProfitSync orders:",
+      error
+    );
 
     return NextResponse.json(
-      { error: "Failed to retrieve orders." },
-      { status: 500 }
+      {
+        error: "Failed to retrieve eBay orders.",
+      },
+      {
+        status: 500,
+      }
     );
+  } finally {
+    // STEP 6: Close the database connection.
+    if (pool) {
+      await pool.end();
+    }
   }
-}
-
-// Disable the old sample-order creation endpoint.
-export async function POST() {
-  return NextResponse.json(
-    { error: "Creating sample orders is disabled." },
-    { status: 405 }
-  );
 }
