@@ -33,7 +33,7 @@ import type {
 } from '@prisma/orm-postgres/contract/types';
 
 export type StorageHash =
-  StorageHashBase<'a4e64187fe1de249fdce70d3ea0065f2f7ad17b7a9af96b8dd59de90ec676c32'>;
+  StorageHashBase<'b1ddb3d3849999095328421a37b5bbc424248643ddf82544a503ea369e894de5'>;
 export type ExecutionHash =
   ExecutionHashBase<'fe29687f147172d6282cffa83f304852ecf3cd1fef2d6382f486c4db82ea2f30'>;
 export type ProfileHash =
@@ -264,6 +264,7 @@ export type FieldOutputTypes = {
       readonly salePrice: CodecTypes['pg/numeric@1']['output'];
       readonly ebayFees: CodecTypes['pg/numeric@1']['output'];
       readonly productCost: CodecTypes['pg/numeric@1']['output'] | null;
+      readonly imageUrl: CodecTypes['pg/text@1']['output'] | null;
       readonly status: CodecTypes['pg/text@1']['output'];
       readonly orderDate: CodecTypes['pg/timestamptz-string@1']['output'];
       readonly createdAt: CodecTypes['pg/timestamptz-string@1']['output'];
@@ -296,6 +297,7 @@ export type FieldInputTypes = {
       readonly salePrice: CodecTypes['pg/numeric@1']['input'];
       readonly ebayFees: CodecTypes['pg/numeric@1']['input'];
       readonly productCost: CodecTypes['pg/numeric@1']['input'] | null;
+      readonly imageUrl: CodecTypes['pg/text@1']['input'] | null;
       readonly status: CodecTypes['pg/text@1']['input'];
       readonly orderDate: CodecTypes['pg/timestamptz-string@1']['input'];
       readonly createdAt: CodecTypes['pg/timestamptz-string@1']['input'];
@@ -325,6 +327,7 @@ export type StorageColumnTypes = {
       readonly ebayUserId: CodecTypes['pg/text@1']['output'] | null;
       readonly environment: CodecTypes['pg/text@1']['output'];
       readonly id: CodecTypes['pg/int4@1']['output'];
+      readonly imageUrl: CodecTypes['pg/text@1']['output'] | null;
       readonly item: CodecTypes['pg/text@1']['output'];
       readonly orderDate: CodecTypes['pg/timestamptz-string@1']['output'];
       readonly productCost: CodecTypes['pg/numeric@1']['output'] | null;
@@ -357,6 +360,7 @@ export type StorageColumnInputTypes = {
       readonly ebayUserId: CodecTypes['pg/text@1']['input'] | null;
       readonly environment: CodecTypes['pg/text@1']['input'];
       readonly id: CodecTypes['pg/int4@1']['input'];
+      readonly imageUrl: CodecTypes['pg/text@1']['input'] | null;
       readonly item: CodecTypes['pg/text@1']['input'];
       readonly orderDate: CodecTypes['pg/timestamptz-string@1']['input'];
       readonly productCost: CodecTypes['pg/numeric@1']['input'] | null;
@@ -510,6 +514,11 @@ type ContractBase = Omit<
                 readonly productCost: {
                   readonly nativeType: 'numeric';
                   readonly codecId: 'pg/numeric@1';
+                  readonly nullable: true;
+                };
+                readonly imageUrl: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'pg/text@1';
                   readonly nullable: true;
                 };
                 readonly status: {
@@ -680,6 +689,10 @@ type ContractBase = Omit<
                 readonly nullable: true;
                 readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/numeric@1' };
               };
+              readonly imageUrl: {
+                readonly nullable: true;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
               readonly status: {
                 readonly nullable: false;
                 readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
@@ -721,6 +734,7 @@ type ContractBase = Omit<
                 readonly salePrice: { readonly column: 'salePrice' };
                 readonly ebayFees: { readonly column: 'ebayFees' };
                 readonly productCost: { readonly column: 'productCost' };
+                readonly imageUrl: { readonly column: 'imageUrl' };
                 readonly status: { readonly column: 'status' };
                 readonly orderDate: { readonly column: 'orderDate' };
                 readonly createdAt: { readonly column: 'createdAt' };

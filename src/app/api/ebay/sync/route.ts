@@ -19,6 +19,17 @@ type Money = {
   currency?: string;
 };
 
+type EbayLineItem = {
+  title?: string;
+  quantity?: number;
+  legacyItemId?: string;
+  legacyVariationId?: string;
+  sku?: string;
+  image?: {
+    imageUrl?: string;
+  };
+};
+
 type EbayOrder = {
   orderId: string;
   creationDate?: string;
@@ -28,10 +39,7 @@ type EbayOrder = {
   pricingSummary?: {
     total?: Money;
   };
-  lineItems?: {
-    title?: string;
-    quantity?: number;
-  }[];
+  lineItems?: EbayLineItem[];
 };
 
 type EbayOrdersResponse = {
@@ -49,6 +57,19 @@ type EbayTransaction = {
 type EbayTransactionsResponse = {
   total?: number;
   transactions?: EbayTransaction[];
+};
+
+type EbayBrowseItem = {
+  image?: {
+    imageUrl?: string;
+  };
+};
+
+type ExistingOrder = {
+  id: number | string;
+  ebayOrderId: string | null;
+  ebayBuyerId: string | null;
+  imageUrl: string | null;
 };
 
 function hashIdentifier(
@@ -92,8 +113,33 @@ function formatMoney(cents: number): string {
   return (cents / 100).toFixed(2);
 }
 
-// Use the same deletion-protection locks as the
-// existing order import and deletion webhook.
+function validImageUrl(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  try {
+    const url = new URL(value);
+
+    if (url.protocol !== "https:") {
+      return null;
+    }
+
+    const hostname = url.hostname.toLowerCase();
+
+    if (
+      hostname !== "ebayimg.com" &&
+      !hostname.endsWith(".ebayimg.com")
+    ) {
+      return null;
+    }
+
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 async function lockAndCheckIdentifiers(
   client: PoolClient,
   environment: string,
@@ -154,6 +200,180 @@ async function verifyActiveConnection(
       "eBay connection was removed during sync."
     );
   }
+}
+
+async function getApplicationToken(
+  ebayApiBase: string
+): Promise<string | null> {
+  const clientId = process.env.EBAY_CLIENT_ID;
+  const clientSecret = process.env.EBAY_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) {
+    return null;
+  }
+
+  const credentials = Buffer.from(
+    `${clientId}:${clientSecret}`
+  ).toString("base64");
+
+  const body = new URLSearchParams({
+    grant_type: "client_credentials",
+    scope: "https://api.ebay.com/oauth/api_scope",
+  });
+
+  try {
+    const response = await fetch(
+      `${ebayApiBase}/identity/v1/oauth2/token`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Authorization: `Basic ${credentials}`,
+        },
+        body: body.toString(),
+        cache: "no-store",
+      }
+    );
+
+    if (!response.ok) {
+      console.error(
+        "Unable to obtain eBay application token:",
+        response.status
+      );
+
+      return null;
+    }
+
+    const data: EbayTokenResponse = await response.json();
+
+    return data.access_token ?? null;
+  } catch (error) {
+    console.error(
+      "Error obtaining eBay application token:",
+      error
+    );
+
+    return null;
+  }
+}
+
+async function getListingImage(
+  ebayApiBase: string,
+  applicationToken: string,
+  lineItem: EbayLineItem
+): Promise<string | null> {
+  const directImage = validImageUrl(
+    lineItem.image?.imageUrl
+  );
+
+  if (directImage) {
+    return directImage;
+  }
+
+  if (!lineItem.legacyItemId) {
+    return null;
+  }
+
+  const params = new URLSearchParams({
+    legacy_item_id: lineItem.legacyItemId,
+  });
+
+  if (lineItem.legacyVariationId) {
+    params.set(
+      "legacy_variation_id",
+      lineItem.legacyVariationId
+    );
+  } else if (lineItem.sku) {
+    params.set("legacy_variation_sku", lineItem.sku);
+  }
+
+  try {
+    const response = await fetch(
+      `${ebayApiBase}/buy/browse/v1/item/get_item_by_legacy_id?${params.toString()}`,
+      {
+        headers: {
+          Authorization: `Bearer ${applicationToken}`,
+          Accept: "application/json",
+          "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+        },
+        cache: "no-store",
+      }
+    );
+
+    if (!response.ok) {
+      console.warn(
+        "eBay listing image unavailable:",
+        lineItem.legacyItemId,
+        response.status
+      );
+
+      return null;
+    }
+
+    const item: EbayBrowseItem = await response.json();
+
+    return validImageUrl(item.image?.imageUrl);
+  } catch (error) {
+    console.error(
+      "Error retrieving eBay listing image:",
+      error
+    );
+
+    return null;
+  }
+}
+
+async function getOrderImage(
+  ebayApiBase: string,
+  applicationToken: string | null,
+  order: EbayOrder,
+  imageCache: Map<string, string | null>
+): Promise<string | null> {
+  const lineItems = order.lineItems ?? [];
+
+  for (const lineItem of lineItems) {
+    const directImage = validImageUrl(
+      lineItem.image?.imageUrl
+    );
+
+    if (directImage) {
+      return directImage;
+    }
+
+    if (!lineItem.legacyItemId || !applicationToken) {
+      continue;
+    }
+
+    const cacheKey = [
+      lineItem.legacyItemId,
+      lineItem.legacyVariationId ?? "",
+      lineItem.sku ?? "",
+    ].join(":");
+
+    if (imageCache.has(cacheKey)) {
+      const cachedImage = imageCache.get(cacheKey);
+
+      if (cachedImage) {
+        return cachedImage;
+      }
+
+      continue;
+    }
+
+    const imageUrl = await getListingImage(
+      ebayApiBase,
+      applicationToken,
+      lineItem
+    );
+
+    imageCache.set(cacheKey, imageUrl);
+
+    if (imageUrl) {
+      return imageUrl;
+    }
+  }
+
+  return null;
 }
 
 export async function POST() {
@@ -253,7 +473,7 @@ export async function POST() {
 
     let accessToken = connection.accessToken;
 
-    // STEP 5: Refresh the token when necessary.
+    // STEP 5: Refresh the seller token if needed.
     const accessTokenExpiresAt = new Date(
       connection.accessTokenExpiresAt
     ).getTime();
@@ -273,16 +493,14 @@ export async function POST() {
         return NextResponse.json(
           {
             error: "eBay refresh token expired.",
-            message:
-              "Please reconnect your eBay account.",
+            message: "Please reconnect your eBay account.",
           },
           { status: 401 }
         );
       }
 
       const clientId = process.env.EBAY_CLIENT_ID;
-      const clientSecret =
-        process.env.EBAY_CLIENT_SECRET;
+      const clientSecret = process.env.EBAY_CLIENT_SECRET;
 
       if (!clientId || !clientSecret) {
         return NextResponse.json(
@@ -295,7 +513,6 @@ export async function POST() {
         `${clientId}:${clientSecret}`
       ).toString("base64");
 
-      // Include the financial scope during refresh.
       const scopes = [
         "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly",
         "https://api.ebay.com/oauth/api_scope/commerce.identity.readonly",
@@ -338,10 +555,8 @@ export async function POST() {
 
         return NextResponse.json(
           {
-            error:
-              "Unable to refresh eBay access token.",
-            message:
-              "Please reconnect your eBay account.",
+            error: "Unable to refresh eBay access token.",
+            message: "Please reconnect your eBay account.",
           },
           { status: 401 }
         );
@@ -435,8 +650,7 @@ export async function POST() {
 
         return NextResponse.json(
           {
-            error:
-              "Unable to retrieve eBay selling fees.",
+            error: "Unable to retrieve eBay selling fees.",
             message:
               "No orders were changed. Please try again.",
           },
@@ -460,16 +674,12 @@ export async function POST() {
         }
 
         if (
-          seenTransactions.has(
-            transaction.transactionId
-          )
+          seenTransactions.has(transaction.transactionId)
         ) {
           continue;
         }
 
-        seenTransactions.add(
-          transaction.transactionId
-        );
+        seenTransactions.add(transaction.transactionId);
 
         const feeCents = parseMoney(
           transaction.totalFeeAmount
@@ -526,17 +736,66 @@ export async function POST() {
     const existingIds = new Set(
       existingOrders
         .map((order) => order.ebayOrderId)
-        .filter(
-          (id): id is string => id !== null
-        )
+        .filter((id): id is string => id !== null)
     );
+
+    // STEP 9: Retrieve listing images.
+    // Images are optional and must never prevent fee syncing.
+    const existingByEbayId = new Map(
+      existingOrders
+        .filter((order) => Boolean(order.ebayOrderId))
+        .map((order) => [order.ebayOrderId, order])
+    );
+
+    const ordersNeedingImages = ebayOrders.filter(
+      (order) => {
+        const existing = existingByEbayId.get(
+          order.orderId
+        );
+
+        return !existing || !existing.imageUrl;
+      }
+    );
+
+    const needsApplicationToken =
+      ordersNeedingImages.some((order) =>
+        order.lineItems?.some(
+          (lineItem) =>
+            Boolean(lineItem.legacyItemId) &&
+            !validImageUrl(lineItem.image?.imageUrl)
+        )
+      );
+
+    const applicationToken = needsApplicationToken
+      ? await getApplicationToken(ebayApiBase)
+      : null;
+
+    const imageCache =
+      new Map<string, string | null>();
+
+    const imagesByOrder = new Map<string, string>();
+
+    for (const order of ordersNeedingImages) {
+      const imageUrl = await getOrderImage(
+        ebayApiBase,
+        applicationToken,
+        order,
+        imageCache
+      );
+
+      if (imageUrl) {
+        imagesByOrder.set(order.orderId, imageUrl);
+      }
+    }
 
     let imported = 0;
     let skipped = 0;
     let feesUpdated = 0;
     let feesUnavailable = 0;
+    let imagesUpdated = 0;
+    let imagesImported = 0;
 
-    // STEP 9: Open a protected PostgreSQL connection.
+    // STEP 10: Open protected PostgreSQL connection.
     const pool = new Pool({
       connectionString: databaseUrl,
       max: 1,
@@ -547,7 +806,7 @@ export async function POST() {
       const client = await pool.connect();
 
       try {
-        // STEP 10: Import new orders.
+        // STEP 11: Import new orders.
         for (const ebayOrder of ebayOrders) {
           if (
             !ebayOrder.orderId ||
@@ -583,6 +842,9 @@ export async function POST() {
           const feeCents = feesByOrder.get(
             ebayOrder.orderId
           );
+
+          const imageUrl =
+            imagesByOrder.get(ebayOrder.orderId) ?? null;
 
           let transactionStarted = false;
 
@@ -635,10 +897,7 @@ export async function POST() {
               await client.query("COMMIT");
               transactionStarted = false;
 
-              existingIds.add(
-                ebayOrder.orderId
-              );
-
+              existingIds.add(ebayOrder.orderId);
               skipped++;
               continue;
             }
@@ -655,14 +914,16 @@ export async function POST() {
                 "salePrice",
                 "ebayFees",
                 "productCost",
+                "imageUrl",
                 status,
                 "orderDate",
                 "updatedAt"
               )
               VALUES (
                 $1, $2, $3, $4, $5, $6,
-                $7, $8, $9, $10,
-                COALESCE($11::timestamptz, NOW()),
+                $7, $8, $9, $10, $11,
+                $12,
+                COALESCE($13::timestamptz, NOW()),
                 NOW()
               )
               `,
@@ -678,6 +939,7 @@ export async function POST() {
                   ? formatMoney(feeCents)
                   : "0.00",
                 null,
+                imageUrl,
                 "COST_NEEDED",
                 ebayOrder.creationDate || null,
               ]
@@ -686,11 +948,12 @@ export async function POST() {
             await client.query("COMMIT");
             transactionStarted = false;
 
-            existingIds.add(
-              ebayOrder.orderId
-            );
-
+            existingIds.add(ebayOrder.orderId);
             imported++;
+
+            if (imageUrl) {
+              imagesImported++;
+            }
 
             if (feeCents === undefined) {
               feesUnavailable++;
@@ -711,10 +974,8 @@ export async function POST() {
           }
         }
 
-        // STEP 11: Update fees on existing orders.
-        //
-        // Only ebayFees and updatedAt are changed.
-        // Product costs and sale prices are preserved.
+        // STEP 12: Update fees and images on existing orders.
+        // Product costs and sale prices are never changed.
         for (const order of existingOrders) {
           if (!order.ebayOrderId) {
             continue;
@@ -724,7 +985,14 @@ export async function POST() {
             order.ebayOrderId
           );
 
-          if (feeCents === undefined) {
+          const imageUrl = imagesByOrder.get(
+            order.ebayOrderId
+          );
+
+          if (
+            feeCents === undefined &&
+            !imageUrl
+          ) {
             feesUnavailable++;
             continue;
           }
@@ -766,23 +1034,38 @@ export async function POST() {
               environment
             );
 
-            const newFee = formatMoney(feeCents);
-
             const result = await client.query(
               `
               UPDATE public."order"
-              SET "ebayFees" = $1,
-                  "updatedAt" = NOW()
-              WHERE id = $2
-                AND "userId" = $3
-                AND "ebayUserId" = $4
-                AND environment = $5
-                AND "ebayOrderId" = $6
-                AND "ebayBuyerId" = $7
-                AND "ebayFees" IS DISTINCT FROM $1::numeric
+              SET
+                "ebayFees" =
+                  COALESCE($1::numeric, "ebayFees"),
+                "imageUrl" =
+                  COALESCE("imageUrl", $2::text),
+                "updatedAt" = NOW()
+              WHERE id = $3
+                AND "userId" = $4
+                AND "ebayUserId" = $5
+                AND environment = $6
+                AND "ebayOrderId" = $7
+                AND "ebayBuyerId" = $8
+                AND (
+                  (
+                    $1::numeric IS NOT NULL
+                    AND "ebayFees" IS DISTINCT FROM $1::numeric
+                  )
+                  OR (
+                    "imageUrl" IS NULL
+                    AND $2::text IS NOT NULL
+                  )
+                )
+              RETURNING "imageUrl"
               `,
               [
-                newFee,
+                feeCents !== undefined
+                  ? formatMoney(feeCents)
+                  : null,
+                imageUrl ?? null,
                 order.id,
                 userId,
                 ebayUserId,
@@ -796,7 +1079,24 @@ export async function POST() {
             transactionStarted = false;
 
             if (result.rowCount) {
-              feesUpdated++;
+              if (
+                feeCents !== undefined &&
+                Number(order.ebayFees) !==
+                  feeCents / 100
+              ) {
+                feesUpdated++;
+              }
+
+              if (
+                imageUrl &&
+                !order.imageUrl
+              ) {
+                imagesUpdated++;
+              }
+            }
+
+            if (feeCents === undefined) {
+              feesUnavailable++;
             }
           } catch (error) {
             if (transactionStarted) {
@@ -804,7 +1104,7 @@ export async function POST() {
                 await client.query("ROLLBACK");
               } catch (rollbackError) {
                 console.error(
-                  "Fee update rollback failed:",
+                  "Order update rollback failed:",
                   rollbackError
                 );
               }
@@ -820,7 +1120,7 @@ export async function POST() {
       await pool.end();
     }
 
-    // STEP 12: Return sync results.
+    // STEP 13: Return sync results.
     return NextResponse.json({
       success: true,
       environment,
@@ -829,10 +1129,13 @@ export async function POST() {
       skipped,
       feesUpdated,
       feesUnavailable,
+      imagesImported,
+      imagesUpdated,
       financialOrdersMatched: feesByOrder.size,
       message:
         `Imported ${imported} new orders. ` +
-        `Updated fees on ${feesUpdated} existing orders.`,
+        `Updated fees on ${feesUpdated} existing orders. ` +
+        `Added ${imagesImported + imagesUpdated} listing images.`,
     });
   } catch (error) {
     console.error(

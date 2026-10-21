@@ -1,5 +1,5 @@
 
-// use prisma-next
+ // use prisma-next
 
 model Order {
   id           Int      @id @default(autoincrement())
@@ -17,6 +17,9 @@ model Order {
   salePrice    Decimal
   ebayFees     Decimal
   productCost  Decimal?
+
+  // Actual eBay listing image URL
+  imageUrl     String?
 
   status       String   @default("COST_NEEDED")
 
