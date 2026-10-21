@@ -105,7 +105,6 @@ function parseMoney(money?: Money): number | null {
   }
 
   const cents = Math.round(Number(money.value) * 100);
-
   return Number.isSafeInteger(cents) ? cents : null;
 }
 
@@ -163,11 +162,11 @@ async function lockAndCheckIdentifiers(
 
   const deleted = await client.query(
     `
-    SELECT 1
-    FROM public."ebayDeletedIdentifier"
-    WHERE environment = $1
-      AND "identifierHash" = ANY($2::text[])
-    LIMIT 1
+      SELECT 1
+      FROM public."ebayDeletedIdentifier"
+      WHERE environment = $1
+        AND "identifierHash" = ANY($2::text[])
+      LIMIT 1
     `,
     [environment, hashes]
   );
@@ -184,13 +183,13 @@ async function verifyActiveConnection(
 ): Promise<void> {
   const active = await client.query(
     `
-    SELECT 1
-    FROM public."ebayConnection"
-    WHERE id = $1
-      AND "userId" = $2
-      AND "ebayUserId" = $3
-      AND environment = $4
-    LIMIT 1
+      SELECT 1
+      FROM public."ebayConnection"
+      WHERE id = $1
+        AND "userId" = $2
+        AND "ebayUserId" = $3
+        AND environment = $4
+      LIMIT 1
     `,
     [connectionId, userId, ebayUserId, environment]
   );
@@ -577,44 +576,94 @@ export async function POST() {
       });
     }
 
-    // STEP 6: Retrieve the latest 20 eBay orders.
-    const ordersResponse = await fetch(
-      `${ebayApiBase}/sell/fulfillment/v1/order?limit=20`,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          Accept: "application/json",
-        },
-        cache: "no-store",
-      }
-    );
+    // STEP 6: Retrieve all available eBay orders using pagination.
+    // eBay Fulfillment supports up to 200 orders per request.
+    const ebayOrders: EbayOrder[] = [];
+    const seenOrderIds = new Set<string>();
+    const ordersPageSize = 200;
+    const maxOrderPages = 100;
+    let ordersOffset = 0;
+    let ordersComplete = false;
 
-    if (!ordersResponse.ok) {
-      console.error(
-        "eBay orders request failed:",
-        ordersResponse.status
-      );
+    for (let page = 0; page < maxOrderPages; page++) {
+      const params = new URLSearchParams({
+        limit: String(ordersPageSize),
+        offset: String(ordersOffset),
+      });
 
-      return NextResponse.json(
+      const ordersResponse = await fetch(
+        `${ebayApiBase}/sell/fulfillment/v1/order?${params.toString()}`,
         {
-          error: "Failed to retrieve eBay orders.",
-          status: ordersResponse.status,
-        },
-        { status: 502 }
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: "application/json",
+          },
+          cache: "no-store",
+        }
       );
+
+      if (!ordersResponse.ok) {
+        console.error(
+          "eBay orders request failed:",
+          ordersResponse.status
+        );
+
+        return NextResponse.json(
+          {
+            error: "Failed to retrieve eBay orders.",
+            status: ordersResponse.status,
+          },
+          { status: 502 }
+        );
+      }
+
+      const ordersData: EbayOrdersResponse =
+        await ordersResponse.json();
+
+      const pageOrders = ordersData.orders ?? [];
+
+      for (const order of pageOrders) {
+        if (
+          order.orderId &&
+          !seenOrderIds.has(order.orderId)
+        ) {
+          seenOrderIds.add(order.orderId);
+          ebayOrders.push(order);
+        }
+      }
+
+      ordersOffset += pageOrders.length;
+
+      if (
+        pageOrders.length === 0 ||
+        pageOrders.length < ordersPageSize ||
+        (
+          typeof ordersData.total === "number" &&
+          ordersOffset >= ordersData.total
+        )
+      ) {
+        ordersComplete = true;
+        break;
+      }
     }
 
-    const ordersData: EbayOrdersResponse =
-      await ordersResponse.json();
-
-    const ebayOrders = ordersData.orders ?? [];
+    if (!ordersComplete) {
+      return NextResponse.json(
+        {
+          error: "eBay order pagination limit reached.",
+          message:
+            "No orders were changed. The order history exceeds the configured page limit.",
+        },
+        { status: 503 }
+      );
+    }
 
     // STEP 7: Retrieve actual SALE transaction fees.
     const feesByOrder = new Map<string, number>();
     const seenTransactions = new Set<string>();
 
     const pageSize = 100;
-    const maxPages = 10;
+    const maxPages = 100;
 
     let offset = 0;
     let feesComplete = false;
@@ -877,13 +926,13 @@ export async function POST() {
 
             const duplicate = await client.query(
               `
-              SELECT 1
-              FROM public."order"
-              WHERE "userId" = $1
-                AND "ebayUserId" = $2
-                AND environment = $3
-                AND "ebayOrderId" = $4
-              LIMIT 1
+                SELECT 1
+                FROM public."order"
+                WHERE "userId" = $1
+                  AND "ebayUserId" = $2
+                  AND environment = $3
+                  AND "ebayOrderId" = $4
+                LIMIT 1
               `,
               [
                 userId,
@@ -904,28 +953,28 @@ export async function POST() {
 
             await client.query(
               `
-              INSERT INTO public."order" (
-                "userId",
-                "ebayOrderId",
-                "ebayUserId",
-                "ebayBuyerId",
-                environment,
-                item,
-                "salePrice",
-                "ebayFees",
-                "productCost",
-                "imageUrl",
-                status,
-                "orderDate",
-                "updatedAt"
-              )
-              VALUES (
-                $1, $2, $3, $4, $5, $6,
-                $7, $8, $9, $10, $11,
-                $12,
-                COALESCE($13::timestamptz, NOW()),
-                NOW()
-              )
+                INSERT INTO public."order" (
+                  "userId",
+                  "ebayOrderId",
+                  "ebayUserId",
+                  "ebayBuyerId",
+                  environment,
+                  item,
+                  "salePrice",
+                  "ebayFees",
+                  "productCost",
+                  "imageUrl",
+                  status,
+                  "orderDate",
+                  "updatedAt"
+                )
+                VALUES (
+                  $1, $2, $3, $4, $5, $6,
+                  $7, $8, $9, $10, $11,
+                  $12,
+                  COALESCE($13::timestamptz, NOW()),
+                  NOW()
+                )
               `,
               [
                 userId,
@@ -1036,30 +1085,30 @@ export async function POST() {
 
             const result = await client.query(
               `
-              UPDATE public."order"
-              SET
-                "ebayFees" =
-                  COALESCE($1::numeric, "ebayFees"),
-                "imageUrl" =
-                  COALESCE("imageUrl", $2::text),
-                "updatedAt" = NOW()
-              WHERE id = $3
-                AND "userId" = $4
-                AND "ebayUserId" = $5
-                AND environment = $6
-                AND "ebayOrderId" = $7
-                AND "ebayBuyerId" = $8
-                AND (
-                  (
-                    $1::numeric IS NOT NULL
-                    AND "ebayFees" IS DISTINCT FROM $1::numeric
+                UPDATE public."order"
+                SET
+                  "ebayFees" =
+                    COALESCE($1::numeric, "ebayFees"),
+                  "imageUrl" =
+                    COALESCE("imageUrl", $2::text),
+                  "updatedAt" = NOW()
+                WHERE id = $3
+                  AND "userId" = $4
+                  AND "ebayUserId" = $5
+                  AND environment = $6
+                  AND "ebayOrderId" = $7
+                  AND "ebayBuyerId" = $8
+                  AND (
+                    (
+                      $1::numeric IS NOT NULL
+                      AND "ebayFees" IS DISTINCT FROM $1::numeric
+                    )
+                    OR (
+                      "imageUrl" IS NULL
+                      AND $2::text IS NOT NULL
+                    )
                   )
-                  OR (
-                    "imageUrl" IS NULL
-                    AND $2::text IS NOT NULL
-                  )
-                )
-              RETURNING "imageUrl"
+                RETURNING "imageUrl"
               `,
               [
                 feeCents !== undefined
