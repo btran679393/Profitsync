@@ -241,8 +241,9 @@ export async function GET(request: NextRequest) {
     }
 
     // STEP 7: Retrieve the verified eBay seller identity.
+    // Updated: Removed the trailing slash from the endpoint.
     const userResponse = await fetch(
-      `${ebayApiBase}/commerce/identity/v1/user/`,
+      `${ebayApiBase}/commerce/identity/v1/user`,
       {
         headers: {
           Authorization: `Bearer ${tokenData.access_token}`,
