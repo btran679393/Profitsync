@@ -2,6 +2,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
 type Order = {
   id: number;
@@ -52,6 +54,8 @@ function formatOrders(data: ApiOrder[]): Order[] {
 }
 
 export default function Home() {
+  const router = useRouter();
+
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<number | null>(null);
@@ -60,6 +64,46 @@ export default function Home() {
   const [syncMessage, setSyncMessage] = useState("");
   const [syncError, setSyncError] = useState(false);
   const [loadError, setLoadError] = useState("");
+
+  // Logout state
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
+
+  async function logout() {
+    if (loggingOut) {
+      return;
+    }
+
+    try {
+      setLoggingOut(true);
+      setLogoutError("");
+
+      const supabase = createClient();
+
+      const { error } = await supabase.auth.signOut();
+
+      if (error) {
+        throw error;
+      }
+
+      // Clear this account's information from the screen.
+      setOrders([]);
+      setSyncMessage("");
+      setLoadError("");
+
+      // Redirect to the login page.
+      router.replace("/login");
+      router.refresh();
+    } catch (error) {
+      console.error("Error logging out:", error);
+
+      setLogoutError(
+        "Unable to log out. Please try again."
+      );
+
+      setLoggingOut(false);
+    }
+  }
 
   async function loadOrders() {
     const response = await fetch("/api/orders", {
@@ -180,7 +224,7 @@ export default function Home() {
         );
       }
 
-      // Reload the database orders after the import
+      // Reload the database orders after the import.
       await loadOrders();
 
       const imported = data.imported ?? 0;
@@ -242,15 +286,41 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-gray-100 text-slate-900">
       <div className="mx-auto max-w-7xl px-6 py-10">
-        <div className="mb-10">
-          <h1 className="text-4xl font-bold tracking-tight">
-            ProfitSync
-          </h1>
 
-          <p className="mt-2 text-lg text-slate-600">
-            Track your eBay sales, costs, and profits.
-          </p>
+        {/* Header with Logout button */}
+        <div className="mb-10 flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-4xl font-bold tracking-tight">
+              ProfitSync
+            </h1>
+
+            <p className="mt-2 text-lg text-slate-600">
+              Track your eBay sales, costs, and profits.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={logout}
+            disabled={loggingOut || syncing || savingId !== null}
+            className={`rounded-xl px-5 py-3 font-medium transition ${
+              loggingOut || syncing || savingId !== null
+                ? "cursor-not-allowed bg-slate-200 text-slate-400"
+                : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+            }`}
+          >
+            {loggingOut ? "Logging out..." : "Logout"}
+          </button>
         </div>
+
+        {logoutError && (
+          <div
+            role="alert"
+            className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+          >
+            {logoutError}
+          </div>
+        )}
 
         <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-2xl bg-white p-6 shadow-sm">
@@ -289,6 +359,7 @@ export default function Home() {
             >
               {money(totals.netProfit)}
             </p>
+
             <p className="mt-1 text-xs text-slate-500">
               Excludes any seller fees not yet imported
             </p>
@@ -310,9 +381,17 @@ export default function Home() {
             <button
               type="button"
               onClick={syncEbayOrders}
-              disabled={syncing || loading || savingId !== null}
+              disabled={
+                syncing ||
+                loading ||
+                loggingOut ||
+                savingId !== null
+              }
               className={`rounded-xl px-5 py-3 font-medium text-white transition ${
-                syncing || loading || savingId !== null
+                syncing ||
+                loading ||
+                loggingOut ||
+                savingId !== null
                   ? "cursor-not-allowed bg-blue-400"
                   : "bg-blue-600 hover:bg-blue-700"
               }`}
@@ -418,6 +497,10 @@ export default function Home() {
                         </td>
 
                         <td className="py-5 pr-6">
+                          {money(order.productCost === "" ? 0 : order.ebayFees)}
+                        </td>
+
+                        <td className="py-5 pr-6">
                           <div className="flex items-center gap-2">
                             <span>$</span>
 
@@ -427,7 +510,11 @@ export default function Home() {
                               step="0.01"
                               value={order.productCost}
                               placeholder="0.00"
-                              disabled={isSaving || syncing}
+                              disabled={
+                                isSaving ||
+                                syncing ||
+                                loggingOut
+                              }
                               onChange={(event) =>
                                 updateProductCost(
                                   order.id,
