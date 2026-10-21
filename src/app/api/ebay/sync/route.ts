@@ -2,10 +2,12 @@
 import { createHmac } from "crypto";
 import { Pool, type PoolClient } from "pg";
 import { NextResponse } from "next/server";
+
 import { db } from "@/prisma/db";
 import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 type EbayTokenResponse = {
   access_token?: string;
@@ -65,13 +67,6 @@ type EbayBrowseItem = {
   };
 };
 
-type ExistingOrder = {
-  id: number | string;
-  ebayOrderId: string | null;
-  ebayBuyerId: string | null;
-  imageUrl: string | null;
-};
-
 function hashIdentifier(
   identifier: string,
   identifierType: "userId" | "username",
@@ -105,6 +100,7 @@ function parseMoney(money?: Money): number | null {
   }
 
   const cents = Math.round(Number(money.value) * 100);
+
   return Number.isSafeInteger(cents) ? cents : null;
 }
 
@@ -226,7 +222,8 @@ async function getApplicationToken(
       {
         method: "POST",
         headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
+          "Content-Type":
+            "application/x-www-form-urlencoded",
           Authorization: `Basic ${credentials}`,
         },
         body: body.toString(),
@@ -576,12 +573,14 @@ export async function POST() {
       });
     }
 
-    // STEP 6: Retrieve all available eBay orders using pagination.
-    // eBay Fulfillment supports up to 200 orders per request.
+    // STEP 6: Retrieve all available eBay orders.
+    // Use pagination instead of stopping at 20 orders.
     const ebayOrders: EbayOrder[] = [];
     const seenOrderIds = new Set<string>();
+
     const ordersPageSize = 200;
     const maxOrderPages = 100;
+
     let ordersOffset = 0;
     let ordersComplete = false;
 
@@ -658,7 +657,7 @@ export async function POST() {
       );
     }
 
-    // STEP 7: Retrieve actual SALE transaction fees.
+    // STEP 7: Retrieve actual eBay SALE transaction fees.
     const feesByOrder = new Map<string, number>();
     const seenTransactions = new Set<string>();
 
@@ -789,7 +788,7 @@ export async function POST() {
     );
 
     // STEP 9: Retrieve listing images.
-    // Images are optional and must never prevent fee syncing.
+    // Image failures must not prevent order syncing.
     const existingByEbayId = new Map(
       existingOrders
         .filter((order) => Boolean(order.ebayOrderId))
@@ -951,6 +950,8 @@ export async function POST() {
               continue;
             }
 
+            // FIXED: 13 columns, 12 parameters,
+            // and NOW() for updatedAt.
             await client.query(
               `
                 INSERT INTO public."order" (
@@ -971,8 +972,7 @@ export async function POST() {
                 VALUES (
                   $1, $2, $3, $4, $5, $6,
                   $7, $8, $9, $10, $11,
-                  $12,
-                  COALESCE($13::timestamptz, NOW()),
+                  COALESCE($12::timestamptz, NOW()),
                   NOW()
                 )
               `,
@@ -1024,7 +1024,8 @@ export async function POST() {
         }
 
         // STEP 12: Update fees and images on existing orders.
-        // Product costs and sale prices are never changed.
+        // Never overwrite manually entered product costs.
+        // Never change previously saved sale prices.
         for (const order of existingOrders) {
           if (!order.ebayOrderId) {
             continue;
@@ -1101,7 +1102,8 @@ export async function POST() {
                   AND (
                     (
                       $1::numeric IS NOT NULL
-                      AND "ebayFees" IS DISTINCT FROM $1::numeric
+                      AND "ebayFees"
+                        IS DISTINCT FROM $1::numeric
                     )
                     OR (
                       "imageUrl" IS NULL
