@@ -1,6 +1,6 @@
 
 import { createHmac } from "crypto";
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 import { NextResponse } from "next/server";
 import { db } from "@/prisma/db";
 import { createClient } from "@/lib/supabase/server";
@@ -14,6 +14,11 @@ type EbayTokenResponse = {
   error_description?: string;
 };
 
+type Money = {
+  value?: string;
+  currency?: string;
+};
+
 type EbayOrder = {
   orderId: string;
   creationDate?: string;
@@ -21,10 +26,7 @@ type EbayOrder = {
     username?: string;
   };
   pricingSummary?: {
-    total?: {
-      value?: string;
-      currency?: string;
-    };
+    total?: Money;
   };
   lineItems?: {
     title?: string;
@@ -37,6 +39,18 @@ type EbayOrdersResponse = {
   orders?: EbayOrder[];
 };
 
+type EbayTransaction = {
+  transactionId?: string;
+  orderId?: string;
+  transactionType?: string;
+  totalFeeAmount?: Money;
+};
+
+type EbayTransactionsResponse = {
+  total?: number;
+  transactions?: EbayTransaction[];
+};
+
 function hashIdentifier(
   identifier: string,
   identifierType: "userId" | "username",
@@ -47,8 +61,6 @@ function hashIdentifier(
     .digest("hex");
 }
 
-// eBay may return either an immutable user ID or a
-// username in its buyer.username field.
 function getIdentifierHashes(
   identifier: string,
   secret: string
@@ -57,6 +69,91 @@ function getIdentifierHashes(
     hashIdentifier(identifier, "userId", secret),
     hashIdentifier(identifier, "username", secret),
   ];
+}
+
+function parseMoney(money?: Money): number | null {
+  if (!money || money.currency !== "USD") {
+    return null;
+  }
+
+  if (
+    typeof money.value !== "string" ||
+    !/^\d+(\.\d{1,2})?$/.test(money.value)
+  ) {
+    return null;
+  }
+
+  const cents = Math.round(Number(money.value) * 100);
+
+  return Number.isSafeInteger(cents) ? cents : null;
+}
+
+function formatMoney(cents: number): string {
+  return (cents / 100).toFixed(2);
+}
+
+// Use the same deletion-protection locks as the
+// existing order import and deletion webhook.
+async function lockAndCheckIdentifiers(
+  client: PoolClient,
+  environment: string,
+  identifiers: string[],
+  hashSecret: string
+): Promise<boolean> {
+  const hashes = Array.from(
+    new Set(
+      identifiers.flatMap((identifier) =>
+        getIdentifierHashes(identifier, hashSecret)
+      )
+    )
+  ).sort();
+
+  for (const hash of hashes) {
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtext($1))",
+      [`${environment}:${hash}`]
+    );
+  }
+
+  const deleted = await client.query(
+    `
+    SELECT 1
+    FROM public."ebayDeletedIdentifier"
+    WHERE environment = $1
+      AND "identifierHash" = ANY($2::text[])
+    LIMIT 1
+    `,
+    [environment, hashes]
+  );
+
+  return Boolean(deleted.rowCount);
+}
+
+async function verifyActiveConnection(
+  client: PoolClient,
+  connectionId: string | number,
+  userId: string,
+  ebayUserId: string,
+  environment: string
+): Promise<void> {
+  const active = await client.query(
+    `
+    SELECT 1
+    FROM public."ebayConnection"
+    WHERE id = $1
+      AND "userId" = $2
+      AND "ebayUserId" = $3
+      AND environment = $4
+    LIMIT 1
+    `,
+    [connectionId, userId, ebayUserId, environment]
+  );
+
+  if (!active.rowCount) {
+    throw new Error(
+      "eBay connection was removed during sync."
+    );
+  }
 }
 
 export async function POST() {
@@ -89,12 +186,21 @@ export async function POST() {
         ? "https://api.ebay.com"
         : "https://api.sandbox.ebay.com";
 
-    // STEP 3: Verify deletion-protection configuration.
-    const hashSecret = process.env.EBAY_DELETION_HASH_SECRET;
+    const ebayFinancesBase =
+      environment === "PRODUCTION"
+        ? "https://apiz.ebay.com"
+        : "https://apiz.sandbox.ebay.com";
+
+    // STEP 3: Verify required configuration.
+    const hashSecret =
+      process.env.EBAY_DELETION_HASH_SECRET;
+
     const databaseUrl = process.env.DATABASE_URL;
 
     if (!hashSecret || !databaseUrl) {
-      console.error("Missing deletion-protection configuration.");
+      console.error(
+        "Missing order deletion-protection configuration."
+      );
 
       return NextResponse.json(
         { error: "Order sync protection unavailable." },
@@ -102,13 +208,12 @@ export async function POST() {
       );
     }
 
-    // STEP 4: Retrieve this user's eBay connection.
-    const connections = await db.orm.public.EbayConnection
-      .where({
+    // STEP 4: Retrieve the connected eBay account.
+    const connections =
+      await db.orm.public.EbayConnection.where({
         userId,
         environment,
-      })
-      .all();
+      }).all();
 
     const identifiedConnections = connections.filter(
       (connection) => Boolean(connection.ebayUserId)
@@ -118,7 +223,8 @@ export async function POST() {
       return NextResponse.json(
         {
           error: "No eBay account connected.",
-          message: "Please connect your eBay account before syncing.",
+          message:
+            "Please connect your eBay account before syncing.",
         },
         { status: 401 }
       );
@@ -128,7 +234,8 @@ export async function POST() {
       return NextResponse.json(
         {
           error: "Multiple eBay accounts connected.",
-          message: "Account selection must be configured before syncing.",
+          message:
+            "Account selection must be configured before syncing.",
         },
         { status: 409 }
       );
@@ -146,14 +253,14 @@ export async function POST() {
 
     let accessToken = connection.accessToken;
 
-    // STEP 5: Check whether the access token expired.
+    // STEP 5: Refresh the token when necessary.
     const accessTokenExpiresAt = new Date(
       connection.accessTokenExpiresAt
     ).getTime();
 
     if (
       !Number.isFinite(accessTokenExpiresAt) ||
-      accessTokenExpiresAt <= Date.now() + 60_000
+      accessTokenExpiresAt <= Date.now() + 60000
     ) {
       const refreshTokenExpiresAt = new Date(
         connection.refreshTokenExpiresAt
@@ -166,14 +273,16 @@ export async function POST() {
         return NextResponse.json(
           {
             error: "eBay refresh token expired.",
-            message: "Please reconnect your eBay account.",
+            message:
+              "Please reconnect your eBay account.",
           },
           { status: 401 }
         );
       }
 
       const clientId = process.env.EBAY_CLIENT_ID;
-      const clientSecret = process.env.EBAY_CLIENT_SECRET;
+      const clientSecret =
+        process.env.EBAY_CLIENT_SECRET;
 
       if (!clientId || !clientSecret) {
         return NextResponse.json(
@@ -182,16 +291,21 @@ export async function POST() {
         );
       }
 
-      // STEP 6: Refresh the eBay access token.
       const credentials = Buffer.from(
         `${clientId}:${clientSecret}`
       ).toString("base64");
 
+      // Include the financial scope during refresh.
+      const scopes = [
+        "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly",
+        "https://api.ebay.com/oauth/api_scope/commerce.identity.readonly",
+        "https://api.ebay.com/oauth/api_scope/sell.finances",
+      ];
+
       const body = new URLSearchParams({
         grant_type: "refresh_token",
         refresh_token: connection.refreshToken,
-        scope:
-          "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly",
+        scope: scopes.join(" "),
       });
 
       const tokenResponse = await fetch(
@@ -199,7 +313,8 @@ export async function POST() {
         {
           method: "POST",
           headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
+            "Content-Type":
+              "application/x-www-form-urlencoded",
             Authorization: `Basic ${credentials}`,
           },
           body: body.toString(),
@@ -223,8 +338,10 @@ export async function POST() {
 
         return NextResponse.json(
           {
-            error: "Unable to refresh eBay access token.",
-            message: "Please reconnect your eBay account.",
+            error:
+              "Unable to refresh eBay access token.",
+            message:
+              "Please reconnect your eBay account.",
           },
           { status: 401 }
         );
@@ -236,19 +353,17 @@ export async function POST() {
         Date.now() + tokenData.expires_in * 1000
       ).toISOString();
 
-      await db.orm.public.EbayConnection
-        .where({
-          id: connection.id,
-          userId,
-        })
-        .update({
-          accessToken,
-          accessTokenExpiresAt: newExpiration,
-        });
+      await db.orm.public.EbayConnection.where({
+        id: connection.id,
+        userId,
+      }).update({
+        accessToken,
+        accessTokenExpiresAt: newExpiration,
+      });
     }
 
-    // STEP 7: Fetch orders from eBay.
-    const response = await fetch(
+    // STEP 6: Retrieve the latest 20 eBay orders.
+    const ordersResponse = await fetch(
       `${ebayApiBase}/sell/fulfillment/v1/order?limit=20`,
       {
         headers: {
@@ -259,40 +374,169 @@ export async function POST() {
       }
     );
 
-    if (!response.ok) {
-      console.error("eBay orders request failed:", response.status);
+    if (!ordersResponse.ok) {
+      console.error(
+        "eBay orders request failed:",
+        ordersResponse.status
+      );
 
       return NextResponse.json(
         {
           error: "Failed to retrieve eBay orders.",
-          status: response.status,
+          status: ordersResponse.status,
         },
         { status: 502 }
       );
     }
 
-    const data: EbayOrdersResponse = await response.json();
-    const ebayOrders = data.orders ?? [];
+    const ordersData: EbayOrdersResponse =
+      await ordersResponse.json();
 
-    // STEP 8: Retrieve existing orders.
-    const existingOrders = await db.orm.public.Order
-      .where({
+    const ebayOrders = ordersData.orders ?? [];
+
+    // STEP 7: Retrieve actual SALE transaction fees.
+    const feesByOrder = new Map<string, number>();
+    const seenTransactions = new Set<string>();
+
+    const pageSize = 100;
+    const maxPages = 10;
+
+    let offset = 0;
+    let feesComplete = false;
+
+    for (let page = 0; page < maxPages; page++) {
+      const params = new URLSearchParams({
+        filter: "transactionType:{SALE}",
+        limit: String(pageSize),
+        offset: String(offset),
+      });
+
+      const financesResponse = await fetch(
+        `${ebayFinancesBase}/sell/finances/v1/transaction?${params.toString()}`,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: "application/json",
+          },
+          cache: "no-store",
+        }
+      );
+
+      if (financesResponse.status === 204) {
+        feesComplete = true;
+        break;
+      }
+
+      if (!financesResponse.ok) {
+        console.error(
+          "eBay Finances API request failed:",
+          financesResponse.status
+        );
+
+        return NextResponse.json(
+          {
+            error:
+              "Unable to retrieve eBay selling fees.",
+            message:
+              "No orders were changed. Please try again.",
+          },
+          { status: 502 }
+        );
+      }
+
+      const financesData: EbayTransactionsResponse =
+        await financesResponse.json();
+
+      const transactions =
+        financesData.transactions ?? [];
+
+      for (const transaction of transactions) {
+        if (
+          transaction.transactionType !== "SALE" ||
+          !transaction.orderId ||
+          !transaction.transactionId
+        ) {
+          continue;
+        }
+
+        if (
+          seenTransactions.has(
+            transaction.transactionId
+          )
+        ) {
+          continue;
+        }
+
+        seenTransactions.add(
+          transaction.transactionId
+        );
+
+        const feeCents = parseMoney(
+          transaction.totalFeeAmount
+        );
+
+        if (feeCents === null) {
+          continue;
+        }
+
+        const previousFees =
+          feesByOrder.get(transaction.orderId) ?? 0;
+
+        feesByOrder.set(
+          transaction.orderId,
+          previousFees + feeCents
+        );
+      }
+
+      offset += transactions.length;
+
+      if (
+        transactions.length === 0 ||
+        transactions.length < pageSize ||
+        (
+          typeof financesData.total === "number" &&
+          offset >= financesData.total
+        )
+      ) {
+        feesComplete = true;
+        break;
+      }
+    }
+
+    if (!feesComplete) {
+      return NextResponse.json(
+        {
+          error:
+            "Financial transaction pagination limit reached.",
+          message:
+            "No orders were changed. Increase the pagination limit.",
+        },
+        { status: 503 }
+      );
+    }
+
+    // STEP 8: Retrieve existing ProfitSync orders.
+    const existingOrders =
+      await db.orm.public.Order.where({
         userId,
         ebayUserId,
         environment,
-      })
-      .all();
+      }).all();
 
     const existingIds = new Set(
       existingOrders
         .map((order) => order.ebayOrderId)
-        .filter((id): id is string => id !== null)
+        .filter(
+          (id): id is string => id !== null
+        )
     );
 
     let imported = 0;
     let skipped = 0;
+    let feesUpdated = 0;
+    let feesUnavailable = 0;
 
-    // STEP 9: Connect to PostgreSQL for protected imports.
+    // STEP 9: Open a protected PostgreSQL connection.
     const pool = new Pool({
       connectionString: databaseUrl,
       max: 1,
@@ -303,34 +547,29 @@ export async function POST() {
       const client = await pool.connect();
 
       try {
-        // Process each order in its own transaction.
+        // STEP 10: Import new orders.
         for (const ebayOrder of ebayOrders) {
-          if (!ebayOrder.orderId) {
+          if (
+            !ebayOrder.orderId ||
+            existingIds.has(ebayOrder.orderId)
+          ) {
             skipped++;
             continue;
           }
 
-          if (existingIds.has(ebayOrder.orderId)) {
-            skipped++;
-            continue;
-          }
+          const buyerId =
+            ebayOrder.buyer?.username?.trim();
 
-          const buyerId = ebayOrder.buyer?.username?.trim();
-
-          // Do not import an order if we cannot identify
-          // its buyer for deletion-protection checks.
           if (!buyerId) {
             skipped++;
             continue;
           }
 
-          const total = ebayOrder.pricingSummary?.total?.value;
+          const totalCents = parseMoney(
+            ebayOrder.pricingSummary?.total
+          );
 
-          if (
-            !total ||
-            !Number.isFinite(Number(total)) ||
-            Number(total) < 0
-          ) {
+          if (totalCents === null) {
             skipped++;
             continue;
           }
@@ -341,14 +580,9 @@ export async function POST() {
               .filter(Boolean)
               .join(", ") || "eBay Order";
 
-          // Check both identifier formats for the seller
-          // and buyer, because eBay may return either.
-          const identifierHashes = Array.from(
-            new Set([
-              ...getIdentifierHashes(ebayUserId, hashSecret),
-              ...getIdentifierHashes(buyerId, hashSecret),
-            ])
-          ).sort();
+          const feeCents = feesByOrder.get(
+            ebayOrder.orderId
+          );
 
           let transactionStarted = false;
 
@@ -356,57 +590,30 @@ export async function POST() {
             await client.query("BEGIN");
             transactionStarted = true;
 
-            // Use the same locks as the deletion webhook.
-            // Consistent ordering prevents lock deadlocks.
-            for (const identifierHash of identifierHashes) {
-              await client.query(
-                "SELECT pg_advisory_xact_lock(hashtext($1))",
-                [`${environment}:${identifierHash}`]
+            const deleted =
+              await lockAndCheckIdentifiers(
+                client,
+                environment,
+                [ebayUserId, buyerId],
+                hashSecret
               );
-            }
 
-            // Block imports for deleted buyers or sellers.
-            const deletedAccount = await client.query(
-              `
-              SELECT 1
-              FROM public."ebayDeletedIdentifier"
-              WHERE environment = $1
-                AND "identifierHash" = ANY($2::text[])
-              LIMIT 1
-              `,
-              [environment, identifierHashes]
-            );
-
-            if (deletedAccount.rowCount) {
+            if (deleted) {
               await client.query("COMMIT");
               transactionStarted = false;
               skipped++;
               continue;
             }
 
-            // Check that the seller connection still exists.
-            // A deletion webhook may have disconnected it.
-            const activeConnection = await client.query(
-              `
-              SELECT 1
-              FROM public."ebayConnection"
-              WHERE id = $1
-                AND "userId" = $2
-                AND "ebayUserId" = $3
-                AND environment = $4
-              LIMIT 1
-              `,
-              [connection.id, userId, ebayUserId, environment]
+            await verifyActiveConnection(
+              client,
+              connection.id,
+              userId,
+              ebayUserId,
+              environment
             );
 
-            if (!activeConnection.rowCount) {
-              throw new Error(
-                "eBay connection was removed during sync."
-              );
-            }
-
-            // Recheck duplicates inside the transaction.
-            const duplicateOrder = await client.query(
+            const duplicate = await client.query(
               `
               SELECT 1
               FROM public."order"
@@ -424,16 +631,18 @@ export async function POST() {
               ]
             );
 
-            if (duplicateOrder.rowCount) {
+            if (duplicate.rowCount) {
               await client.query("COMMIT");
               transactionStarted = false;
-              existingIds.add(ebayOrder.orderId);
+
+              existingIds.add(
+                ebayOrder.orderId
+              );
+
               skipped++;
               continue;
             }
 
-            // Insert the order while the deletion locks
-            // are still held.
             await client.query(
               `
               INSERT INTO public."order" (
@@ -464,8 +673,10 @@ export async function POST() {
                 buyerId,
                 environment,
                 item,
-                Number(total).toFixed(2),
-                "0.00",
+                formatMoney(totalCents),
+                feeCents !== undefined
+                  ? formatMoney(feeCents)
+                  : "0.00",
                 null,
                 "COST_NEEDED",
                 ebayOrder.creationDate || null,
@@ -475,22 +686,130 @@ export async function POST() {
             await client.query("COMMIT");
             transactionStarted = false;
 
-            existingIds.add(ebayOrder.orderId);
+            existingIds.add(
+              ebayOrder.orderId
+            );
+
             imported++;
+
+            if (feeCents === undefined) {
+              feesUnavailable++;
+            }
           } catch (error) {
             if (transactionStarted) {
               try {
                 await client.query("ROLLBACK");
               } catch (rollbackError) {
                 console.error(
-                  "Order sync rollback failed:",
+                  "Order import rollback failed:",
                   rollbackError
                 );
               }
             }
 
-            // Stop syncing if deletion protection or
-            // database insertion cannot be completed.
+            throw error;
+          }
+        }
+
+        // STEP 11: Update fees on existing orders.
+        //
+        // Only ebayFees and updatedAt are changed.
+        // Product costs and sale prices are preserved.
+        for (const order of existingOrders) {
+          if (!order.ebayOrderId) {
+            continue;
+          }
+
+          const feeCents = feesByOrder.get(
+            order.ebayOrderId
+          );
+
+          if (feeCents === undefined) {
+            feesUnavailable++;
+            continue;
+          }
+
+          if (!order.ebayBuyerId) {
+            skipped++;
+            continue;
+          }
+
+          let transactionStarted = false;
+
+          try {
+            await client.query("BEGIN");
+            transactionStarted = true;
+
+            const deleted =
+              await lockAndCheckIdentifiers(
+                client,
+                environment,
+                [
+                  ebayUserId,
+                  order.ebayBuyerId,
+                ],
+                hashSecret
+              );
+
+            if (deleted) {
+              await client.query("COMMIT");
+              transactionStarted = false;
+              skipped++;
+              continue;
+            }
+
+            await verifyActiveConnection(
+              client,
+              connection.id,
+              userId,
+              ebayUserId,
+              environment
+            );
+
+            const newFee = formatMoney(feeCents);
+
+            const result = await client.query(
+              `
+              UPDATE public."order"
+              SET "ebayFees" = $1,
+                  "updatedAt" = NOW()
+              WHERE id = $2
+                AND "userId" = $3
+                AND "ebayUserId" = $4
+                AND environment = $5
+                AND "ebayOrderId" = $6
+                AND "ebayBuyerId" = $7
+                AND "ebayFees" IS DISTINCT FROM $1::numeric
+              `,
+              [
+                newFee,
+                order.id,
+                userId,
+                ebayUserId,
+                environment,
+                order.ebayOrderId,
+                order.ebayBuyerId,
+              ]
+            );
+
+            await client.query("COMMIT");
+            transactionStarted = false;
+
+            if (result.rowCount) {
+              feesUpdated++;
+            }
+          } catch (error) {
+            if (transactionStarted) {
+              try {
+                await client.query("ROLLBACK");
+              } catch (rollbackError) {
+                console.error(
+                  "Fee update rollback failed:",
+                  rollbackError
+                );
+              }
+            }
+
             throw error;
           }
         }
@@ -501,21 +820,30 @@ export async function POST() {
       await pool.end();
     }
 
-    // STEP 10: Return the sync results.
+    // STEP 12: Return sync results.
     return NextResponse.json({
       success: true,
       environment,
       found: ebayOrders.length,
       imported,
       skipped,
-      message: `Imported ${imported} new eBay orders.`,
+      feesUpdated,
+      feesUnavailable,
+      financialOrdersMatched: feesByOrder.size,
+      message:
+        `Imported ${imported} new orders. ` +
+        `Updated fees on ${feesUpdated} existing orders.`,
     });
   } catch (error) {
-    console.error("Failed to sync eBay orders:", error);
+    console.error(
+      "Failed to sync eBay orders:",
+      error
+    );
 
     return NextResponse.json(
       {
-        error: "Something went wrong syncing eBay orders.",
+        error:
+          "Something went wrong syncing eBay orders.",
       },
       { status: 500 }
     );
