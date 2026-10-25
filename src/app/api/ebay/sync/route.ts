@@ -1,4 +1,3 @@
-
 import { createHmac } from "crypto";
 import { Pool, type PoolClient } from "pg";
 import { NextResponse } from "next/server";
@@ -8,6 +7,10 @@ import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+// ============================================================
+// TYPES
+// ============================================================
 
 type EbayTokenResponse = {
   access_token?: string;
@@ -66,6 +69,25 @@ type EbayBrowseItem = {
     imageUrl?: string;
   };
 };
+
+// ============================================================
+// CONFIGURATION
+// ============================================================
+
+// Import orders created during the previous 365 days.
+const ORDER_HISTORY_DAYS = 365;
+
+// eBay supports paginated order retrieval.
+const ORDERS_PAGE_SIZE = 200;
+const MAX_ORDER_PAGES = 100;
+
+// Financial transactions are retrieved separately.
+const FINANCES_PAGE_SIZE = 100;
+const MAX_FINANCES_PAGES = 100;
+
+// ============================================================
+// HELPERS
+// ============================================================
 
 function hashIdentifier(
   identifier: string,
@@ -135,6 +157,10 @@ function validImageUrl(value: unknown): string | null {
   }
 }
 
+// ============================================================
+// ACCOUNT DELETION PROTECTION
+// ============================================================
+
 async function lockAndCheckIdentifiers(
   client: PoolClient,
   environment: string,
@@ -197,6 +223,10 @@ async function verifyActiveConnection(
   }
 }
 
+// ============================================================
+// EBAY APPLICATION TOKEN
+// ============================================================
+
 async function getApplicationToken(
   ebayApiBase: string
 ): Promise<string | null> {
@@ -253,6 +283,10 @@ async function getApplicationToken(
   }
 }
 
+// ============================================================
+// LISTING IMAGES
+// ============================================================
+
 async function getListingImage(
   ebayApiBase: string,
   applicationToken: string,
@@ -280,7 +314,10 @@ async function getListingImage(
       lineItem.legacyVariationId
     );
   } else if (lineItem.sku) {
-    params.set("legacy_variation_sku", lineItem.sku);
+    params.set(
+      "legacy_variation_sku",
+      lineItem.sku
+    );
   }
 
   try {
@@ -372,9 +409,246 @@ async function getOrderImage(
   return null;
 }
 
+// ============================================================
+// HISTORICAL ORDER RETRIEVAL
+// ============================================================
+
+async function getHistoricalOrders(
+  ebayApiBase: string,
+  accessToken: string
+): Promise<EbayOrder[]> {
+  const now = new Date();
+
+  const historyStart = new Date(
+    now.getTime() -
+      ORDER_HISTORY_DAYS * 24 * 60 * 60 * 1000
+  );
+
+  // Explicitly request the previous 365 days.
+  // Without this filter, the Fulfillment API may
+  // return only the default recent order history.
+  const creationDateFilter =
+    `creationdate:[${historyStart.toISOString()}..${now.toISOString()}]`;
+
+  const ebayOrders: EbayOrder[] = [];
+  const seenOrderIds = new Set<string>();
+
+  let offset = 0;
+  let complete = false;
+
+  for (
+    let page = 0;
+    page < MAX_ORDER_PAGES;
+    page++
+  ) {
+    const params = new URLSearchParams({
+      filter: creationDateFilter,
+      limit: String(ORDERS_PAGE_SIZE),
+      offset: String(offset),
+    });
+
+    const response = await fetch(
+      `${ebayApiBase}/sell/fulfillment/v1/order?${params.toString()}`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json",
+        },
+        cache: "no-store",
+      }
+    );
+
+    if (!response.ok) {
+      const responseText = await response.text();
+
+      console.error(
+        "Historical eBay orders request failed:",
+        {
+          status: response.status,
+          page,
+          offset,
+          response: responseText.slice(0, 1000),
+        }
+      );
+
+      throw new Error(
+        `eBay historical orders request failed (HTTP ${response.status}).`
+      );
+    }
+
+    const data: EbayOrdersResponse =
+      await response.json();
+
+    const pageOrders = data.orders ?? [];
+
+    for (const order of pageOrders) {
+      if (
+        order.orderId &&
+        !seenOrderIds.has(order.orderId)
+      ) {
+        seenOrderIds.add(order.orderId);
+        ebayOrders.push(order);
+      }
+    }
+
+    offset += pageOrders.length;
+
+    console.log("ProfitSync order history page:", {
+      page: page + 1,
+      retrieved: pageOrders.length,
+      totalImportedFromApi: ebayOrders.length,
+      reportedTotal: data.total,
+    });
+
+    if (
+      pageOrders.length === 0 ||
+      pageOrders.length < ORDERS_PAGE_SIZE ||
+      (
+        typeof data.total === "number" &&
+        offset >= data.total
+      )
+    ) {
+      complete = true;
+      break;
+    }
+  }
+
+  if (!complete) {
+    throw new Error(
+      "Historical order pagination limit reached."
+    );
+  }
+
+  return ebayOrders;
+}
+
+// ============================================================
+// FINANCIAL TRANSACTION RETRIEVAL
+// ============================================================
+
+async function getFinancialFees(
+  ebayFinancesBase: string,
+  accessToken: string
+): Promise<Map<string, number>> {
+  const feesByOrder = new Map<string, number>();
+  const seenTransactions = new Set<string>();
+
+  let offset = 0;
+  let complete = false;
+
+  for (
+    let page = 0;
+    page < MAX_FINANCES_PAGES;
+    page++
+  ) {
+    const params = new URLSearchParams({
+      filter: "transactionType:{SALE}",
+      limit: String(FINANCES_PAGE_SIZE),
+      offset: String(offset),
+    });
+
+    const response = await fetch(
+      `${ebayFinancesBase}/sell/finances/v1/transaction?${params.toString()}`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json",
+        },
+        cache: "no-store",
+      }
+    );
+
+    if (response.status === 204) {
+      complete = true;
+      break;
+    }
+
+    if (!response.ok) {
+      console.error(
+        "eBay Finances API request failed:",
+        response.status
+      );
+
+      throw new Error(
+        `Unable to retrieve eBay selling fees (HTTP ${response.status}).`
+      );
+    }
+
+    const data: EbayTransactionsResponse =
+      await response.json();
+
+    const transactions = data.transactions ?? [];
+
+    for (const transaction of transactions) {
+      if (
+        transaction.transactionType !== "SALE" ||
+        !transaction.orderId ||
+        !transaction.transactionId
+      ) {
+        continue;
+      }
+
+      if (
+        seenTransactions.has(
+          transaction.transactionId
+        )
+      ) {
+        continue;
+      }
+
+      seenTransactions.add(
+        transaction.transactionId
+      );
+
+      const feeCents = parseMoney(
+        transaction.totalFeeAmount
+      );
+
+      if (feeCents === null) {
+        continue;
+      }
+
+      const previousFees =
+        feesByOrder.get(transaction.orderId) ?? 0;
+
+      feesByOrder.set(
+        transaction.orderId,
+        previousFees + feeCents
+      );
+    }
+
+    offset += transactions.length;
+
+    if (
+      transactions.length === 0 ||
+      transactions.length < FINANCES_PAGE_SIZE ||
+      (
+        typeof data.total === "number" &&
+        offset >= data.total
+      )
+    ) {
+      complete = true;
+      break;
+    }
+  }
+
+  if (!complete) {
+    throw new Error(
+      "Financial transaction pagination limit reached."
+    );
+  }
+
+  return feesByOrder;
+}
+
+// ============================================================
+// MAIN SYNC ROUTE
+// ============================================================
+
 export async function POST() {
   try {
     // STEP 1: Authenticate the ProfitSync user.
+
     const supabase = await createClient();
 
     const {
@@ -391,7 +665,8 @@ export async function POST() {
 
     const userId = user.id;
 
-    // STEP 2: Determine the eBay environment.
+    // STEP 2: Determine eBay environment.
+
     const environment =
       process.env.EBAY_ENVIRONMENT === "PRODUCTION"
         ? "PRODUCTION"
@@ -407,7 +682,8 @@ export async function POST() {
         ? "https://apiz.ebay.com"
         : "https://apiz.sandbox.ebay.com";
 
-    // STEP 3: Verify required configuration.
+    // STEP 3: Verify configuration.
+
     const hashSecret =
       process.env.EBAY_DELETION_HASH_SECRET;
 
@@ -419,21 +695,27 @@ export async function POST() {
       );
 
       return NextResponse.json(
-        { error: "Order sync protection unavailable." },
+        {
+          error:
+            "Order sync protection unavailable.",
+        },
         { status: 503 }
       );
     }
 
-    // STEP 4: Retrieve the connected eBay account.
+    // STEP 4: Retrieve connected eBay account.
+
     const connections =
       await db.orm.public.EbayConnection.where({
         userId,
         environment,
       }).all();
 
-    const identifiedConnections = connections.filter(
-      (connection) => Boolean(connection.ebayUserId)
-    );
+    const identifiedConnections =
+      connections.filter(
+        (connection) =>
+          Boolean(connection.ebayUserId)
+      );
 
     if (identifiedConnections.length === 0) {
       return NextResponse.json(
@@ -449,7 +731,8 @@ export async function POST() {
     if (identifiedConnections.length > 1) {
       return NextResponse.json(
         {
-          error: "Multiple eBay accounts connected.",
+          error:
+            "Multiple eBay accounts connected.",
           message:
             "Account selection must be configured before syncing.",
         },
@@ -457,50 +740,67 @@ export async function POST() {
       );
     }
 
-    const connection = identifiedConnections[0];
+    const connection =
+      identifiedConnections[0];
+
     const ebayUserId = connection.ebayUserId;
 
     if (!ebayUserId) {
       return NextResponse.json(
-        { error: "Connected eBay account has no user ID." },
+        {
+          error:
+            "Connected eBay account has no user ID.",
+        },
         { status: 401 }
       );
     }
 
     let accessToken = connection.accessToken;
 
-    // STEP 5: Refresh the seller token if needed.
+    // STEP 5: Refresh access token if needed.
+
     const accessTokenExpiresAt = new Date(
       connection.accessTokenExpiresAt
     ).getTime();
 
     if (
       !Number.isFinite(accessTokenExpiresAt) ||
-      accessTokenExpiresAt <= Date.now() + 60000
+      accessTokenExpiresAt <=
+        Date.now() + 60000
     ) {
       const refreshTokenExpiresAt = new Date(
         connection.refreshTokenExpiresAt
       ).getTime();
 
       if (
-        !Number.isFinite(refreshTokenExpiresAt) ||
+        !Number.isFinite(
+          refreshTokenExpiresAt
+        ) ||
         refreshTokenExpiresAt <= Date.now()
       ) {
         return NextResponse.json(
           {
-            error: "eBay refresh token expired.",
-            message: "Please reconnect your eBay account.",
+            error:
+              "eBay refresh token expired.",
+            message:
+              "Please reconnect your eBay account.",
           },
           { status: 401 }
         );
       }
 
-      const clientId = process.env.EBAY_CLIENT_ID;
-      const clientSecret = process.env.EBAY_CLIENT_SECRET;
+      const clientId =
+        process.env.EBAY_CLIENT_ID;
+
+      const clientSecret =
+        process.env.EBAY_CLIENT_SECRET;
 
       if (!clientId || !clientSecret) {
         return NextResponse.json(
-          { error: "Missing eBay API credentials." },
+          {
+            error:
+              "Missing eBay API credentials.",
+          },
           { status: 500 }
         );
       }
@@ -517,7 +817,8 @@ export async function POST() {
 
       const body = new URLSearchParams({
         grant_type: "refresh_token",
-        refresh_token: connection.refreshToken,
+        refresh_token:
+          connection.refreshToken,
         scope: scopes.join(" "),
       });
 
@@ -528,7 +829,8 @@ export async function POST() {
           headers: {
             "Content-Type":
               "application/x-www-form-urlencoded",
-            Authorization: `Basic ${credentials}`,
+            Authorization:
+              `Basic ${credentials}`,
           },
           body: body.toString(),
           cache: "no-store",
@@ -543,16 +845,22 @@ export async function POST() {
         !tokenData.access_token ||
         !tokenData.expires_in
       ) {
-        console.error("eBay token refresh failed:", {
-          status: tokenResponse.status,
-          error: tokenData.error,
-          description: tokenData.error_description,
-        });
+        console.error(
+          "eBay token refresh failed:",
+          {
+            status: tokenResponse.status,
+            error: tokenData.error,
+            description:
+              tokenData.error_description,
+          }
+        );
 
         return NextResponse.json(
           {
-            error: "Unable to refresh eBay access token.",
-            message: "Please reconnect your eBay account.",
+            error:
+              "Unable to refresh eBay access token.",
+            message:
+              "Please reconnect your eBay account.",
           },
           { status: 401 }
         );
@@ -561,7 +869,8 @@ export async function POST() {
       accessToken = tokenData.access_token;
 
       const newExpiration = new Date(
-        Date.now() + tokenData.expires_in * 1000
+        Date.now() +
+          tokenData.expires_in * 1000
       ).toISOString();
 
       await db.orm.public.EbayConnection.where({
@@ -569,211 +878,37 @@ export async function POST() {
         userId,
       }).update({
         accessToken,
-        accessTokenExpiresAt: newExpiration,
+        accessTokenExpiresAt:
+          newExpiration,
       });
     }
 
-    // STEP 6: Retrieve all available eBay orders.
-    // Use pagination instead of stopping at 20 orders.
-    const ebayOrders: EbayOrder[] = [];
-    const seenOrderIds = new Set<string>();
+    // STEP 6: Retrieve historical orders.
+    //
+    // NEW: Explicit 365-day date filter.
+    // Pagination is handled inside this helper.
 
-    const ordersPageSize = 200;
-    const maxOrderPages = 100;
-
-    let ordersOffset = 0;
-    let ordersComplete = false;
-
-    for (let page = 0; page < maxOrderPages; page++) {
-      const params = new URLSearchParams({
-        limit: String(ordersPageSize),
-        offset: String(ordersOffset),
-      });
-
-      const ordersResponse = await fetch(
-        `${ebayApiBase}/sell/fulfillment/v1/order?${params.toString()}`,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            Accept: "application/json",
-          },
-          cache: "no-store",
-        }
+    const ebayOrders =
+      await getHistoricalOrders(
+        ebayApiBase,
+        accessToken
       );
 
-      if (!ordersResponse.ok) {
-        console.error(
-          "eBay orders request failed:",
-          ordersResponse.status
-        );
+    console.log(
+      "ProfitSync historical orders found:",
+      ebayOrders.length
+    );
 
-        return NextResponse.json(
-          {
-            error: "Failed to retrieve eBay orders.",
-            status: ordersResponse.status,
-          },
-          { status: 502 }
-        );
-      }
+    // STEP 7: Retrieve eBay selling fees.
 
-      const ordersData: EbayOrdersResponse =
-        await ordersResponse.json();
-
-      const pageOrders = ordersData.orders ?? [];
-
-      for (const order of pageOrders) {
-        if (
-          order.orderId &&
-          !seenOrderIds.has(order.orderId)
-        ) {
-          seenOrderIds.add(order.orderId);
-          ebayOrders.push(order);
-        }
-      }
-
-      ordersOffset += pageOrders.length;
-
-      if (
-        pageOrders.length === 0 ||
-        pageOrders.length < ordersPageSize ||
-        (
-          typeof ordersData.total === "number" &&
-          ordersOffset >= ordersData.total
-        )
-      ) {
-        ordersComplete = true;
-        break;
-      }
-    }
-
-    if (!ordersComplete) {
-      return NextResponse.json(
-        {
-          error: "eBay order pagination limit reached.",
-          message:
-            "No orders were changed. The order history exceeds the configured page limit.",
-        },
-        { status: 503 }
+    const feesByOrder =
+      await getFinancialFees(
+        ebayFinancesBase,
+        accessToken
       );
-    }
-
-    // STEP 7: Retrieve actual eBay SALE transaction fees.
-    const feesByOrder = new Map<string, number>();
-    const seenTransactions = new Set<string>();
-
-    const pageSize = 100;
-    const maxPages = 100;
-
-    let offset = 0;
-    let feesComplete = false;
-
-    for (let page = 0; page < maxPages; page++) {
-      const params = new URLSearchParams({
-        filter: "transactionType:{SALE}",
-        limit: String(pageSize),
-        offset: String(offset),
-      });
-
-      const financesResponse = await fetch(
-        `${ebayFinancesBase}/sell/finances/v1/transaction?${params.toString()}`,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            Accept: "application/json",
-          },
-          cache: "no-store",
-        }
-      );
-
-      if (financesResponse.status === 204) {
-        feesComplete = true;
-        break;
-      }
-
-      if (!financesResponse.ok) {
-        console.error(
-          "eBay Finances API request failed:",
-          financesResponse.status
-        );
-
-        return NextResponse.json(
-          {
-            error: "Unable to retrieve eBay selling fees.",
-            message:
-              "No orders were changed. Please try again.",
-          },
-          { status: 502 }
-        );
-      }
-
-      const financesData: EbayTransactionsResponse =
-        await financesResponse.json();
-
-      const transactions =
-        financesData.transactions ?? [];
-
-      for (const transaction of transactions) {
-        if (
-          transaction.transactionType !== "SALE" ||
-          !transaction.orderId ||
-          !transaction.transactionId
-        ) {
-          continue;
-        }
-
-        if (
-          seenTransactions.has(transaction.transactionId)
-        ) {
-          continue;
-        }
-
-        seenTransactions.add(transaction.transactionId);
-
-        const feeCents = parseMoney(
-          transaction.totalFeeAmount
-        );
-
-        if (feeCents === null) {
-          continue;
-        }
-
-        const previousFees =
-          feesByOrder.get(transaction.orderId) ?? 0;
-
-        feesByOrder.set(
-          transaction.orderId,
-          previousFees + feeCents
-        );
-      }
-
-      offset += transactions.length;
-
-      if (
-        transactions.length === 0 ||
-        transactions.length < pageSize ||
-        (
-          typeof financesData.total === "number" &&
-          offset >= financesData.total
-        )
-      ) {
-        feesComplete = true;
-        break;
-      }
-    }
-
-    if (!feesComplete) {
-      return NextResponse.json(
-        {
-          error:
-            "Financial transaction pagination limit reached.",
-          message:
-            "No orders were changed. Increase the pagination limit.",
-        },
-        { status: 503 }
-      );
-    }
 
     // STEP 8: Retrieve existing ProfitSync orders.
+
     const existingOrders =
       await db.orm.public.Order.where({
         userId,
@@ -784,57 +919,87 @@ export async function POST() {
     const existingIds = new Set(
       existingOrders
         .map((order) => order.ebayOrderId)
-        .filter((id): id is string => id !== null)
+        .filter(
+          (id): id is string =>
+            id !== null
+        )
     );
 
-    // STEP 9: Retrieve listing images.
-    // Image failures must not prevent order syncing.
     const existingByEbayId = new Map(
       existingOrders
-        .filter((order) => Boolean(order.ebayOrderId))
-        .map((order) => [order.ebayOrderId, order])
+        .filter((order) =>
+          Boolean(order.ebayOrderId)
+        )
+        .map((order) => [
+          order.ebayOrderId,
+          order,
+        ])
     );
 
-    const ordersNeedingImages = ebayOrders.filter(
-      (order) => {
-        const existing = existingByEbayId.get(
-          order.orderId
+    // STEP 9: Find orders needing images.
+
+    const ordersNeedingImages =
+      ebayOrders.filter((order) => {
+        const existing =
+          existingByEbayId.get(
+            order.orderId
+          );
+
+        return (
+          !existing ||
+          !existing.imageUrl
         );
-
-        return !existing || !existing.imageUrl;
-      }
-    );
+      });
 
     const needsApplicationToken =
       ordersNeedingImages.some((order) =>
         order.lineItems?.some(
           (lineItem) =>
-            Boolean(lineItem.legacyItemId) &&
-            !validImageUrl(lineItem.image?.imageUrl)
+            Boolean(
+              lineItem.legacyItemId
+            ) &&
+            !validImageUrl(
+              lineItem.image?.imageUrl
+            )
         )
       );
 
-    const applicationToken = needsApplicationToken
-      ? await getApplicationToken(ebayApiBase)
-      : null;
+    const applicationToken =
+      needsApplicationToken
+        ? await getApplicationToken(
+            ebayApiBase
+          )
+        : null;
 
     const imageCache =
-      new Map<string, string | null>();
+      new Map<
+        string,
+        string | null
+      >();
 
-    const imagesByOrder = new Map<string, string>();
+    const imagesByOrder =
+      new Map<string, string>();
 
-    for (const order of ordersNeedingImages) {
-      const imageUrl = await getOrderImage(
-        ebayApiBase,
-        applicationToken,
-        order,
-        imageCache
-      );
+    for (
+      const order of ordersNeedingImages
+    ) {
+      const imageUrl =
+        await getOrderImage(
+          ebayApiBase,
+          applicationToken,
+          order,
+          imageCache
+        );
 
       if (imageUrl) {
-        imagesByOrder.set(order.orderId, imageUrl);
+        imagesByOrder.set(
+          order.orderId,
+          imageUrl
+        );
       }
     }
+
+    // STEP 10: Prepare sync counters.
 
     let imported = 0;
     let skipped = 0;
@@ -843,7 +1008,8 @@ export async function POST() {
     let imagesUpdated = 0;
     let imagesImported = 0;
 
-    // STEP 10: Open protected PostgreSQL connection.
+    // STEP 11: Connect to PostgreSQL.
+
     const pool = new Pool({
       connectionString: databaseUrl,
       max: 1,
@@ -851,14 +1017,22 @@ export async function POST() {
     });
 
     try {
-      const client = await pool.connect();
+      const client =
+        await pool.connect();
 
       try {
-        // STEP 11: Import new orders.
-        for (const ebayOrder of ebayOrders) {
+        // ====================================================
+        // IMPORT NEW ORDERS
+        // ====================================================
+
+        for (
+          const ebayOrder of ebayOrders
+        ) {
           if (
             !ebayOrder.orderId ||
-            existingIds.has(ebayOrder.orderId)
+            existingIds.has(
+              ebayOrder.orderId
+            )
           ) {
             skipped++;
             continue;
@@ -872,9 +1046,11 @@ export async function POST() {
             continue;
           }
 
-          const totalCents = parseMoney(
-            ebayOrder.pricingSummary?.total
-          );
+          const totalCents =
+            parseMoney(
+              ebayOrder.pricingSummary
+                ?.total
+            );
 
           if (totalCents === null) {
             skipped++;
@@ -883,33 +1059,49 @@ export async function POST() {
 
           const item =
             ebayOrder.lineItems
-              ?.map((lineItem) => lineItem.title)
+              ?.map(
+                (lineItem) =>
+                  lineItem.title
+              )
               .filter(Boolean)
-              .join(", ") || "eBay Order";
+              .join(", ") ||
+            "eBay Order";
 
-          const feeCents = feesByOrder.get(
-            ebayOrder.orderId
-          );
+          const feeCents =
+            feesByOrder.get(
+              ebayOrder.orderId
+            );
 
           const imageUrl =
-            imagesByOrder.get(ebayOrder.orderId) ?? null;
+            imagesByOrder.get(
+              ebayOrder.orderId
+            ) ?? null;
 
           let transactionStarted = false;
 
           try {
             await client.query("BEGIN");
+
             transactionStarted = true;
+
+            // Respect account deletion requests.
 
             const deleted =
               await lockAndCheckIdentifiers(
                 client,
                 environment,
-                [ebayUserId, buyerId],
+                [
+                  ebayUserId,
+                  buyerId,
+                ],
                 hashSecret
               );
 
             if (deleted) {
-              await client.query("COMMIT");
+              await client.query(
+                "COMMIT"
+              );
+
               transactionStarted = false;
               skipped++;
               continue;
@@ -923,35 +1115,50 @@ export async function POST() {
               environment
             );
 
-            const duplicate = await client.query(
-              `
-                SELECT 1
-                FROM public."order"
-                WHERE "userId" = $1
-                  AND "ebayUserId" = $2
-                  AND environment = $3
-                  AND "ebayOrderId" = $4
-                LIMIT 1
-              `,
-              [
-                userId,
-                ebayUserId,
-                environment,
-                ebayOrder.orderId,
-              ]
-            );
+            // Double-check for duplicates.
+
+            const duplicate =
+              await client.query(
+                `
+                  SELECT 1
+                  FROM public."order"
+                  WHERE "userId" = $1
+                    AND "ebayUserId" = $2
+                    AND environment = $3
+                    AND "ebayOrderId" = $4
+                  LIMIT 1
+                `,
+                [
+                  userId,
+                  ebayUserId,
+                  environment,
+                  ebayOrder.orderId,
+                ]
+              );
 
             if (duplicate.rowCount) {
-              await client.query("COMMIT");
+              await client.query(
+                "COMMIT"
+              );
+
               transactionStarted = false;
 
-              existingIds.add(ebayOrder.orderId);
+              existingIds.add(
+                ebayOrder.orderId
+              );
+
               skipped++;
               continue;
             }
 
-            // FIXED: 13 columns, 12 parameters,
-            // and NOW() for updatedAt.
+            // Insert the new order.
+            //
+            // Product cost stays NULL until
+            // the user enters it manually.
+            //
+            // 13 columns:
+            // 12 parameters + NOW().
+
             await client.query(
               `
                 INSERT INTO public."order" (
@@ -972,7 +1179,10 @@ export async function POST() {
                 VALUES (
                   $1, $2, $3, $4, $5, $6,
                   $7, $8, $9, $10, $11,
-                  COALESCE($12::timestamptz, NOW()),
+                  COALESCE(
+                    $12::timestamptz,
+                    NOW()
+                  ),
                   NOW()
                 )
               `,
@@ -983,35 +1193,54 @@ export async function POST() {
                 buyerId,
                 environment,
                 item,
-                formatMoney(totalCents),
+                formatMoney(
+                  totalCents
+                ),
                 feeCents !== undefined
-                  ? formatMoney(feeCents)
+                  ? formatMoney(
+                      feeCents
+                    )
                   : "0.00",
                 null,
                 imageUrl,
                 "COST_NEEDED",
-                ebayOrder.creationDate || null,
+                ebayOrder.creationDate ||
+                  null,
               ]
             );
 
-            await client.query("COMMIT");
+            await client.query(
+              "COMMIT"
+            );
+
             transactionStarted = false;
 
-            existingIds.add(ebayOrder.orderId);
+            existingIds.add(
+              ebayOrder.orderId
+            );
+
             imported++;
 
             if (imageUrl) {
               imagesImported++;
             }
 
-            if (feeCents === undefined) {
+            if (
+              feeCents === undefined
+            ) {
               feesUnavailable++;
             }
           } catch (error) {
-            if (transactionStarted) {
+            if (
+              transactionStarted
+            ) {
               try {
-                await client.query("ROLLBACK");
-              } catch (rollbackError) {
+                await client.query(
+                  "ROLLBACK"
+                );
+              } catch (
+                rollbackError
+              ) {
                 console.error(
                   "Order import rollback failed:",
                   rollbackError
@@ -1023,21 +1252,35 @@ export async function POST() {
           }
         }
 
-        // STEP 12: Update fees and images on existing orders.
-        // Never overwrite manually entered product costs.
-        // Never change previously saved sale prices.
-        for (const order of existingOrders) {
+        // ====================================================
+        // UPDATE EXISTING ORDERS
+        // ====================================================
+        //
+        // Update fees and missing images.
+        //
+        // DO NOT overwrite:
+        // - Product costs
+        // - Sale prices
+        // - Order status
+        // - Order dates
+        // ====================================================
+
+        for (
+          const order of existingOrders
+        ) {
           if (!order.ebayOrderId) {
             continue;
           }
 
-          const feeCents = feesByOrder.get(
-            order.ebayOrderId
-          );
+          const feeCents =
+            feesByOrder.get(
+              order.ebayOrderId
+            );
 
-          const imageUrl = imagesByOrder.get(
-            order.ebayOrderId
-          );
+          const imageUrl =
+            imagesByOrder.get(
+              order.ebayOrderId
+            );
 
           if (
             feeCents === undefined &&
@@ -1047,7 +1290,9 @@ export async function POST() {
             continue;
           }
 
-          if (!order.ebayBuyerId) {
+          if (
+            !order.ebayBuyerId
+          ) {
             skipped++;
             continue;
           }
@@ -1055,7 +1300,10 @@ export async function POST() {
           let transactionStarted = false;
 
           try {
-            await client.query("BEGIN");
+            await client.query(
+              "BEGIN"
+            );
+
             transactionStarted = true;
 
             const deleted =
@@ -1070,7 +1318,10 @@ export async function POST() {
               );
 
             if (deleted) {
-              await client.query("COMMIT");
+              await client.query(
+                "COMMIT"
+              );
+
               transactionStarted = false;
               skipped++;
               continue;
@@ -1084,55 +1335,72 @@ export async function POST() {
               environment
             );
 
-            const result = await client.query(
-              `
-                UPDATE public."order"
-                SET
-                  "ebayFees" =
-                    COALESCE($1::numeric, "ebayFees"),
-                  "imageUrl" =
-                    COALESCE("imageUrl", $2::text),
-                  "updatedAt" = NOW()
-                WHERE id = $3
-                  AND "userId" = $4
-                  AND "ebayUserId" = $5
-                  AND environment = $6
-                  AND "ebayOrderId" = $7
-                  AND "ebayBuyerId" = $8
-                  AND (
-                    (
-                      $1::numeric IS NOT NULL
-                      AND "ebayFees"
-                        IS DISTINCT FROM $1::numeric
+            const result =
+              await client.query(
+                `
+                  UPDATE public."order"
+                  SET
+                    "ebayFees" =
+                      COALESCE(
+                        $1::numeric,
+                        "ebayFees"
+                      ),
+                    "imageUrl" =
+                      COALESCE(
+                        "imageUrl",
+                        $2::text
+                      ),
+                    "updatedAt" = NOW()
+                  WHERE id = $3
+                    AND "userId" = $4
+                    AND "ebayUserId" = $5
+                    AND environment = $6
+                    AND "ebayOrderId" = $7
+                    AND "ebayBuyerId" = $8
+                    AND (
+                      (
+                        $1::numeric IS NOT NULL
+                        AND "ebayFees"
+                          IS DISTINCT FROM
+                          $1::numeric
+                      )
+                      OR (
+                        "imageUrl" IS NULL
+                        AND $2::text IS NOT NULL
+                      )
                     )
-                    OR (
-                      "imageUrl" IS NULL
-                      AND $2::text IS NOT NULL
-                    )
-                  )
-                RETURNING "imageUrl"
-              `,
-              [
-                feeCents !== undefined
-                  ? formatMoney(feeCents)
-                  : null,
-                imageUrl ?? null,
-                order.id,
-                userId,
-                ebayUserId,
-                environment,
-                order.ebayOrderId,
-                order.ebayBuyerId,
-              ]
+                  RETURNING "imageUrl"
+                `,
+                [
+                  feeCents !== undefined
+                    ? formatMoney(
+                        feeCents
+                      )
+                    : null,
+                  imageUrl ?? null,
+                  order.id,
+                  userId,
+                  ebayUserId,
+                  environment,
+                  order.ebayOrderId,
+                  order.ebayBuyerId,
+                ]
+              );
+
+            await client.query(
+              "COMMIT"
             );
 
-            await client.query("COMMIT");
             transactionStarted = false;
 
-            if (result.rowCount) {
+            if (
+              result.rowCount
+            ) {
               if (
                 feeCents !== undefined &&
-                Number(order.ebayFees) !==
+                Number(
+                  order.ebayFees
+                ) !==
                   feeCents / 100
               ) {
                 feesUpdated++;
@@ -1146,14 +1414,22 @@ export async function POST() {
               }
             }
 
-            if (feeCents === undefined) {
+            if (
+              feeCents === undefined
+            ) {
               feesUnavailable++;
             }
           } catch (error) {
-            if (transactionStarted) {
+            if (
+              transactionStarted
+            ) {
               try {
-                await client.query("ROLLBACK");
-              } catch (rollbackError) {
+                await client.query(
+                  "ROLLBACK"
+                );
+              } catch (
+                rollbackError
+              ) {
                 console.error(
                   "Order update rollback failed:",
                   rollbackError
@@ -1171,19 +1447,32 @@ export async function POST() {
       await pool.end();
     }
 
-    // STEP 13: Return sync results.
+    // ========================================================
+    // SYNC COMPLETE
+    // ========================================================
+
     return NextResponse.json({
       success: true,
       environment,
+
+      historyDays: ORDER_HISTORY_DAYS,
+
       found: ebayOrders.length,
       imported,
       skipped,
+
       feesUpdated,
       feesUnavailable,
+
       imagesImported,
       imagesUpdated,
-      financialOrdersMatched: feesByOrder.size,
+
+      financialOrdersMatched:
+        feesByOrder.size,
+
       message:
+        `Found ${ebayOrders.length} eBay orders ` +
+        `from the past ${ORDER_HISTORY_DAYS} days. ` +
         `Imported ${imported} new orders. ` +
         `Updated fees on ${feesUpdated} existing orders. ` +
         `Added ${imagesImported + imagesUpdated} listing images.`,
@@ -1198,6 +1487,10 @@ export async function POST() {
       {
         error:
           "Something went wrong syncing eBay orders.",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unknown synchronization error.",
       },
       { status: 500 }
     );
