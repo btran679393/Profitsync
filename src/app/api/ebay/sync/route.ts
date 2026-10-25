@@ -4,27 +4,19 @@ import { Pool, type PoolClient } from "pg";
 
 import { NextResponse } from "next/server";
 
-
-
 import { db } from "@/prisma/db";
 
 import { createClient } from "@/lib/supabase/server";
 
-
-
 export const runtime = "nodejs";
 
 export const dynamic = "force-dynamic";
-
-
 
 // ============================================================
 
 // TYPES
 
 // ============================================================
-
-
 
 type Money = {
 
@@ -33,8 +25,6 @@ type Money = {
   currency?: string;
 
 };
-
-
 
 type EbayTokenResponse = {
 
@@ -47,8 +37,6 @@ type EbayTokenResponse = {
   error_description?: string;
 
 };
-
-
 
 type EbayLineItem = {
 
@@ -70,23 +58,17 @@ type EbayLineItem = {
 
 };
 
-
-
 type EbayOrder = {
 
   orderId: string;
 
   creationDate?: string;
 
-
-
   buyer?: {
 
     username?: string;
 
   };
-
-
 
   pricingSummary?: {
 
@@ -112,13 +94,9 @@ type EbayOrder = {
 
   };
 
-
-
   lineItems?: EbayLineItem[];
 
 };
-
-
 
 type EbayOrdersResponse = {
 
@@ -127,8 +105,6 @@ type EbayOrdersResponse = {
   orders?: EbayOrder[];
 
 };
-
-
 
 type EbayTransaction = {
 
@@ -148,8 +124,6 @@ type EbayTransaction = {
 
 };
 
-
-
 type EbayTransactionsResponse = {
 
   total?: number;
@@ -157,8 +131,6 @@ type EbayTransactionsResponse = {
   transactions?: EbayTransaction[];
 
 };
-
-
 
 type EbayBrowseItem = {
 
@@ -170,8 +142,6 @@ type EbayBrowseItem = {
 
 };
 
-
-
 type RefundInfo = {
 
   amountCents: number;
@@ -180,8 +150,6 @@ type RefundInfo = {
 
 };
 
-
-
 type FinancialData = {
 
   feesByOrder: Map<string, number>;
@@ -189,8 +157,6 @@ type FinancialData = {
   refundsByOrder: Map<string, RefundInfo>;
 
 };
-
-
 
 type ExistingOrder = {
 
@@ -205,8 +171,6 @@ type ExistingOrder = {
   imageUrl: string | null;
 
 };
-
-
 
 type PreparedOrder = {
 
@@ -228,39 +192,27 @@ type PreparedOrder = {
 
 };
 
-
-
 // ============================================================
 
 // CONFIGURATION
 
 // ============================================================
 
-
-
 const ORDER_HISTORY_DAYS = 365;
-
-
 
 const ORDERS_PAGE_SIZE = 200;
 
 const MAX_ORDER_PAGES = 100;
 
-
-
 const FINANCES_PAGE_SIZE = 100;
 
 const MAX_FINANCES_PAGES = 100;
-
-
 
 // ============================================================
 
 // MONEY HELPERS
 
 // ============================================================
-
-
 
 function parseMoney(value?: Money): number | null {
 
@@ -269,8 +221,6 @@ function parseMoney(value?: Money): number | null {
     return null;
 
   }
-
-
 
   if (
 
@@ -284,25 +234,17 @@ function parseMoney(value?: Money): number | null {
 
   }
 
-
-
   const cents = Math.round(Number(value.value) * 100);
-
-
 
   return Number.isSafeInteger(cents) ? cents : null;
 
 }
-
-
 
 function formatMoney(cents: number): string {
 
   return (cents / 100).toFixed(2);
 
 }
-
-
 
 function getRefundStatus(
 
@@ -318,66 +260,90 @@ function getRefundStatus(
 
   }
 
-
-
   if (refundCents >= saleCents - 1) {
 
     return "REFUNDED";
 
   }
 
-
-
   return "PARTIALLY_REFUNDED";
 
 }
 
-
-
 // Prefer the buyer-facing Fulfillment refund details over the seller-side
+
 // Finances REFUND transaction amount (which can exclude reversed fees).
+
 // Normalize the buyer refund to the sale-price basis used by ProfitSync;
+
 // marketplace-collected sales tax must not inflate seller revenue refunds.
+
 function getBuyerRefundInfo(order: EbayOrder): RefundInfo | undefined {
+
   const entries = order.paymentSummary?.refunds;
+
   if (!entries?.length) return undefined;
 
   let buyerRefundCents = 0;
+
   let refundedAt: string | null = null;
+
   const seen = new Set<string>();
 
   for (const entry of entries) {
+
     // Never treat a pending or failed refund as completed.
+
     if (entry.refundStatus !== "REFUNDED") continue;
+
     if (entry.refundId && seen.has(entry.refundId)) continue;
+
     if (entry.refundId) seen.add(entry.refundId);
 
     const cents = parseMoney(entry.refundAmount);
+
     if (cents === null || cents <= 0) continue;
+
     buyerRefundCents += cents;
 
     if (entry.refundDate) {
+
       const parsed = new Date(entry.refundDate);
+
       if (!Number.isNaN(parsed.getTime())) {
+
         const iso = parsed.toISOString();
+
         if (!refundedAt || iso > refundedAt) refundedAt = iso;
+
       }
+
     }
+
   }
 
   if (buyerRefundCents <= 0) return undefined;
+
   const saleCents = parseMoney(order.pricingSummary?.total);
+
   if (saleCents === null || saleCents <= 0) return undefined;
 
   const taxCents = Math.max(0, parseMoney(order.pricingSummary?.tax) ?? 0);
+
   const buyerTotalCents = saleCents + taxCents;
+
   // When the buyer receives a full refund (including tax), record the
+
   // full sale as refunded, so the order becomes REFUNDED.
+
   const amountCents = buyerRefundCents >= buyerTotalCents - 1
+
     ? saleCents
+
     : Math.min(saleCents, Math.round(buyerRefundCents * saleCents / buyerTotalCents));
 
   return { amountCents, refundedAt };
+
 }
 
 // ============================================================
@@ -385,8 +351,6 @@ function getBuyerRefundInfo(order: EbayOrder): RefundInfo | undefined {
 // IMAGE HELPERS
 
 // ============================================================
-
-
 
 function validImageUrl(value: unknown): string | null {
 
@@ -396,13 +360,9 @@ function validImageUrl(value: unknown): string | null {
 
   }
 
-
-
   try {
 
     const url = new URL(value);
-
-
 
     if (url.protocol !== "https:") {
 
@@ -410,11 +370,7 @@ function validImageUrl(value: unknown): string | null {
 
     }
 
-
-
     const hostname = url.hostname.toLowerCase();
-
-
 
     if (
 
@@ -428,8 +384,6 @@ function validImageUrl(value: unknown): string | null {
 
     }
 
-
-
     return url.toString();
 
   } catch {
@@ -439,8 +393,6 @@ function validImageUrl(value: unknown): string | null {
   }
 
 }
-
-
 
 async function getApplicationToken(
 
@@ -452,23 +404,17 @@ async function getApplicationToken(
 
   const clientSecret = process.env.EBAY_CLIENT_SECRET;
 
-
-
   if (!clientId || !clientSecret) {
 
     return null;
 
   }
 
-
-
   const credentials = Buffer.from(
 
     `${clientId}:${clientSecret}`
 
   ).toString("base64");
-
-
 
   const body = new URLSearchParams({
 
@@ -477,8 +423,6 @@ async function getApplicationToken(
     scope: "https://api.ebay.com/oauth/api_scope",
 
   });
-
-
 
   try {
 
@@ -508,8 +452,6 @@ async function getApplicationToken(
 
     );
 
-
-
     if (!response.ok) {
 
       console.error(
@@ -520,17 +462,11 @@ async function getApplicationToken(
 
       );
 
-
-
       return null;
 
     }
 
-
-
     const data: EbayTokenResponse = await response.json();
-
-
 
     return data.access_token ?? null;
 
@@ -544,15 +480,11 @@ async function getApplicationToken(
 
     );
 
-
-
     return null;
 
   }
 
 }
-
-
 
 async function getListingImage(
 
@@ -570,15 +502,11 @@ async function getListingImage(
 
   );
 
-
-
   if (directImage) {
 
     return directImage;
 
   }
-
-
 
   if (!lineItem.legacyItemId) {
 
@@ -586,15 +514,11 @@ async function getListingImage(
 
   }
 
-
-
   const params = new URLSearchParams({
 
     legacy_item_id: lineItem.legacyItemId,
 
   });
-
-
 
   if (lineItem.legacyVariationId) {
 
@@ -611,8 +535,6 @@ async function getListingImage(
     params.set("legacy_variation_sku", lineItem.sku);
 
   }
-
-
 
   try {
 
@@ -638,8 +560,6 @@ async function getListingImage(
 
     );
 
-
-
     if (!response.ok) {
 
       console.warn(
@@ -652,17 +572,11 @@ async function getListingImage(
 
       );
 
-
-
       return null;
 
     }
 
-
-
     const item: EbayBrowseItem = await response.json();
-
-
 
     return validImageUrl(item.image?.imageUrl);
 
@@ -676,15 +590,11 @@ async function getListingImage(
 
     );
 
-
-
     return null;
 
   }
 
 }
-
-
 
 async function getOrderImage(
 
@@ -706,23 +616,17 @@ async function getOrderImage(
 
     );
 
-
-
     if (directImage) {
 
       return directImage;
 
     }
 
-
-
     if (!lineItem.legacyItemId || !applicationToken) {
 
       continue;
 
     }
-
-
 
     const cacheKey = [
 
@@ -734,13 +638,9 @@ async function getOrderImage(
 
     ].join(":");
 
-
-
     if (imageCache.has(cacheKey)) {
 
       const cached = imageCache.get(cacheKey);
-
-
 
       if (cached) {
 
@@ -748,13 +648,9 @@ async function getOrderImage(
 
       }
 
-
-
       continue;
 
     }
-
-
 
     const imageUrl = await getListingImage(
 
@@ -766,11 +662,7 @@ async function getOrderImage(
 
     );
 
-
-
     imageCache.set(cacheKey, imageUrl);
-
-
 
     if (imageUrl) {
 
@@ -780,21 +672,15 @@ async function getOrderImage(
 
   }
 
-
-
   return null;
 
 }
-
-
 
 // ============================================================
 
 // ACCOUNT DELETION PROTECTION
 
 // ============================================================
-
-
 
 function hashIdentifier(
 
@@ -814,8 +700,6 @@ function hashIdentifier(
 
 }
 
-
-
 function getIdentifierHashes(
 
   identifier: string,
@@ -833,8 +717,6 @@ function getIdentifierHashes(
   ];
 
 }
-
-
 
 async function lockAndCheckIdentifiers(
 
@@ -862,8 +744,6 @@ async function lockAndCheckIdentifiers(
 
   ).sort();
 
-
-
   for (const hash of hashes) {
 
     await client.query(
@@ -875,8 +755,6 @@ async function lockAndCheckIdentifiers(
     );
 
   }
-
-
 
   const deleted = await client.query(
 
@@ -898,13 +776,9 @@ async function lockAndCheckIdentifiers(
 
   );
 
-
-
   return Boolean(deleted.rowCount);
 
 }
-
-
 
 async function verifyActiveConnection(
 
@@ -944,8 +818,6 @@ async function verifyActiveConnection(
 
   );
 
-
-
   if (!active.rowCount) {
 
     throw new Error(
@@ -958,15 +830,11 @@ async function verifyActiveConnection(
 
 }
 
-
-
 // ============================================================
 
 // HISTORICAL ORDER RETRIEVAL
 
 // ============================================================
-
-
 
 async function getHistoricalOrders(
 
@@ -978,8 +846,6 @@ async function getHistoricalOrders(
 
   const now = new Date();
 
-
-
   const historyStart = new Date(
 
     now.getTime() -
@@ -988,25 +854,17 @@ async function getHistoricalOrders(
 
   );
 
-
-
   const creationDateFilter =
 
     `creationdate:[${historyStart.toISOString()}..${now.toISOString()}]`;
-
-
 
   const ebayOrders: EbayOrder[] = [];
 
   const seenOrderIds = new Set<string>();
 
-
-
   let offset = 0;
 
   let complete = false;
-
-
 
   for (
 
@@ -1028,8 +886,6 @@ async function getHistoricalOrders(
 
     });
 
-
-
     const response = await fetch(
 
       `${ebayApiBase}/sell/fulfillment/v1/order?${params.toString()}`,
@@ -1050,13 +906,9 @@ async function getHistoricalOrders(
 
     );
 
-
-
     if (!response.ok) {
 
       const responseText = await response.text();
-
-
 
       console.error(
 
@@ -1076,8 +928,6 @@ async function getHistoricalOrders(
 
       );
 
-
-
       throw new Error(
 
         `eBay historical orders request failed (HTTP ${response.status}).`
@@ -1086,17 +936,11 @@ async function getHistoricalOrders(
 
     }
 
-
-
     const data: EbayOrdersResponse =
 
       await response.json();
 
-
-
     const pageOrders = data.orders ?? [];
-
-
 
     for (const order of pageOrders) {
 
@@ -1116,11 +960,7 @@ async function getHistoricalOrders(
 
     }
 
-
-
     offset += pageOrders.length;
-
-
 
     console.log("ProfitSync order history page:", {
 
@@ -1133,8 +973,6 @@ async function getHistoricalOrders(
       reportedTotal: data.total,
 
     });
-
-
 
     if (
 
@@ -1160,8 +998,6 @@ async function getHistoricalOrders(
 
   }
 
-
-
   if (!complete) {
 
     throw new Error(
@@ -1172,13 +1008,9 @@ async function getHistoricalOrders(
 
   }
 
-
-
   return ebayOrders;
 
 }
-
-
 
 // ============================================================
 
@@ -1198,8 +1030,6 @@ async function getHistoricalOrders(
 
 // ============================================================
 
-
-
 async function getFinancialTransactions(
 
   ebayFinancesBase: string,
@@ -1214,13 +1044,9 @@ async function getFinancialTransactions(
 
   const seenTransactions = new Set<string>();
 
-
-
   let offset = 0;
 
   let complete = false;
-
-
 
   for (
 
@@ -1242,8 +1068,6 @@ async function getFinancialTransactions(
 
     });
 
-
-
     const response = await fetch(
 
       `${ebayFinancesBase}/sell/finances/v1/transaction?${params.toString()}`,
@@ -1264,8 +1088,6 @@ async function getFinancialTransactions(
 
     );
 
-
-
     if (response.status === 204) {
 
       complete = true;
@@ -1274,13 +1096,9 @@ async function getFinancialTransactions(
 
     }
 
-
-
     if (!response.ok) {
 
       const responseText = await response.text();
-
-
 
       console.error(
 
@@ -1296,8 +1114,6 @@ async function getFinancialTransactions(
 
       );
 
-
-
       throw new Error(
 
         `Unable to retrieve eBay ${transactionType} transactions (HTTP ${response.status}).`
@@ -1306,17 +1122,11 @@ async function getFinancialTransactions(
 
     }
 
-
-
     const data: EbayTransactionsResponse =
 
       await response.json();
 
-
-
     const pageTransactions = data.transactions ?? [];
-
-
 
     for (const transaction of pageTransactions) {
 
@@ -1334,8 +1144,6 @@ async function getFinancialTransactions(
 
       }
 
-
-
       if (
 
         seenTransactions.has(transaction.transactionId)
@@ -1346,19 +1154,13 @@ async function getFinancialTransactions(
 
       }
 
-
-
       seenTransactions.add(transaction.transactionId);
 
       transactions.push(transaction);
 
     }
 
-
-
     offset += pageTransactions.length;
-
-
 
     if (
 
@@ -1384,8 +1186,6 @@ async function getFinancialTransactions(
 
   }
 
-
-
   if (!complete) {
 
     throw new Error(
@@ -1396,13 +1196,9 @@ async function getFinancialTransactions(
 
   }
 
-
-
   return transactions;
 
 }
-
-
 
 async function getFinancialData(
 
@@ -1416,15 +1212,11 @@ async function getFinancialData(
 
   const refundsByOrder = new Map<string, RefundInfo>();
 
-
-
   // --------------------------------------------
 
   // Retrieve SALE transactions
 
   // --------------------------------------------
-
-
 
   const sales = await getFinancialTransactions(
 
@@ -1436,8 +1228,6 @@ async function getFinancialData(
 
   );
 
-
-
   for (const transaction of sales) {
 
     if (!transaction.orderId) {
@@ -1446,15 +1236,11 @@ async function getFinancialData(
 
     }
 
-
-
     const feeCents = parseMoney(
 
       transaction.totalFeeAmount
 
     );
-
-
 
     if (feeCents === null) {
 
@@ -1462,13 +1248,9 @@ async function getFinancialData(
 
     }
 
-
-
     const previousFees =
 
       feesByOrder.get(transaction.orderId) ?? 0;
-
-
 
     feesByOrder.set(
 
@@ -1480,15 +1262,11 @@ async function getFinancialData(
 
   }
 
-
-
   // --------------------------------------------
 
   // Retrieve REFUND transactions
 
   // --------------------------------------------
-
-
 
   const refunds = await getFinancialTransactions(
 
@@ -1500,8 +1278,6 @@ async function getFinancialData(
 
   );
 
-
-
   for (const transaction of refunds) {
 
     if (!transaction.orderId) {
@@ -1510,15 +1286,11 @@ async function getFinancialData(
 
     }
 
-
-
     const parsedAmount = parseMoney(
 
       transaction.amount
 
     );
-
-
 
     if (parsedAmount === null) {
 
@@ -1530,13 +1302,9 @@ async function getFinancialData(
 
       );
 
-
-
       continue;
 
     }
-
-
 
     // eBay refund transactions may represent
 
@@ -1544,15 +1312,11 @@ async function getFinancialData(
 
     const refundCents = Math.abs(parsedAmount);
 
-
-
     if (refundCents <= 0) {
 
       continue;
 
     }
-
-
 
     const previous = refundsByOrder.get(
 
@@ -1560,19 +1324,13 @@ async function getFinancialData(
 
     );
 
-
-
     const previousAmount =
 
       previous?.amountCents ?? 0;
 
-
-
     let refundedAt =
 
       previous?.refundedAt ?? null;
-
-
 
     if (transaction.transactionDate) {
 
@@ -1582,13 +1340,9 @@ async function getFinancialData(
 
       );
 
-
-
       if (!Number.isNaN(date.getTime())) {
 
         const currentDate = date.toISOString();
-
-
 
         if (
 
@@ -1605,8 +1359,6 @@ async function getFinancialData(
       }
 
     }
-
-
 
     refundsByOrder.set(
 
@@ -1626,8 +1378,6 @@ async function getFinancialData(
 
   }
 
-
-
   console.log("ProfitSync financial data:", {
 
     saleTransactions: sales.length,
@@ -1640,8 +1390,6 @@ async function getFinancialData(
 
   });
 
-
-
   return {
 
     feesByOrder,
@@ -1652,15 +1400,11 @@ async function getFinancialData(
 
 }
 
-
-
 // ============================================================
 
 // DATABASE HELPERS
 
 // ============================================================
-
-
 
 async function insertOrder(
 
@@ -1680,8 +1424,6 @@ async function insertOrder(
 
     order.refund?.amountCents ?? 0;
 
-
-
   const status = getRefundStatus(
 
     order.saleCents,
@@ -1689,8 +1431,6 @@ async function insertOrder(
     refundCents
 
   );
-
-
 
   await client.query(
 
@@ -1786,8 +1526,6 @@ async function insertOrder(
 
 }
 
-
-
 async function updateExistingOrder(
 
   client: PoolClient,
@@ -1826,8 +1564,6 @@ async function updateExistingOrder(
 
         ),
 
-
-
         "imageUrl" = COALESCE(
 
           "imageUrl",
@@ -1836,22 +1572,21 @@ async function updateExistingOrder(
 
         ),
 
-
-
         "refundAmount" = CASE
 
           WHEN $3::numeric IS NOT NULL
 
           THEN CASE
+
             WHEN $11::boolean THEN $3::numeric
+
             ELSE GREATEST(COALESCE("refundAmount", 0), $3::numeric)
+
           END
 
           ELSE "refundAmount"
 
         END,
-
-
 
         "refundedAt" = CASE
 
@@ -1869,8 +1604,6 @@ async function updateExistingOrder(
 
         END,
 
-
-
         status = CASE
 
           WHEN $3::numeric IS NOT NULL
@@ -1878,8 +1611,6 @@ async function updateExistingOrder(
             AND $3::numeric >= "salePrice" - 0.01
 
           THEN 'REFUNDED'
-
-
 
           WHEN $3::numeric IS NOT NULL
 
@@ -1889,17 +1620,11 @@ async function updateExistingOrder(
 
           THEN 'PARTIALLY_REFUNDED'
 
-
-
           ELSE status
 
         END,
 
-
-
         "updatedAt" = NOW()
-
-
 
       WHERE id = $5
 
@@ -1912,8 +1637,6 @@ async function updateExistingOrder(
         AND "ebayOrderId" = $9
 
         AND "ebayBuyerId" = $10
-
-
 
         AND (
 
@@ -1940,6 +1663,7 @@ async function updateExistingOrder(
             AND (
 
               COALESCE("refundAmount", 0) < $3::numeric
+
               OR ($11::boolean AND "refundAmount" IS DISTINCT FROM $3::numeric)
 
               OR (
@@ -1971,8 +1695,6 @@ async function updateExistingOrder(
           )
 
         )
-
-
 
       RETURNING id
 
@@ -2014,21 +1736,15 @@ async function updateExistingOrder(
 
   );
 
-
-
   return Boolean(result.rowCount);
 
 }
-
-
 
 // ============================================================
 
 // MAIN SYNC ROUTE
 
 // ============================================================
-
-
 
 export async function POST() {
 
@@ -2040,11 +1756,7 @@ export async function POST() {
 
     // --------------------------------------------------------
 
-
-
     const supabase = await createClient();
-
-
 
     const {
 
@@ -2053,8 +1765,6 @@ export async function POST() {
       error: authError,
 
     } = await supabase.auth.getUser();
-
-
 
     if (authError || !user) {
 
@@ -2072,19 +1782,13 @@ export async function POST() {
 
     }
 
-
-
     const userId = user.id;
-
-
 
     // --------------------------------------------------------
 
     // STEP 2: Determine eBay environment
 
     // --------------------------------------------------------
-
-
 
     const environment =
 
@@ -2094,8 +1798,6 @@ export async function POST() {
 
         : "SANDBOX";
 
-
-
     const ebayApiBase =
 
       environment === "PRODUCTION"
@@ -2103,8 +1805,6 @@ export async function POST() {
         ? "https://api.ebay.com"
 
         : "https://api.sandbox.ebay.com";
-
-
 
     const ebayFinancesBase =
 
@@ -2114,27 +1814,19 @@ export async function POST() {
 
         : "https://apiz.sandbox.ebay.com";
 
-
-
     // --------------------------------------------------------
 
     // STEP 3: Verify configuration
 
     // --------------------------------------------------------
 
-
-
     const hashSecret =
 
       process.env.EBAY_DELETION_HASH_SECRET;
 
-
-
     const databaseUrl =
 
       process.env.DATABASE_URL;
-
-
 
     if (!hashSecret || !databaseUrl) {
 
@@ -2143,8 +1835,6 @@ export async function POST() {
         "Missing order sync configuration."
 
       );
-
-
 
       return NextResponse.json(
 
@@ -2162,15 +1852,11 @@ export async function POST() {
 
     }
 
-
-
     // --------------------------------------------------------
 
     // STEP 4: Retrieve connected eBay account
 
     // --------------------------------------------------------
-
-
 
     const connections =
 
@@ -2182,8 +1868,6 @@ export async function POST() {
 
       }).all();
 
-
-
     const identifiedConnections =
 
       connections.filter(
@@ -2193,8 +1877,6 @@ export async function POST() {
           Boolean(connection.ebayUserId)
 
       );
-
-
 
     if (identifiedConnections.length === 0) {
 
@@ -2215,8 +1897,6 @@ export async function POST() {
       );
 
     }
-
-
 
     if (identifiedConnections.length > 1) {
 
@@ -2240,19 +1920,13 @@ export async function POST() {
 
     }
 
-
-
     const connection =
 
       identifiedConnections[0];
 
-
-
     const ebayUserId =
 
       connection.ebayUserId;
-
-
 
     if (!ebayUserId) {
 
@@ -2272,13 +1946,9 @@ export async function POST() {
 
     }
 
-
-
     let accessToken =
 
       connection.accessToken;
-
-
 
     // --------------------------------------------------------
 
@@ -2286,15 +1956,11 @@ export async function POST() {
 
     // --------------------------------------------------------
 
-
-
     const accessTokenExpiresAt = new Date(
 
       connection.accessTokenExpiresAt
 
     ).getTime();
-
-
 
     if (
 
@@ -2309,8 +1975,6 @@ export async function POST() {
         connection.refreshTokenExpiresAt
 
       ).getTime();
-
-
 
       if (
 
@@ -2340,19 +2004,13 @@ export async function POST() {
 
       }
 
-
-
       const clientId =
 
         process.env.EBAY_CLIENT_ID;
 
-
-
       const clientSecret =
 
         process.env.EBAY_CLIENT_SECRET;
-
-
 
       if (!clientId || !clientSecret) {
 
@@ -2372,15 +2030,11 @@ export async function POST() {
 
       }
 
-
-
       const credentials = Buffer.from(
 
         `${clientId}:${clientSecret}`
 
       ).toString("base64");
-
-
 
       const scopes = [
 
@@ -2391,8 +2045,6 @@ export async function POST() {
         "https://api.ebay.com/oauth/api_scope/sell.finances",
 
       ];
-
-
 
       const body = new URLSearchParams({
 
@@ -2405,8 +2057,6 @@ export async function POST() {
         scope: scopes.join(" "),
 
       });
-
-
 
       const tokenResponse = await fetch(
 
@@ -2436,13 +2086,9 @@ export async function POST() {
 
       );
 
-
-
       const tokenData: EbayTokenResponse =
 
         await tokenResponse.json();
-
-
 
       if (
 
@@ -2472,8 +2118,6 @@ export async function POST() {
 
         );
 
-
-
         return NextResponse.json(
 
           {
@@ -2494,13 +2138,9 @@ export async function POST() {
 
       }
 
-
-
       accessToken =
 
         tokenData.access_token;
-
-
 
       const newExpiration = new Date(
 
@@ -2509,8 +2149,6 @@ export async function POST() {
           tokenData.expires_in * 1000
 
       ).toISOString();
-
-
 
       await db.orm.public.EbayConnection.where({
 
@@ -2530,15 +2168,11 @@ export async function POST() {
 
     }
 
-
-
     // --------------------------------------------------------
 
     // STEP 6: Retrieve historical eBay orders
 
     // --------------------------------------------------------
-
-
 
     const ebayOrders =
 
@@ -2550,8 +2184,6 @@ export async function POST() {
 
       );
 
-
-
     console.log(
 
       "ProfitSync historical orders found:",
@@ -2560,15 +2192,11 @@ export async function POST() {
 
     );
 
-
-
     // --------------------------------------------------------
 
     // STEP 7: Retrieve fees and refunds
 
     // --------------------------------------------------------
-
-
 
     const financialData =
 
@@ -2580,8 +2208,6 @@ export async function POST() {
 
       );
 
-
-
     const {
 
       feesByOrder,
@@ -2591,22 +2217,30 @@ export async function POST() {
     } = financialData;
 
     // Order-level buyer refunds take priority over seller-side adjustments.
+
     const buyerRefundsByOrder = new Map<string, RefundInfo>();
+
     for (const order of ebayOrders) {
+
       const refund = getBuyerRefundInfo(order);
+
       if (refund) buyerRefundsByOrder.set(order.orderId, refund);
+
     }
 
-
-
+    console.log("ProfitSync refund source summary:", {
+      ordersWithBuyerRefunds: buyerRefundsByOrder.size,
+      ordersWithFinancialRefunds: refundsByOrder.size,
+      ordersUsingFinancialFallback: Array.from(refundsByOrder.keys()).filter(
+        (orderId) => !buyerRefundsByOrder.has(orderId)
+      ).length,
+    });
 
     // --------------------------------------------------------
 
     // STEP 8: Retrieve existing ProfitSync orders
 
     // --------------------------------------------------------
-
-
 
     const existingOrders =
 
@@ -2619,8 +2253,6 @@ export async function POST() {
         environment,
 
       }).all();
-
-
 
     const existingIds = new Set(
 
@@ -2637,8 +2269,6 @@ export async function POST() {
         )
 
     );
-
-
 
     const existingByEbayId = new Map(
 
@@ -2660,15 +2290,11 @@ export async function POST() {
 
     );
 
-
-
     // --------------------------------------------------------
 
     // STEP 9: Retrieve missing listing images
 
     // --------------------------------------------------------
-
-
 
     const ordersNeedingImages =
 
@@ -2682,8 +2308,6 @@ export async function POST() {
 
           );
 
-
-
         return (
 
           !existing ||
@@ -2693,8 +2317,6 @@ export async function POST() {
         );
 
       });
-
-
 
     const needsApplicationToken =
 
@@ -2716,8 +2338,6 @@ export async function POST() {
 
       );
 
-
-
     const applicationToken =
 
       needsApplicationToken
@@ -2730,19 +2350,13 @@ export async function POST() {
 
         : null;
 
-
-
     const imageCache =
 
       new Map<string, string | null>();
 
-
-
     const imagesByOrder =
 
       new Map<string, string>();
-
-
 
     for (const order of ordersNeedingImages) {
 
@@ -2760,8 +2374,6 @@ export async function POST() {
 
         );
 
-
-
       if (imageUrl) {
 
         imagesByOrder.set(
@@ -2776,53 +2388,37 @@ export async function POST() {
 
     }
 
-
-
     // --------------------------------------------------------
 
     // STEP 10: Prepare counters
 
     // --------------------------------------------------------
 
-
-
     let imported = 0;
 
     let skipped = 0;
-
-
 
     let feesUpdated = 0;
 
     let feesUnavailable = 0;
 
-
-
     let imagesImported = 0;
 
     let imagesUpdated = 0;
-
-
 
     let refundedImported = 0;
 
     let refundsUpdated = 0;
 
-
-
     let fullyRefunded = 0;
 
     let partiallyRefunded = 0;
-
-
 
     // --------------------------------------------------------
 
     // STEP 11: Connect to PostgreSQL
 
     // --------------------------------------------------------
-
-
 
     const pool = new Pool({
 
@@ -2834,15 +2430,11 @@ export async function POST() {
 
     });
 
-
-
     try {
 
       const client =
 
         await pool.connect();
-
-
 
       try {
 
@@ -2851,8 +2443,6 @@ export async function POST() {
         // IMPORT NEW ORDERS
 
         // ====================================================
-
-
 
         for (const ebayOrder of ebayOrders) {
 
@@ -2870,13 +2460,9 @@ export async function POST() {
 
           }
 
-
-
           const buyerId =
 
             ebayOrder.buyer?.username?.trim();
-
-
 
           if (!buyerId) {
 
@@ -2886,8 +2472,6 @@ export async function POST() {
 
           }
 
-
-
           const totalCents =
 
             parseMoney(
@@ -2896,8 +2480,6 @@ export async function POST() {
 
             );
 
-
-
           if (totalCents === null) {
 
             skipped++;
@@ -2905,8 +2487,6 @@ export async function POST() {
             continue;
 
           }
-
-
 
           const item =
 
@@ -2924,8 +2504,6 @@ export async function POST() {
 
             "eBay Order";
 
-
-
           const feeCents =
 
             feesByOrder.get(
@@ -2934,14 +2512,11 @@ export async function POST() {
 
             );
 
-
-
           const refund =
 
             buyerRefundsByOrder.get(ebayOrder.orderId) ??
+
             refundsByOrder.get(ebayOrder.orderId);
-
-
 
           const imageUrl =
 
@@ -2950,8 +2525,6 @@ export async function POST() {
               ebayOrder.orderId
 
             ) ?? null;
-
-
 
           const preparedOrder: PreparedOrder = {
 
@@ -2975,11 +2548,7 @@ export async function POST() {
 
           };
 
-
-
           let transactionStarted = false;
-
-
 
           try {
 
@@ -2987,11 +2556,7 @@ export async function POST() {
 
             transactionStarted = true;
 
-
-
             // Respect account deletion requests.
-
-
 
             const deleted =
 
@@ -3013,23 +2578,17 @@ export async function POST() {
 
               );
 
-
-
             if (deleted) {
 
               await client.query("COMMIT");
 
               transactionStarted = false;
 
-
-
               skipped++;
 
               continue;
 
             }
-
-
 
             await verifyActiveConnection(
 
@@ -3045,11 +2604,7 @@ export async function POST() {
 
             );
 
-
-
             // Prevent duplicate imports.
-
-
 
             const duplicate =
 
@@ -3087,15 +2642,11 @@ export async function POST() {
 
               );
 
-
-
             if (duplicate.rowCount) {
 
               await client.query("COMMIT");
 
               transactionStarted = false;
-
-
 
               existingIds.add(
 
@@ -3103,19 +2654,13 @@ export async function POST() {
 
               );
 
-
-
               skipped++;
 
               continue;
 
             }
 
-
-
             // Insert order and refund information.
-
-
 
             await insertOrder(
 
@@ -3131,13 +2676,9 @@ export async function POST() {
 
             );
 
-
-
             await client.query("COMMIT");
 
             transactionStarted = false;
-
-
 
             existingIds.add(
 
@@ -3145,11 +2686,7 @@ export async function POST() {
 
             );
 
-
-
             imported++;
-
-
 
             if (imageUrl) {
 
@@ -3157,21 +2694,15 @@ export async function POST() {
 
             }
 
-
-
             if (feeCents === undefined) {
 
               feesUnavailable++;
 
             }
 
-
-
             if (refund && refund.amountCents > 0) {
 
               refundedImported++;
-
-
 
               const status = getRefundStatus(
 
@@ -3180,8 +2711,6 @@ export async function POST() {
                 refund.amountCents
 
               );
-
-
 
               if (status === "REFUNDED") {
 
@@ -3217,15 +2746,11 @@ export async function POST() {
 
             }
 
-
-
             throw error;
 
           }
 
         }
-
-
 
         // ====================================================
 
@@ -3257,8 +2782,6 @@ export async function POST() {
 
         // ====================================================
 
-
-
         for (const order of existingOrders) {
 
           if (!order.ebayOrderId) {
@@ -3266,8 +2789,6 @@ export async function POST() {
             continue;
 
           }
-
-
 
           const feeCents =
 
@@ -3277,8 +2798,6 @@ export async function POST() {
 
             );
 
-
-
           const imageUrl =
 
             imagesByOrder.get(
@@ -3287,14 +2806,11 @@ export async function POST() {
 
             ) ?? null;
 
-
-
           const refund =
 
             buyerRefundsByOrder.get(order.ebayOrderId) ??
+
             refundsByOrder.get(order.ebayOrderId);
-
-
 
           if (
 
@@ -3312,8 +2828,6 @@ export async function POST() {
 
           }
 
-
-
           if (!order.ebayBuyerId) {
 
             skipped++;
@@ -3322,19 +2836,13 @@ export async function POST() {
 
           }
 
-
-
           let transactionStarted = false;
-
-
 
           try {
 
             await client.query("BEGIN");
 
             transactionStarted = true;
-
-
 
             const deleted =
 
@@ -3356,23 +2864,17 @@ export async function POST() {
 
               );
 
-
-
             if (deleted) {
 
               await client.query("COMMIT");
 
               transactionStarted = false;
 
-
-
               skipped++;
 
               continue;
 
             }
-
-
 
             await verifyActiveConnection(
 
@@ -3387,8 +2889,6 @@ export async function POST() {
               environment
 
             );
-
-
 
             const updated =
 
@@ -3414,13 +2914,9 @@ export async function POST() {
 
               );
 
-
-
             await client.query("COMMIT");
 
             transactionStarted = false;
-
-
 
             if (updated) {
 
@@ -3438,8 +2934,6 @@ export async function POST() {
 
               }
 
-
-
               if (
 
                 imageUrl &&
@@ -3451,8 +2945,6 @@ export async function POST() {
                 imagesUpdated++;
 
               }
-
-
 
               if (
 
@@ -3467,8 +2959,6 @@ export async function POST() {
               }
 
             }
-
-
 
             if (feeCents === undefined) {
 
@@ -3498,8 +2988,6 @@ export async function POST() {
 
             }
 
-
-
             throw error;
 
           }
@@ -3518,15 +3006,11 @@ export async function POST() {
 
     }
 
-
-
     // ========================================================
 
     // SYNC COMPLETE
 
     // ========================================================
-
-
 
     return NextResponse.json({
 
@@ -3534,11 +3018,7 @@ export async function POST() {
 
       environment,
 
-
-
       historyDays: ORDER_HISTORY_DAYS,
-
-
 
       found: ebayOrders.length,
 
@@ -3546,43 +3026,29 @@ export async function POST() {
 
       skipped,
 
-
-
       feesUpdated,
 
       feesUnavailable,
-
-
 
       imagesImported,
 
       imagesUpdated,
 
-
-
       refundedImported,
 
       refundsUpdated,
-
-
 
       fullyRefunded,
 
       partiallyRefunded,
 
-
-
       financialOrdersMatched:
 
         feesByOrder.size,
 
-
-
       refundedOrdersMatched:
 
         refundsByOrder.size,
-
-
 
       message:
 
@@ -3611,8 +3077,6 @@ export async function POST() {
       error
 
     );
-
-
 
     return NextResponse.json(
 
