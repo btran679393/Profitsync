@@ -23,6 +23,8 @@ type Order = {
   ebayFees: number;
   productCost: string;
   savedProductCost: string;
+  refundAmount: number;
+  refundedAt: string | null;
   status: string;
   orderDate: string | null;
 };
@@ -35,6 +37,8 @@ type ApiOrder = {
   salePrice: string | number;
   ebayFees: string | number;
   productCost: string | number | null;
+  refundAmount?: string | number | null;
+  refundedAt?: string | null;
   status: string;
   orderDate?: string | null;
 };
@@ -47,11 +51,13 @@ type SyncResponse = {
   feesUpdated?: number;
   imagesImported?: number;
   imagesUpdated?: number;
+  refundedImported?: number;
+  refundsUpdated?: number;
   error?: string;
   message?: string;
 };
 
-type OrderFilter = "all" | "completed" | "pending";
+type OrderFilter = "all" | "completed" | "pending" | "refunded";
 
 type DateRange = "7d" | "30d" | "90d" | "all";
 
@@ -137,22 +143,40 @@ function formatOrders(data: ApiOrder[]): Order[] {
       ebayFees: Number(order.ebayFees),
       productCost: cost,
       savedProductCost: cost,
+      refundAmount: Math.max(0, Number(order.refundAmount ?? 0) || 0),
+      refundedAt: order.refundedAt ?? null,
       status: order.status,
       orderDate: order.orderDate ?? null,
     };
   });
 }
 
-function getOrderProfit(order: Order) {
-  if (!isValidCost(order.savedProductCost)) {
-    return null;
-  }
+function isFullyRefunded(order: Order) {
+  return order.status === "REFUNDED" ||
+    (order.refundAmount > 0 && order.refundAmount >= order.salePrice - 0.01);
+}
 
-  return (
-    order.salePrice -
-    order.ebayFees -
-    Number(order.savedProductCost)
-  );
+function isPartiallyRefunded(order: Order) {
+  return !isFullyRefunded(order) &&
+    (order.status === "PARTIALLY_REFUNDED" || order.refundAmount > 0);
+}
+
+function requiresProductCost(order: Order) {
+  return !isFullyRefunded(order);
+}
+
+function hasRecordedCost(order: Order) {
+  return isValidCost(order.savedProductCost);
+}
+
+function getOrderProfit(order: Order) {
+  // A fully refunded order is removed from profit reporting.
+  // Its retained seller fees or other sunk costs may still need
+  // separate accounting outside this dashboard.
+  if (isFullyRefunded(order)) return null;
+  if (!hasRecordedCost(order)) return null;
+  return order.salePrice - order.refundAmount -
+    order.ebayFees - Number(order.savedProductCost);
 }
 
 function getDateRangeStart(
@@ -795,16 +819,17 @@ function OrderDetailsPanel({
   onChangeCost: (id: number, value: string) => void;
   onSaveCost: (id: number, value: string) => Promise<void>;
 }) {
+  const refunded = isFullyRefunded(order);
+  const partialRefund = isPartiallyRefunded(order);
   const hasSavedCost = isValidCost(
     order.savedProductCost
   );
 
   const validDraft = isValidCost(order.productCost);
 
-  const calculatedProfit = validDraft
-    ? order.salePrice -
-      order.ebayFees -
-      Number(order.productCost)
+  const calculatedProfit = !refunded && validDraft
+    ? order.salePrice - order.refundAmount -
+      order.ebayFees - Number(order.productCost)
     : null;
 
   const profitMargin =
@@ -818,7 +843,7 @@ function OrderDetailsPanel({
       Number(order.savedProductCost) !==
         Number(order.productCost));
 
-  const disabled = saving || syncing || loggingOut;
+  const disabled = saving || syncing || loggingOut || refunded;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -877,7 +902,15 @@ function OrderDetailsPanel({
           </div>
 
           <div className="mt-7">
-            {hasSavedCost ? (
+            {refunded ? (
+              <span className="inline-flex items-center gap-2 rounded-full bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-400">
+                Refunded — No Product Cost Needed
+              </span>
+            ) : partialRefund ? (
+              <span className="inline-flex items-center gap-2 rounded-full bg-orange-500/10 px-3 py-1.5 text-xs font-medium text-orange-400">
+                Partially Refunded
+              </span>
+            ) : hasSavedCost ? (
               <span className="inline-flex items-center gap-2 rounded-full bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-400">
                 <Icon name="check" size={14} />
                 Product Cost Recorded
@@ -916,7 +949,13 @@ function OrderDetailsPanel({
                 </span>
               </div>
 
-              <div className="border-t border-white/[0.07] pt-5">
+              {order.refundAmount > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-slate-400">Refund Issued</span>
+                  <span className="text-sm font-semibold text-orange-400">−{money(order.refundAmount)}</span>
+                </div>
+              )}
+              {!refunded && <div className="border-t border-white/[0.07] pt-5">
                 <label
                   htmlFor="detail-product-cost"
                   className="mb-3 block text-sm font-semibold text-slate-300"
@@ -964,7 +1003,7 @@ function OrderDetailsPanel({
                   ProfitSync calculates your profit
                   automatically.
                 </p>
-              </div>
+              </div>}
             </div>
           </div>
 
@@ -982,13 +1021,13 @@ function OrderDetailsPanel({
                     : "text-red-400"
               }`}
             >
-              {calculatedProfit === null
+              {refunded ? "Excluded (Refunded)" : calculatedProfit === null
                 ? "Pending"
                 : money(calculatedProfit)}
             </p>
 
             <p className="mt-2 text-xs text-slate-500">
-              {profitMargin === null
+              {refunded ? "Fully refunded orders are excluded from profit totals." : profitMargin === null
                 ? "Add a product cost to calculate margin."
                 : `Profit Margin: ${profitMargin.toFixed(1)}%`}
             </p>
@@ -1002,11 +1041,9 @@ function OrderDetailsPanel({
             />
 
             <p className="text-xs leading-5 text-slate-400">
-              Profit estimates subtract recorded eBay
-              fees and product costs from the sale
-              price. Shipping expenses, refunds, or
-              other unrecorded costs may affect actual
-              profit.
+              Profit estimates subtract refunds, recorded eBay fees,
+              and product costs. Fully refunded sales are excluded.
+              Shipping expenses and nonrefundable fees may still affect actual profit.
             </p>
           </div>
         </div>
@@ -1024,6 +1061,7 @@ function OrderDetailsPanel({
 
             {saving
               ? "Saving..."
+              : refunded ? "No Cost Needed (Refunded)"
               : hasChanges
                 ? "Save Product Cost"
                 : "No Unsaved Changes"}
@@ -1178,7 +1216,7 @@ export default function Home() {
       (order) => order.id === id
     );
 
-    if (!currentOrder) return;
+    if (!currentOrder || isFullyRefunded(currentOrder)) return;
 
     if (!isValidCost(value)) {
       setOrders((currentOrders) =>
@@ -1234,7 +1272,7 @@ export default function Home() {
                 ...order,
                 productCost: formattedCost,
                 savedProductCost: formattedCost,
-                status: "COMPLETED",
+                status: isPartiallyRefunded(order) ? "PARTIALLY_REFUNDED" : "COMPLETED",
               }
             : order
         )
@@ -1309,6 +1347,12 @@ export default function Home() {
             : "") +
           (data.imagesUpdated !== undefined
             ? ` Updated ${data.imagesUpdated} listing images.`
+            : "") +
+          (data.refundedImported !== undefined
+            ? ` Imported ${data.refundedImported} refunded orders.`
+            : "") +
+          (data.refundsUpdated !== undefined
+            ? ` Updated refunds on ${data.refundsUpdated} existing orders.`
             : "")
       );
     } catch (error) {
@@ -1343,57 +1387,29 @@ export default function Home() {
   // ----------------------------------------------------------
 
   const totals = useMemo(() => {
-    const totalRevenue = periodOrders.reduce(
-      (sum, order) => sum + order.salePrice,
-      0
+    const activeOrders = periodOrders.filter((order) => !isFullyRefunded(order));
+    const refundedCount = periodOrders.length - activeOrders.length;
+    const totalRevenue = activeOrders.reduce(
+      (sum, order) => sum + Math.max(0, order.salePrice - order.refundAmount), 0
     );
-
-    const totalFees = periodOrders.reduce(
-      (sum, order) => sum + order.ebayFees,
-      0
-    );
-
-    const completedOrders = periodOrders.filter(
-      (order) => isValidCost(order.savedProductCost)
-    );
-
+    const totalFees = activeOrders.reduce((sum, order) => sum + order.ebayFees, 0);
+    const completedOrders = activeOrders.filter(hasRecordedCost);
     const totalProductCosts = completedOrders.reduce(
-      (sum, order) =>
-        sum + Number(order.savedProductCost),
-      0
+      (sum, order) => sum + Number(order.savedProductCost), 0
     );
-
     const netProfit = completedOrders.reduce(
-      (sum, order) =>
-        sum +
-        order.salePrice -
-        order.ebayFees -
-        Number(order.savedProductCost),
-      0
+      (sum, order) => sum + (getOrderProfit(order) ?? 0), 0
     );
-
     const completedRevenue = completedOrders.reduce(
-      (sum, order) => sum + order.salePrice,
-      0
+      (sum, order) => sum + Math.max(0, order.salePrice - order.refundAmount), 0
     );
-
-    const profitMargin =
-      completedRevenue > 0
-        ? (netProfit / completedRevenue) * 100
-        : 0;
-
-    const pendingOrders =
-      periodOrders.length - completedOrders.length;
-
+    const profitMargin = completedRevenue > 0
+      ? (netProfit / completedRevenue) * 100 : 0;
+    const pendingOrders = activeOrders.length - completedOrders.length;
     return {
-      totalRevenue,
-      totalFees,
-      totalProductCosts,
-      netProfit,
-      profitMargin,
-      completedCount: completedOrders.length,
-      pendingOrders,
-      orderCount: periodOrders.length,
+      totalRevenue, totalFees, totalProductCosts, netProfit, profitMargin,
+      completedCount: completedOrders.length, pendingOrders,
+      orderCount: activeOrders.length, refundedCount,
     };
   }, [periodOrders]);
 
@@ -1411,14 +1427,14 @@ export default function Home() {
           .toLowerCase()
           .includes(query);
 
-      const completed = isValidCost(
-        order.savedProductCost
-      );
+      const refunded = isFullyRefunded(order);
+      const completed = !refunded && hasRecordedCost(order);
 
       const matchesFilter =
         filter === "all" ||
         (filter === "completed" && completed) ||
-        (filter === "pending" && !completed);
+        (filter === "pending" && !completed && !refunded) ||
+        (filter === "refunded" && refunded);
 
       return matchesSearch && matchesFilter;
     });
@@ -1447,6 +1463,7 @@ export default function Home() {
 
     const completedOrders = periodOrders.filter(
       (order) =>
+        !isFullyRefunded(order) &&
         isValidCost(order.savedProductCost) &&
         order.orderDate &&
         !Number.isNaN(
@@ -1921,7 +1938,7 @@ export default function Home() {
             <MetricCard
               title="Total Revenue"
               value={money(totals.totalRevenue)}
-              description={`${totals.orderCount} orders in ${dateRangeLabel(dateRange).toLowerCase()}`}
+              description={`${totals.orderCount} active orders; ${totals.refundedCount} refunded excluded`}
               icon="wallet"
               accent="blue"
             />
@@ -1929,7 +1946,7 @@ export default function Home() {
             <MetricCard
               title="eBay Fees"
               value={money(totals.totalFees)}
-              description="Recorded fees for selected orders"
+              description="Fees on non-fully-refunded orders"
               icon="dollar"
               accent="amber"
             />
@@ -2273,6 +2290,7 @@ export default function Home() {
                       <option value="pending">
                         Cost Needed
                       </option>
+                      <option value="refunded">Refunded</option>
                     </select>
 
                     <Icon
@@ -2297,6 +2315,9 @@ export default function Home() {
 
                 <span className="rounded-lg bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-400">
                   {totals.pendingOrders} need costs
+                </span>
+                <span className="rounded-lg bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-400">
+                  {totals.refundedCount} refunded
                 </span>
               </div>
             </div>
@@ -2358,6 +2379,8 @@ export default function Home() {
 
                   <tbody className="divide-y divide-white/[0.06]">
                     {filteredOrders.map((order) => {
+                      const refunded = isFullyRefunded(order);
+                      const partialRefund = isPartiallyRefunded(order);
                       const hasSavedCost = isValidCost(
                         order.savedProductCost
                       );
@@ -2367,9 +2390,8 @@ export default function Home() {
                       );
 
                       const profit =
-                        order.salePrice -
-                        order.ebayFees -
-                        Number(order.productCost);
+                        order.salePrice - order.refundAmount -
+                        order.ebayFees - Number(order.productCost);
 
                       const isSaving =
                         savingId === order.id;
@@ -2413,7 +2435,13 @@ export default function Home() {
                           {/* Sale price */}
 
                           <td className="px-3 py-4 text-sm font-medium text-slate-200">
-                            {money(order.salePrice)}
+                            {refunded ? (
+                              <span className="text-slate-500 line-through">{money(order.salePrice)}</span>
+                            ) : (
+                              <div>{money(Math.max(0, order.salePrice - order.refundAmount))}
+                                {partialRefund && <p className="text-[11px] text-orange-400">Refund: {money(order.refundAmount)}</p>}
+                              </div>
+                            )}
                           </td>
 
                           {/* eBay fees */}
@@ -2425,7 +2453,7 @@ export default function Home() {
                           {/* Product cost */}
 
                           <td className="px-3 py-4">
-                            <div className="flex items-center gap-2">
+                            {refunded ? <span className="text-xs text-slate-500">Not required</span> : <div className="flex items-center gap-2">
                               <span className="text-sm text-slate-500">
                                 $
                               </span>
@@ -2469,13 +2497,15 @@ export default function Home() {
                                   Saving
                                 </span>
                               )}
-                            </div>
+                            </div>}
                           </td>
 
                           {/* Profit */}
 
                           <td className="px-3 py-4">
-                            {hasValidDraft ? (
+                            {refunded ? (
+                              <span className="text-xs text-slate-500">Excluded</span>
+                            ) : hasValidDraft ? (
                               <span
                                 className={`text-sm font-semibold ${
                                   profit >= 0
@@ -2495,7 +2525,11 @@ export default function Home() {
                           {/* Status */}
 
                           <td className="px-3 py-4">
-                            {hasSavedCost ? (
+                            {refunded ? (
+                              <span className="inline-flex items-center whitespace-nowrap rounded-full bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-400">Refunded</span>
+                            ) : partialRefund ? (
+                              <span className="inline-flex items-center whitespace-nowrap rounded-full bg-orange-500/10 px-3 py-1.5 text-xs font-medium text-orange-400">Partially Refunded</span>
+                            ) : hasSavedCost ? (
                               <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-emerald-500/10 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-400">
                                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                                 Completed

@@ -1,4 +1,3 @@
-
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { Pool } from "pg";
@@ -8,7 +7,10 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
+    // ============================================================
     // STEP 1: Verify the ProfitSync user is signed in.
+    // ============================================================
+
     const supabase = await createClient();
 
     const {
@@ -23,7 +25,10 @@ export async function GET() {
       );
     }
 
+    // ============================================================
     // STEP 2: Verify database configuration.
+    // ============================================================
+
     const databaseUrl = process.env.DATABASE_URL;
 
     if (!databaseUrl) {
@@ -35,7 +40,10 @@ export async function GET() {
       );
     }
 
+    // ============================================================
     // STEP 3: Connect to PostgreSQL.
+    // ============================================================
+
     const pool = new Pool({
       connectionString: databaseUrl,
       max: 1,
@@ -43,8 +51,19 @@ export async function GET() {
     });
 
     try {
+      // ============================================================
       // STEP 4: Retrieve orders belonging to this user.
-      // Include the actual eBay listing image URL.
+      //
+      // Includes:
+      // - Original sale information
+      // - eBay transaction fees
+      // - Product costs
+      // - Listing images
+      // - Order status
+      // - Refund amounts
+      // - Refund dates
+      // ============================================================
+
       const result = await pool.query(
         `
         SELECT
@@ -58,6 +77,8 @@ export async function GET() {
           "ebayFees",
           "productCost",
           status,
+          "refundAmount",
+          "refundedAt",
           "orderDate",
           "createdAt",
           "updatedAt"
@@ -68,14 +89,27 @@ export async function GET() {
         [user.id]
       );
 
-      // STEP 5: Return all orders and their image URLs.
+      // ============================================================
+      // STEP 5: Return orders and financial information.
+      //
+      // Refunded orders are NOT removed from the results.
+      //
+      // The dashboard uses their refund status to decide:
+      // - Whether revenue should count
+      // - Whether product costs are required
+      // - How to display the order
+      // ============================================================
+
       return NextResponse.json(result.rows, {
         headers: {
           "Cache-Control": "private, no-store, max-age=0",
         },
       });
     } finally {
+      // ============================================================
       // STEP 6: Close the database connection.
+      // ============================================================
+
       await pool.end();
     }
   } catch (error) {

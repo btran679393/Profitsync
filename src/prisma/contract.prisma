@@ -1,5 +1,4 @@
-
- // use prisma-next
+// use prisma-next
 
 model Order {
   id           Int      @id @default(autoincrement())
@@ -12,8 +11,10 @@ model Order {
   ebayBuyerId  String?
   environment  String   @default("SANDBOX")
 
+  // Order information
   item         String
 
+  // Financial information
   salePrice    Decimal
   ebayFees     Decimal
   productCost  Decimal?
@@ -21,8 +22,21 @@ model Order {
   // Actual eBay listing image URL
   imageUrl     String?
 
+  // Order status:
+  // COST_NEEDED
+  // COMPLETED
+  // REFUNDED
+  // PARTIALLY_REFUNDED
   status       String   @default("COST_NEEDED")
 
+  // Refund information
+  // Amount refunded to the buyer in USD
+  refundAmount Decimal?
+
+  // Date the refund was processed
+  refundedAt   TimestamptzString?
+
+  // Timestamps
   orderDate    TimestamptzString @default(now())
   createdAt    TimestamptzString @default(now())
   updatedAt    temporal.updatedAtString()
