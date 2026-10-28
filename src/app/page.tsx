@@ -17,6 +17,7 @@ import { createClient } from "@/lib/supabase/client";
 type Order = {
   id: number;
   ebayOrderId: string | null;
+  ebayBuyerId: string | null;
   item: string;
   imageUrl: string | null;
   salePrice: number;
@@ -32,6 +33,7 @@ type Order = {
 type ApiOrder = {
   id: number;
   ebayOrderId: string | null;
+  ebayBuyerId: string | null;
   item: string;
   imageUrl?: string | null;
   salePrice: string | number;
@@ -137,6 +139,7 @@ function formatOrders(data: ApiOrder[]): Order[] {
     return {
       id: order.id,
       ebayOrderId: order.ebayOrderId,
+      ebayBuyerId: order.ebayBuyerId ?? null,
       item: order.item,
       imageUrl: order.imageUrl ?? null,
       salePrice: Number(order.salePrice),
@@ -153,12 +156,12 @@ function formatOrders(data: ApiOrder[]): Order[] {
 
 function isFullyRefunded(order: Order) {
   return order.status === "REFUNDED" ||
-    (order.refundAmount > 0 && order.refundAmount >= order.salePrice - 0.01);
+    order.status === "PARTIALLY_REFUNDED" ||
+    order.refundAmount > 0;
 }
 
 function isPartiallyRefunded(order: Order) {
-  return !isFullyRefunded(order) &&
-    (order.status === "PARTIALLY_REFUNDED" || order.refundAmount > 0);
+  return false; // All confirmed refund states are excluded from active sales.
 }
 
 function requiresProductCost(order: Order) {
@@ -895,6 +898,10 @@ function OrderDetailsPanel({
                   : "Order ID unavailable"}
               </p>
 
+              <p className="mt-1 text-xs text-slate-400">
+                Buyer: {order.ebayBuyerId || "Unavailable"}
+              </p>
+
               <p className="mt-1 text-xs text-slate-500">
                 {formatOrderDate(order.orderDate)}
               </p>
@@ -1027,7 +1034,7 @@ function OrderDetailsPanel({
             </p>
 
             <p className="mt-2 text-xs text-slate-500">
-              {refunded ? "Fully refunded orders are excluded from profit totals." : profitMargin === null
+              {refunded ? "Refunded orders are excluded from dashboard sales and profit totals." : profitMargin === null
                 ? "Add a product cost to calculate margin."
                 : `Profit Margin: ${profitMargin.toFixed(1)}%`}
             </p>
@@ -1042,7 +1049,7 @@ function OrderDetailsPanel({
 
             <p className="text-xs leading-5 text-slate-400">
               Profit estimates subtract refunds, recorded eBay fees,
-              and product costs. Fully refunded sales are excluded.
+              and product costs. Refunded sales are excluded from dashboard reporting.
               Shipping expenses and nonrefundable fees may still affect actual profit.
             </p>
           </div>
@@ -1195,7 +1202,7 @@ export default function Home() {
   function updateProductCost(id: number, value: string) {
     setOrders((currentOrders) =>
       currentOrders.map((order) =>
-        order.id === id
+        order.id === id && !isFullyRefunded(order)
           ? { ...order, productCost: value }
           : order
       )
@@ -1425,7 +1432,8 @@ export default function Home() {
         order.item.toLowerCase().includes(query) ||
         (order.ebayOrderId ?? "")
           .toLowerCase()
-          .includes(query);
+          .includes(query) ||
+        (order.ebayBuyerId ?? "").toLowerCase().includes(query);
 
       const refunded = isFullyRefunded(order);
       const completed = !refunded && hasRecordedCost(order);
@@ -2423,6 +2431,9 @@ export default function Home() {
                                   {order.item}
                                 </button>
 
+                                <p className="mt-1 text-[11px] text-blue-300/80">
+                                  Buyer: {order.ebayBuyerId || "Unavailable"}
+                                </p>
                                 <p className="mt-1 text-[11px] text-slate-500">
                                   {formatOrderDate(
                                     order.orderDate
