@@ -26,6 +26,9 @@ type Order = {
   savedProductCost: string;
   refundAmount: number;
   refundedAt: string | null;
+  refundOutcome: string | null;
+  refundShippingLoss: number;
+  refundFeeLoss: number;
   status: string;
   orderDate: string | null;
 };
@@ -41,6 +44,9 @@ type ApiOrder = {
   productCost: string | number | null;
   refundAmount?: string | number | null;
   refundedAt?: string | null;
+  refundOutcome?: string | null;
+  refundShippingLoss?: string | number | null;
+  refundFeeLoss?: string | number | null;
   status: string;
   orderDate?: string | null;
 };
@@ -148,6 +154,9 @@ function formatOrders(data: ApiOrder[]): Order[] {
       savedProductCost: cost,
       refundAmount: Math.max(0, Number(order.refundAmount ?? 0) || 0),
       refundedAt: order.refundedAt ?? null,
+      refundOutcome: order.refundOutcome ?? null,
+      refundShippingLoss: Number(order.refundShippingLoss ?? 0),
+      refundFeeLoss: Number(order.refundFeeLoss ?? 0),
       status: order.status,
       orderDate: order.orderDate ?? null,
     };
@@ -158,6 +167,14 @@ function isFullyRefunded(order: Order) {
   return order.status === "REFUNDED" ||
     order.status === "PARTIALLY_REFUNDED" ||
     order.refundAmount > 0;
+}
+
+function getRefundLoss(order: Order) {
+  if (!isFullyRefunded(order)) return 0;
+  if (!order.refundOutcome) return 0; // Unreviewed refund: loss unknown.
+  const productLoss = order.refundOutcome === "SHIPPED_LOST"
+    ? Number(order.savedProductCost || 0) : 0;
+  return productLoss + order.refundShippingLoss + order.refundFeeLoss;
 }
 
 function isPartiallyRefunded(order: Order) {
@@ -813,6 +830,7 @@ function OrderDetailsPanel({
   onClose,
   onChangeCost,
   onSaveCost,
+  onSaveRefund,
 }: {
   order: Order;
   saving: boolean;
@@ -821,7 +839,34 @@ function OrderDetailsPanel({
   onClose: () => void;
   onChangeCost: (id: number, value: string) => void;
   onSaveCost: (id: number, value: string) => Promise<void>;
+  onSaveRefund: (id: number, data: { refundOutcome: string; productCost: number | null; refundShippingLoss: number; refundFeeLoss: number }) => Promise<void>;
 }) {
+  const [refundOutcome, setRefundOutcome] = useState(order.refundOutcome ?? "NOT_SHIPPED");
+  const [lostProductCost, setLostProductCost] = useState(order.savedProductCost || "");
+  const [shippingLoss, setShippingLoss] = useState(String(order.refundShippingLoss));
+  const [feeLoss, setFeeLoss] = useState(String(order.refundFeeLoss));
+  const [refundSaving, setRefundSaving] = useState(false);
+  const [refundError, setRefundError] = useState("");
+  const validMoney = (v: string) => isValidCost(v);
+  const refundValid = validMoney(shippingLoss) && validMoney(feeLoss) &&
+    (refundOutcome !== "SHIPPED_LOST" || validMoney(lostProductCost));
+  async function saveRefundDetails() {
+    if (!refundValid || refundSaving) return;
+    setRefundSaving(true);
+    setRefundError("");
+    try {
+      await onSaveRefund(order.id, {
+        refundOutcome,
+        productCost: refundOutcome === "SHIPPED_LOST" ? Number(lostProductCost) : null,
+        refundShippingLoss: Number(shippingLoss),
+        refundFeeLoss: Number(feeLoss),
+      });
+    } catch (error) {
+      setRefundError(error instanceof Error ? error.message : "Could not save refund details.");
+    } finally {
+      setRefundSaving(false);
+    }
+  }
   const refunded = isFullyRefunded(order);
   const partialRefund = isPartiallyRefunded(order);
   const hasSavedCost = isValidCost(
@@ -930,6 +975,42 @@ function OrderDetailsPanel({
             )}
           </div>
 
+          {refunded && (
+            <div className="mt-6 rounded-2xl border border-rose-500/20 bg-[#151d2d] p-5">
+              <h4 className="text-sm font-semibold text-white">Refund Loss Tracking</h4>
+              <p className="mt-2 text-xs text-slate-400">Choose what happened to the product. These expenses reduce your overall net profit.</p>
+              <label className="mt-4 block text-xs text-slate-300" htmlFor="refund-outcome">Product outcome</label>
+              <select id="refund-outcome" value={refundOutcome} onChange={e => setRefundOutcome(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-white/10 bg-[#0b1120] p-3 text-sm text-white">
+                <option value="NOT_SHIPPED">Not shipped / Still in inventory</option>
+                <option value="SHIPPED_LOST">Shipped &amp; lost / Not returned</option>
+                <option value="RETURNED">Product returned / Recovered</option>
+              </select>
+              {refundOutcome === "SHIPPED_LOST" && (
+                <label className="mt-4 block text-xs text-slate-300">Lost product cost ($)
+                  <input type="number" min="0" step="0.01" value={lostProductCost} onChange={e => setLostProductCost(e.target.value)}
+                    placeholder="Cost of the lost product" className="mt-2 w-full rounded-xl border border-white/10 bg-[#0b1120] p-3 text-sm text-white" />
+                </label>
+              )}
+              <label className="mt-4 block text-xs text-slate-300">Unrecovered shipping expenses ($)
+                <input type="number" min="0" step="0.01" value={shippingLoss} onChange={e => setShippingLoss(e.target.value)}
+                  className="mt-2 w-full rounded-xl border border-white/10 bg-[#0b1120] p-3 text-sm text-white" />
+              </label>
+              <label className="mt-4 block text-xs text-slate-300">eBay fees actually retained ($)
+                <input type="number" min="0" step="0.01" value={feeLoss} onChange={e => setFeeLoss(e.target.value)}
+                  className="mt-2 w-full rounded-xl border border-white/10 bg-[#0b1120] p-3 text-sm text-white" />
+              </label>
+              <p className="mt-4 text-sm font-semibold text-rose-400">Estimated refund loss: {money((refundOutcome === "SHIPPED_LOST" ? Number(lostProductCost || 0) : 0) + Number(shippingLoss || 0) + Number(feeLoss || 0))}</p>
+              <p className="mt-1 text-xs text-slate-500">Only enter fees eBay did not credit back. Avoid counting refunded fees twice.</p>
+              {refundError && <p role="alert" className="mt-3 text-xs text-red-400">{refundError}</p>}
+              <button type="button" disabled={!refundValid || refundSaving || syncing || loggingOut}
+                onClick={() => void saveRefundDetails()}
+                className="mt-4 w-full rounded-xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">
+                {refundSaving ? "Saving refund..." : "Save Refund Outcome"}
+              </button>
+            </div>
+          )}
+
           <div className="mt-8 rounded-2xl border border-white/[0.07] bg-[#151d2d] p-5">
             <h4 className="mb-6 text-sm font-semibold text-white">
               Financial Breakdown
@@ -1021,20 +1102,22 @@ function OrderDetailsPanel({
 
             <p
               className={`mt-3 text-3xl font-bold ${
-                calculatedProfit === null
+                refunded
+                  ? (getRefundLoss(order) > 0 ? "text-red-400" : "text-slate-500")
+                  : calculatedProfit === null
                   ? "text-slate-500"
                   : calculatedProfit >= 0
                     ? "text-emerald-400"
                     : "text-red-400"
               }`}
             >
-              {refunded ? "Excluded (Refunded)" : calculatedProfit === null
+              {refunded ? (getRefundLoss(order) > 0 ? money(-getRefundLoss(order)) : money(0)) : calculatedProfit === null
                 ? "Pending"
                 : money(calculatedProfit)}
             </p>
 
             <p className="mt-2 text-xs text-slate-500">
-              {refunded ? "Refunded orders are excluded from dashboard sales and profit totals." : profitMargin === null
+              {refunded ? "Refunded sale excluded from revenue. Recorded refund losses are deducted from net profit." : profitMargin === null
                 ? "Add a product cost to calculate margin."
                 : `Profit Margin: ${profitMargin.toFixed(1)}%`}
             </p>
@@ -1307,6 +1390,18 @@ export default function Home() {
     }
   }
 
+  async function saveRefundOutcome(id: number, data: { refundOutcome: string; productCost: number | null; refundShippingLoss: number; refundFeeLoss: number }) {
+    const response = await fetch(`/api/orders/${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(detail.error || "Failed to save refund details.");
+    }
+    await loadOrders();
+  }
+
   // ----------------------------------------------------------
   // SYNC EBAY
   // ----------------------------------------------------------
@@ -1404,9 +1499,11 @@ export default function Home() {
     const totalProductCosts = completedOrders.reduce(
       (sum, order) => sum + Number(order.savedProductCost), 0
     );
-    const netProfit = completedOrders.reduce(
+    const completedProfit = completedOrders.reduce(
       (sum, order) => sum + (getOrderProfit(order) ?? 0), 0
     );
+    const refundLosses = periodOrders.reduce((sum, order) => sum + getRefundLoss(order), 0);
+    const netProfit = completedProfit - refundLosses;
     const completedRevenue = completedOrders.reduce(
       (sum, order) => sum + Math.max(0, order.salePrice - order.refundAmount), 0
     );
@@ -1414,7 +1511,7 @@ export default function Home() {
       ? (netProfit / completedRevenue) * 100 : 0;
     const pendingOrders = activeOrders.length - completedOrders.length;
     return {
-      totalRevenue, totalFees, totalProductCosts, netProfit, profitMargin,
+      totalRevenue, totalFees, totalProductCosts, netProfit, refundLosses, profitMargin,
       completedCount: completedOrders.length, pendingOrders,
       orderCount: activeOrders.length, refundedCount,
     };
@@ -1977,6 +2074,12 @@ export default function Home() {
             />
           </div>
 
+          {totals.refundLosses > 0 && (
+            <div className="mb-5 rounded-xl border border-rose-500/20 bg-rose-500/5 px-5 py-3 text-sm text-rose-300">
+              Refund losses included in net profit: −{money(totals.refundLosses)}
+            </div>
+          )}
+
           {/* =================================================
               PROFIT PERFORMANCE
           ================================================= */}
@@ -2515,7 +2618,9 @@ export default function Home() {
 
                           <td className="px-3 py-4">
                             {refunded ? (
-                              <span className="text-xs text-slate-500">Excluded</span>
+                              <span className={`text-sm font-semibold ${getRefundLoss(order) > 0 ? "text-red-400" : "text-slate-500"}`}>
+                                {money(-getRefundLoss(order))}
+                              </span>
                             ) : hasValidDraft ? (
                               <span
                                 className={`text-sm font-semibold ${
@@ -2640,6 +2745,7 @@ export default function Home() {
 
       {selectedOrder && (
         <OrderDetailsPanel
+          key={selectedOrder.id}
           order={selectedOrder}
           saving={savingId === selectedOrder.id}
           syncing={syncing}
@@ -2647,6 +2753,7 @@ export default function Home() {
           onClose={() => setSelectedOrderId(null)}
           onChangeCost={updateProductCost}
           onSaveCost={saveProductCost}
+          onSaveRefund={saveRefundOutcome}
         />
       )}
     </div>
