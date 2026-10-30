@@ -1,7 +1,8 @@
-
 import { createHmac, randomBytes } from "crypto";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+
+export const runtime = "nodejs";
 
 export async function GET() {
   try {
@@ -42,11 +43,14 @@ export async function GET() {
       // Read seller orders.
       "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly",
 
-      // Retrieve the verified eBay seller identity.
+      // Retrieve verified eBay seller identity.
       "https://api.ebay.com/oauth/api_scope/commerce.identity.readonly",
 
-      // NEW: Access eBay financial transactions and fees.
+      // Access eBay financial transactions and fees.
       "https://api.ebay.com/oauth/api_scope/sell.finances",
+
+      // NEW: Retrieve and synchronize active eBay listings.
+      "https://api.ebay.com/oauth/api_scope/sell.inventory",
     ];
 
     // STEP 4: Generate a secure OAuth state.

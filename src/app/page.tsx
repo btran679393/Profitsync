@@ -520,7 +520,7 @@ function MetricCard({
   value: string;
   description: string;
   icon: IconName;
-  accent?: "blue" | "green" | "amber" | "purple";
+  accent?: "blue" | "green" | "amber" | "purple" | "rose";
   featured?: boolean;
 }) {
   const accents = {
@@ -528,6 +528,7 @@ function MetricCard({
     green: "bg-emerald-500/10 text-emerald-400",
     amber: "bg-amber-500/10 text-amber-400",
     purple: "bg-violet-500/10 text-violet-400",
+    rose: "bg-rose-500/10 text-rose-400",
   };
 
   return (
@@ -556,7 +557,7 @@ function MetricCard({
 
       <div
         className={`relative text-2xl font-bold tracking-tight sm:text-3xl ${
-          featured ? "text-emerald-400" : "text-white"
+          featured ? "text-emerald-400" : accent === "rose" ? "text-rose-400" : "text-white"
         }`}
       >
         {value}
@@ -2074,12 +2075,6 @@ export default function Home() {
             />
           </div>
 
-          {totals.refundLosses > 0 && (
-            <div className="mb-5 rounded-xl border border-rose-500/20 bg-rose-500/5 px-5 py-3 text-sm text-rose-300">
-              Refund losses included in net profit: −{money(totals.refundLosses)}
-            </div>
-          )}
-
           {/* =================================================
               PROFIT PERFORMANCE
           ================================================= */}
@@ -2153,11 +2148,27 @@ export default function Home() {
 
             {/* Right-side summary */}
 
-            <div className="flex flex-col gap-5">
+            <div className="flex flex-col gap-4">
+              {/* Refund losses: separate summary card above Profit Margin */}
+              <div className="rounded-2xl border border-rose-500/20 bg-[#151d2d] p-5">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-white">Refund Losses</h3>
+                  <div className="rounded-xl bg-rose-500/10 p-2 text-rose-400">
+                    <Icon name="alert" size={18} />
+                  </div>
+                </div>
+                <p className="text-3xl font-bold tracking-tight text-rose-400">
+                  {totals.refundLosses > 0 ? `−${money(totals.refundLosses)}` : money(0)}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-slate-500">
+                  {totals.refundedCount} refunded orders · Losses included in net profit
+                </p>
+              </div>
+
               {/* Profit margin */}
 
-              <div className="rounded-2xl border border-white/[0.07] bg-[#151d2d] p-6">
-                <div className="mb-5 flex items-center justify-between">
+              <div className="rounded-2xl border border-white/[0.07] bg-[#151d2d] p-5">
+                <div className="mb-3 flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-white">
                     Profit Margin
                   </h3>
@@ -2185,8 +2196,8 @@ export default function Home() {
 
               {/* Order completion */}
 
-              <div className="flex-1 rounded-2xl border border-white/[0.07] bg-[#151d2d] p-6">
-                <div className="mb-5 flex items-center justify-between">
+              <div className="rounded-2xl border border-white/[0.07] bg-[#151d2d] p-5">
+                <div className="mb-3 flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-white">
                     Order Completion
                   </h3>
@@ -2213,7 +2224,7 @@ export default function Home() {
                   </span>
                 </div>
 
-                <div className="mt-5 h-2.5 overflow-hidden rounded-full bg-slate-800">
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-800">
                   <div
                     className="h-full rounded-full bg-blue-500 transition-all duration-300"
                     style={{
@@ -2222,7 +2233,7 @@ export default function Home() {
                   />
                 </div>
 
-                <div className="mt-6 space-y-3">
+                <div className="mt-3 space-y-2">
                   <div className="flex items-center justify-between text-sm">
                     <span className="flex items-center gap-2 text-slate-400">
                       <span className="h-2 w-2 rounded-full bg-emerald-400" />

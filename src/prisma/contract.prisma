@@ -14,6 +14,15 @@ model Order {
   // Order information
   item         String
 
+  // eBay listing identification
+  // Used to match sold jerseys to active listings
+  ebayItemId      String?
+  ebayVariationId String?
+  sku             String?
+
+  // Number of units sold
+  quantity        Int      @default(1)
+
   // Financial information
   salePrice    Decimal
   ebayFees     Decimal
@@ -59,4 +68,44 @@ model EbayConnection {
 
   createdAt             TimestamptzString @default(now())
   updatedAt             temporal.updatedAtString()
+}
+
+// ============================================================
+// EBAY ACTIVE LISTINGS
+// ============================================================
+
+model EbayListing {
+  id            Int      @id @default(autoincrement())
+
+  // Supabase user who owns this listing
+  userId        String
+
+  // Connected eBay account
+  ebayUserId    String
+  environment   String   @default("PRODUCTION")
+
+  // eBay listing identification
+  ebayItemId    String
+  title         String
+  sku           String?
+
+  // Listing information
+  imageUrl      String?
+  listingPrice  Decimal
+
+  // Available quantity
+  quantity      Int      @default(0)
+
+  // Listing status:
+  // ACTIVE
+  // ENDED
+  // SOLD_OUT
+  status        String   @default("ACTIVE")
+
+  // Timestamps
+  createdAt     TimestamptzString @default(now())
+  updatedAt     temporal.updatedAtString()
+
+  // Prevent duplicate listings for the same account
+  @@unique([userId, ebayUserId, environment, ebayItemId])
 }

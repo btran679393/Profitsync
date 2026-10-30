@@ -1,42 +1,78 @@
 
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [mode, setMode] = useState<"signin" | "signup" | "forgot">("signin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
-  async function signInWithGoogle() {
+  async function socialSignIn(provider: "google" | "azure" | "facebook") {
     if (loading) return;
-
+    setLoading(provider);
+    setError("");
+    setNotice("");
     try {
-      setLoading(true);
-      setError("");
-
       const supabase = createClient();
+      const { error: authError } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+          ...(provider === "google" ? { queryParams: { prompt: "select_account" } } : {}),
+          ...(provider === "azure" ? { scopes: "email" } : {}),
+        },
+      });
+      if (authError) throw authError;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sign-in failed. Please try again.");
+      setLoading("");
+    }
+  }
 
-      const { error: authError } =
-  await supabase.auth.signInWithOAuth({
-    provider: "google",
-    options: {
-      redirectTo: `${window.location.origin}/auth/callback`,
-      queryParams: {
-        prompt: "select_account",
-      },
-    },
-  });
-
-      if (authError) {
-        throw authError;
+  async function submitEmail(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (loading) return;
+    setError("");
+    setNotice("");
+    if (mode === "signup" && password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+    setLoading("email");
+    try {
+      const supabase = createClient();
+      if (mode === "forgot") {
+        const { error: authError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+          redirectTo: `${window.location.origin}/reset-password`,
+        });
+        if (authError) throw authError;
+        setNotice("If this address has an account, a password reset email will arrive shortly.");
+      } else if (mode === "signup") {
+        const { data, error: authError } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+        });
+        if (authError) throw authError;
+        if (data.session) window.location.assign("/");
+        else setNotice("Check your email to confirm your account before signing in.");
+      } else {
+        const { error: authError } = await supabase.auth.signInWithPassword({
+          email: email.trim(), password,
+        });
+        if (authError) throw authError;
+        window.location.assign("/");
       }
     } catch (err) {
-      console.error("Google login failed:", err);
-      setError(
-        "Unable to sign in with Google. Please try again."
-      );
-      setLoading(false);
+      setError(err instanceof Error ? err.message : "Authentication failed.");
+    } finally {
+      setLoading("");
     }
   }
 
@@ -254,80 +290,58 @@ export default function LoginPage() {
                 manage your eBay sales, expenses, and profits.
               </p>
 
-              <div className="mt-10">
-                <button
-                  type="button"
-                  onClick={signInWithGoogle}
-                  disabled={loading}
-                  className="group flex min-h-14 w-full items-center justify-center gap-4 rounded-xl border border-slate-200 bg-white px-5 py-4 font-semibold text-slate-800 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {loading ? (
-                    <span className="h-5 w-5 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
-                  ) : (
-                    <svg
-                      width="22"
-                      height="22"
-                      viewBox="0 0 48 48"
-                      aria-hidden="true"
-                    >
-                      <path
-                        fill="#EA4335"
-                        d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
-                      />
-                      <path
-                        fill="#4285F4"
-                        d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.27 5.48-4.79 7.18l7.73 6C44.39 38.03 46.98 31.88 46.98 24.55z"
-                      />
-                      <path
-                        fill="#FBBC05"
-                        d="M10.53 28.59A14.4 14.4 0 0 1 9.75 24c0-1.59.27-3.13.76-4.59l-7.98-6.2A23.9 23.9 0 0 0 0 24c0 3.87.93 7.52 2.56 10.78l7.97-6.19z"
-                      />
-                      <path
-                        fill="#34A853"
-                        d="M24 48c6.48 0 11.92-2.13 15.89-5.8l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
-                      />
-                    </svg>
-                  )}
-
-                  <span>
-                    {loading
-                      ? "Connecting to Google..."
-                      : "Continue with Google"}
-                  </span>
-                </button>
-
-                {error && (
-                  <div
-                    role="alert"
-                    className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
-                  >
-                    {error}
-                  </div>
-                )}
-
-                <div className="mt-7 flex items-center justify-center gap-2 text-sm text-slate-500">
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <rect
-                      x="5"
-                      y="10"
-                      width="14"
-                      height="11"
-                      rx="2"
-                    />
-                    <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-                  </svg>
-                  Secure sign-in powered by Google
+              <div className="mt-8">
+                <div className="mb-6 flex rounded-xl bg-slate-100 p-1 text-sm font-semibold">
+                  {(["signin", "signup"] as const).map((tab) => (
+                    <button key={tab} type="button" onClick={() => { setMode(tab); setError(""); setNotice(""); }}
+                      className={`flex-1 rounded-lg px-3 py-3 transition ${mode === tab ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>
+                      {tab === "signin" ? "Sign in" : "Create account"}
+                    </button>
+                  ))}
                 </div>
+                <h3 className="mb-5 text-xl font-bold text-slate-900">
+                  {mode === "forgot" ? "Reset your password" : mode === "signup" ? "Create your seller account" : "Welcome back"}
+                </h3>
+                <form onSubmit={submitEmail} className="space-y-4">
+                  <label className="block text-sm font-medium text-slate-700">
+                    Email address
+                    <input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)}
+                      placeholder="you@example.com" className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+                  </label>
+                  {mode !== "forgot" && <label className="block text-sm font-medium text-slate-700">
+                    Password
+                    <input type="password" minLength={mode === "signup" ? 6 : undefined} autoComplete={mode === "signup" ? "new-password" : "current-password"} required value={password} onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Enter your password" className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+                  </label>}
+                  {mode === "signup" && <label className="block text-sm font-medium text-slate-700">
+                    Confirm password
+                    <input type="password" autoComplete="new-password" required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Re-enter your password" className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+                  </label>}
+                  {mode === "signin" && <button type="button" onClick={() => { setMode("forgot"); setError(""); setNotice(""); }} className="block ml-auto text-sm font-semibold text-blue-600 hover:underline">Forgot password?</button>}
+                  <button type="submit" disabled={Boolean(loading)} className="w-full rounded-xl bg-blue-600 px-5 py-3.5 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60">
+                    {loading === "email" ? "Please wait..." : mode === "forgot" ? "Send reset link" : mode === "signup" ? "Create account" : "Sign in"}
+                  </button>
+                  {mode === "forgot" && <button type="button" onClick={() => setMode("signin")} className="w-full text-sm font-medium text-blue-600 hover:underline">Back to sign in</button>}
+                </form>
+                {mode !== "forgot" && <>
+                  <div className="my-6 flex items-center gap-3 text-xs text-slate-400"><span className="h-px flex-1 bg-slate-200" />or continue with<span className="h-px flex-1 bg-slate-200" /></div>
+                  <div className="space-y-3">
+                    {([ ["google", "Google"], ["azure", "Microsoft (Outlook / Hotmail)"], ["facebook", "Facebook"] ] as const).map(([provider, label]) => (
+                      <button key={provider} type="button" disabled={Boolean(loading)} onClick={() => socialSignIn(provider)}
+                        className="flex w-full items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:opacity-60">
+                        <span className={`flex h-6 w-6 items-center justify-center rounded-md text-xs font-extrabold ${provider === "google" ? "text-blue-600" : provider === "azure" ? "bg-blue-600 text-white" : "bg-[#1877F2] text-white"}`}>
+                          {provider === "google" ? "G" : provider === "azure" ? "M" : "f"}
+                        </span>
+                        {loading === provider ? "Connecting..." : `Continue with ${label}`}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-4 text-center text-xs text-slate-500">Yahoo and other email addresses can register using email and password.</p>
+                </>}
+                {error && <div role="alert" className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+                {notice && <div role="status" className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</div>}
+                <p className="mt-6 text-center text-xs text-slate-500">Secure authentication powered by Supabase</p>
               </div>
 
               {/* Features */}
