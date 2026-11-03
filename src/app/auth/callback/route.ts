@@ -2,16 +2,32 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
+function loginRedirect(origin: string, error: string, description?: string | null) {
+  const url = new URL("/login", origin);
+  url.searchParams.set("error", error);
+  if (description) url.searchParams.set("error_description", description.slice(0, 300));
+  return NextResponse.redirect(url);
+}
+
 export async function GET(request: NextRequest) {
-  const code = request.nextUrl.searchParams.get("code");
+  const params = request.nextUrl.searchParams;
 
   // Use the application's own origin for the redirect.
   const origin = request.nextUrl.origin;
 
+  // The provider (Google, Microsoft, Facebook) or Supabase can send the user
+  // back with an error instead of a code, e.g. when they cancel the consent
+  // screen or the provider isn't configured correctly.
+  const providerError = params.get("error");
+  if (providerError) {
+    const description = params.get("error_description");
+    console.error("OAuth provider returned an error:", providerError, description);
+    return loginRedirect(origin, providerError, description);
+  }
+
+  const code = params.get("code");
   if (!code) {
-    return NextResponse.redirect(
-      new URL("/login?error=missing_code", origin)
-    );
+    return loginRedirect(origin, "missing_code");
   }
 
   const supabase = await createClient();
@@ -21,12 +37,12 @@ export async function GET(request: NextRequest) {
 
   if (error) {
     console.error("Supabase authentication callback failed:", error.message);
-
-    return NextResponse.redirect(
-      new URL("/login?error=auth_failed", origin)
-    );
+    return loginRedirect(origin, "auth_failed", error.message);
   }
 
-  // Redirect to the dashboard after successful login.
-  return NextResponse.redirect(new URL("/", origin));
+  // Only allow same-site relative paths as the post-login destination.
+  const next = params.get("next");
+  const destination = next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
+
+  return NextResponse.redirect(new URL(destination, origin));
 }

@@ -1,8 +1,38 @@
 
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
+
+type SocialProvider = "google" | "azure" | "facebook";
+
+const SOCIAL_PROVIDERS: ReadonlyArray<readonly [SocialProvider, string]> = [
+  ["google", "Google"],
+  ["azure", "Microsoft (Outlook / Hotmail)"],
+  ["facebook", "Facebook"],
+];
+
+// Turn Supabase / OAuth error codes and messages into something a seller can act on.
+function friendlyAuthError(raw: string): string {
+  const msg = raw.toLowerCase();
+  if (msg.includes("provider is not enabled") || msg.includes("unsupported provider"))
+    return "That sign-in option isn't available yet. Please use another option or your email and password.";
+  if (msg.includes("invalid login credentials"))
+    return "Incorrect email or password.";
+  if (msg.includes("email not confirmed"))
+    return "Please confirm your email first. Check your inbox (and spam folder) for the confirmation link.";
+  if (msg.includes("user already registered"))
+    return "An account with this email already exists. Try signing in, or use \"Forgot password?\".";
+  if (msg.includes("email_address_not_authorized") || msg.includes("not authorized"))
+    return "We couldn't send an email to this address right now. Please try a Google, Microsoft or Facebook sign-in instead, or try again later.";
+  if (msg.includes("rate limit") || msg.includes("over_email_send_rate_limit"))
+    return "Too many emails were sent recently. Please wait a few minutes and try again.";
+  if (msg.includes("access_denied"))
+    return "Sign-in was cancelled.";
+  if (msg.includes("missing_code") || msg.includes("auth_failed") || msg.includes("code verifier"))
+    return "Sign-in didn't complete. Please try again in the same browser.";
+  return raw;
+}
 
 export default function LoginPage() {
   const [loading, setLoading] = useState("");
@@ -12,8 +42,29 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  // Which social providers are switched on in Supabase. null = still checking.
+  const [enabledProviders, setEnabledProviders] = useState<SocialProvider[] | null>(null);
 
-  async function socialSignIn(provider: "google" | "azure" | "facebook") {
+  useEffect(() => {
+    // Show errors passed back from /auth/callback (e.g. cancelled consent).
+    const params = new URLSearchParams(window.location.search);
+    const urlError = params.get("error_description") || params.get("error");
+    if (urlError) setError(friendlyAuthError(urlError));
+
+    // Only show buttons for providers that are enabled in the Supabase dashboard,
+    // so nobody lands on a raw "provider is not enabled" error page.
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+    fetch(`${url}/auth/v1/settings`, { headers: { apikey: key ?? "" } })
+      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+      .then((settings: { external?: Record<string, boolean> }) => {
+        const ext = settings.external ?? {};
+        setEnabledProviders(SOCIAL_PROVIDERS.map(([p]) => p).filter((p) => ext[p]));
+      })
+      .catch(() => setEnabledProviders(SOCIAL_PROVIDERS.map(([p]) => p)));
+  }, []);
+
+  async function socialSignIn(provider: SocialProvider) {
     if (loading) return;
     setLoading(provider);
     setError("");
@@ -30,7 +81,7 @@ export default function LoginPage() {
       });
       if (authError) throw authError;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Sign-in failed. Please try again.");
+      setError(err instanceof Error ? friendlyAuthError(err.message) : "Sign-in failed. Please try again.");
       setLoading("");
     }
   }
@@ -70,7 +121,7 @@ export default function LoginPage() {
         window.location.assign("/");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Authentication failed.");
+      setError(err instanceof Error ? friendlyAuthError(err.message) : "Authentication failed.");
     } finally {
       setLoading("");
     }
@@ -324,10 +375,10 @@ export default function LoginPage() {
                   </button>
                   {mode === "forgot" && <button type="button" onClick={() => setMode("signin")} className="w-full text-sm font-medium text-blue-600 hover:underline">Back to sign in</button>}
                 </form>
-                {mode !== "forgot" && <>
+                {mode !== "forgot" && enabledProviders !== null && enabledProviders.length > 0 && <>
                   <div className="my-6 flex items-center gap-3 text-xs text-slate-400"><span className="h-px flex-1 bg-slate-200" />or continue with<span className="h-px flex-1 bg-slate-200" /></div>
                   <div className="space-y-3">
-                    {([ ["google", "Google"], ["azure", "Microsoft (Outlook / Hotmail)"], ["facebook", "Facebook"] ] as const).map(([provider, label]) => (
+                    {SOCIAL_PROVIDERS.filter(([provider]) => enabledProviders.includes(provider)).map(([provider, label]) => (
                       <button key={provider} type="button" disabled={Boolean(loading)} onClick={() => socialSignIn(provider)}
                         className="flex w-full items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:opacity-60">
                         <span className={`flex h-6 w-6 items-center justify-center rounded-md text-xs font-extrabold ${provider === "google" ? "text-blue-600" : provider === "azure" ? "bg-blue-600 text-white" : "bg-[#1877F2] text-white"}`}>
@@ -337,7 +388,7 @@ export default function LoginPage() {
                       </button>
                     ))}
                   </div>
-                  <p className="mt-4 text-center text-xs text-slate-500">Yahoo and other email addresses can register using email and password.</p>
+                  <p className="mt-4 text-center text-xs text-slate-500">Yahoo, iCloud and any other email address can sign up with email and password.</p>
                 </>}
                 {error && <div role="alert" className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
                 {notice && <div role="status" className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</div>}

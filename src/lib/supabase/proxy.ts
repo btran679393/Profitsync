@@ -39,11 +39,14 @@ export async function updateSession(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
 
-  // Public pages that do not require a Google login.
+  // Public pages that do not require a login.
+  // /reset-password must be public: people arrive from the reset email
+  // before they have a session (the page exchanges the link's code itself).
   const isPublicPage =
     pathname === "/login" ||
     pathname === "/privacy" ||
     pathname === "/privacy/" ||
+    pathname === "/reset-password" ||
     pathname.startsWith("/auth/callback");
 
   // eBay must be able to deliver account-deletion notifications.
