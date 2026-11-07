@@ -9,6 +9,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import AccountBadge from "./AccountBadge";
 
 // ============================================================
 // TYPES
@@ -1863,6 +1864,8 @@ export default function Home() {
         {/* Logout */}
 
         <div className="border-t border-white/[0.07] p-4">
+          <AccountBadge />
+
           <button
             type="button"
             onClick={logout}

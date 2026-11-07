@@ -4,19 +4,60 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
 
+// Supabase calls Microsoft sign-in "azure". One Microsoft button covers personal
+// accounts (Outlook, Hotmail, Live) and work or school accounts.
 type SocialProvider = "google" | "azure" | "facebook";
 
 const SOCIAL_PROVIDERS: ReadonlyArray<readonly [SocialProvider, string]> = [
   ["google", "Google"],
-  ["azure", "Microsoft (Outlook / Hotmail)"],
+  ["azure", "Microsoft"],
   ["facebook", "Facebook"],
 ];
+
+function ProviderLogo({ provider }: { provider: SocialProvider }) {
+  const common = { width: 20, height: 20, "aria-hidden": true } as const;
+  if (provider === "google")
+    return (
+      <svg {...common} viewBox="0 0 24 24">
+        <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z" />
+        <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09C3.26 21.3 7.31 24 12 24z" />
+        <path fill="#FBBC05" d="M5.27 14.29c-.25-.72-.38-1.49-.38-2.29s.14-1.57.38-2.29V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.98-3.09z" />
+        <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.98 3.09c.95-2.85 3.6-4.96 6.73-4.96z" />
+      </svg>
+    );
+  if (provider === "azure")
+    return (
+      <svg {...common} viewBox="0 0 23 23">
+        <rect x="1" y="1" width="10" height="10" fill="#F25022" />
+        <rect x="12" y="1" width="10" height="10" fill="#7FBA00" />
+        <rect x="1" y="12" width="10" height="10" fill="#00A4EF" />
+        <rect x="12" y="12" width="10" height="10" fill="#FFB900" />
+      </svg>
+    );
+  return (
+    <svg {...common} viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="12" fill="#1877F2" />
+      <path fill="#fff" d="M16.67 15.47 17.2 12h-3.33V9.75c0-.95.47-1.87 1.96-1.87h1.51V4.92s-1.37-.23-2.68-.23c-2.74 0-4.53 1.66-4.53 4.66V12H7.08v3.47h3.05V24h3.75v-8.53z" />
+    </svg>
+  );
+}
 
 // Turn Supabase / OAuth error codes and messages into something a seller can act on.
 function friendlyAuthError(raw: string): string {
   const msg = raw.toLowerCase();
   if (msg.includes("provider is not enabled") || msg.includes("unsupported provider"))
     return "That sign-in option isn't available yet. Please use another option or your email and password.";
+  // Microsoft: the app registration only accepts one organisation's accounts
+  // (e.g. a school tenant) instead of "any organisation + personal accounts".
+  if (msg.includes("aadsts50020") || msg.includes("aadsts50194") || msg.includes("does not exist in tenant") || msg.includes("not configured as a multi-tenant"))
+    return "Microsoft sign-in isn't accepting this type of account yet. Please try a personal Outlook/Hotmail account, another sign-in option, or your email and password.";
+  // Microsoft work/school accounts whose organisation requires admin approval.
+  if (msg.includes("aadsts65001") || msg.includes("aadsts90094") || msg.includes("admin approval") || msg.includes("need admin"))
+    return "Your organisation needs to approve ProfitSync before you can sign in with this work or school account. Try a personal account or your email and password instead.";
+  if (msg.includes("error getting user email"))
+    return "We couldn't get an email address from that account. Please make sure it has a verified email, or sign in another way.";
+  if (msg.includes("unable to exchange external code") || msg.includes("aadsts7000215") || msg.includes("invalid client secret"))
+    return "Sign-in with that provider isn't set up correctly right now. Please try another option or your email and password.";
   if (msg.includes("invalid login credentials"))
     return "Incorrect email or password.";
   if (msg.includes("email not confirmed"))
@@ -29,7 +70,7 @@ function friendlyAuthError(raw: string): string {
     return "Too many emails were sent recently. Please wait a few minutes and try again.";
   if (msg.includes("access_denied"))
     return "Sign-in was cancelled.";
-  if (msg.includes("missing_code") || msg.includes("auth_failed") || msg.includes("code verifier"))
+  if (msg.includes("missing_code") || msg.includes("auth_failed") || msg.includes("code verifier") || msg.includes("bad_oauth_state"))
     return "Sign-in didn't complete. Please try again in the same browser.";
   return raw;
 }
@@ -76,7 +117,9 @@ export default function LoginPage() {
         options: {
           redirectTo: `${window.location.origin}/auth/callback`,
           ...(provider === "google" ? { queryParams: { prompt: "select_account" } } : {}),
-          ...(provider === "azure" ? { scopes: "email" } : {}),
+          // Ask Microsoft for the email address and name. "openid" makes it a
+          // standard sign-in; offline access isn't needed (Supabase keeps its own session).
+          ...(provider === "azure" ? { scopes: "openid email profile", queryParams: { prompt: "select_account" } } : {}),
         },
       });
       if (authError) throw authError;
@@ -381,14 +424,15 @@ export default function LoginPage() {
                     {SOCIAL_PROVIDERS.filter(([provider]) => enabledProviders.includes(provider)).map(([provider, label]) => (
                       <button key={provider} type="button" disabled={Boolean(loading)} onClick={() => socialSignIn(provider)}
                         className="flex w-full items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:opacity-60">
-                        <span className={`flex h-6 w-6 items-center justify-center rounded-md text-xs font-extrabold ${provider === "google" ? "text-blue-600" : provider === "azure" ? "bg-blue-600 text-white" : "bg-[#1877F2] text-white"}`}>
-                          {provider === "google" ? "G" : provider === "azure" ? "M" : "f"}
-                        </span>
+                        <ProviderLogo provider={provider} />
                         {loading === provider ? "Connecting..." : `Continue with ${label}`}
                       </button>
                     ))}
                   </div>
-                  <p className="mt-4 text-center text-xs text-slate-500">Yahoo, iCloud and any other email address can sign up with email and password.</p>
+                  <p className="mt-4 text-center text-xs text-slate-500">
+                    {enabledProviders.includes("azure") && "Microsoft works with Outlook, Hotmail, Live and work or school accounts. "}
+                    Yahoo, iCloud and any other email address can sign up with email and password.
+                  </p>
                 </>}
                 {error && <div role="alert" className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
                 {notice && <div role="status" className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</div>}
