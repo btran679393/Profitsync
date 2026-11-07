@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { Pool } from "pg";
 import { createClient } from "@/lib/supabase/server";
 import { fetchSellerProfile, isMissingColumn, saveSellerProfile } from "@/lib/ebay/sellerProfile";
+import { activeStoreId } from "@/lib/ebay/activeStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,10 +40,10 @@ export async function GET() {
         SELECT id, "accessToken", "accessTokenExpiresAt"${columns}
         FROM public."ebayConnection"
         WHERE "userId" = $1 AND environment = 'PRODUCTION' AND "accessToken" IS NOT NULL
-        ORDER BY "updatedAt" DESC
+        ORDER BY ("ebayUserId" = $2) DESC NULLS LAST, "updatedAt" DESC
         LIMIT 1
         `,
-        [user.id]
+        [user.id, activeStoreId(user) ?? ""]
       );
 
     let result;

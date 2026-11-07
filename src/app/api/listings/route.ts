@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { Pool } from "pg";
 import { createClient } from "@/lib/supabase/server";
 import { existingColumns } from "@/lib/db/optionalColumns";
+import { resolveActiveEbayUserId } from "@/lib/ebay/activeStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,14 +28,16 @@ export async function GET() {
     // "shippingCost" is added by docs/sql/2026-11-07_shipping_cost.sql.
     const optional = await existingColumns(pool, "EbayListing", ["shippingCost"]);
     const shipping = optional.has("shippingCost") ? `"shippingCost",` : "";
+    const store = await resolveActiveEbayUserId(pool, user);
     const result = await pool.query(
       `
       SELECT "ebayItemId", title, sku, "imageUrl", "listingPrice", quantity, status, "unitCost", ${shipping} "updatedAt"
       FROM public."EbayListing"
       WHERE "userId" = $1 AND environment = 'PRODUCTION'
+        AND ($2::text IS NULL OR "ebayUserId" = $2)
       ORDER BY status = 'ACTIVE' DESC, "updatedAt" DESC
       `,
-      [user.id]
+      [user.id, store]
     );
     return NextResponse.json(result.rows, {
       headers: { "Cache-Control": "private, no-store, max-age=0" },

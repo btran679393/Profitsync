@@ -80,6 +80,9 @@ export async function GET() {
       response_type: "code",
       scope: scopes.join(" "),
       state,
+      // Always show eBay's sign-in so sellers can add a different store
+      // instead of silently reconnecting the eBay account they're logged in to.
+      prompt: "login",
     });
 
     // STEP 6: Select the eBay authorization server.

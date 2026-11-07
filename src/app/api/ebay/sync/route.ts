@@ -2,6 +2,7 @@ import { createHmac } from "crypto";
 import { Pool, type PoolClient } from "pg";
 import { NextResponse } from "next/server";
 import { db } from "@/prisma/db";
+import { activeStoreId, pickConnection } from "@/lib/ebay/activeStore";
 import { createClient } from "@/lib/supabase/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -1046,18 +1047,9 @@ export async function POST() {
         { status: 401 }
       );
     }
-    if (identifiedConnections.length > 1) {
-      return NextResponse.json(
-        {
-          error:
-            "Multiple eBay accounts connected.",
-          message:
-            "Account selection must be configured before syncing.",
-        },
-        { status: 409 }
-      );
-    }
+    // With several stores connected, sync the one the seller is viewing.
     const connection =
+      pickConnection(identifiedConnections, activeStoreId(user)) ??
       identifiedConnections[0];
     const ebayUserId =
       connection.ebayUserId;

@@ -13,6 +13,7 @@ import { createClient } from "@/lib/supabase/client";
 import AccountBadge from "./AccountBadge";
 import ListingsSection, { type ListingRange, type ListingRow } from "./ListingsSection";
 import StoreShippingSetting from "./StoreShippingSetting";
+import StoreSwitcher, { type EbayStore } from "./StoreSwitcher";
 
 // ============================================================
 // TYPES
@@ -1508,12 +1509,6 @@ export default function Home() {
   // else the person's first name (from their sign-in profile or email).
   useEffect(() => {
     let active = true;
-    fetch("/api/ebay/profile")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((profile: { storeName?: string | null; username?: string | null } | null) => {
-        if (active && profile) setSellerName(profile.storeName || profile.username || "");
-      })
-      .catch(() => undefined);
     createClient()
       .auth.getUser()
       .then(({ data }) => {
@@ -1698,6 +1693,62 @@ export default function Home() {
     }
   }, []);
 
+  // ----------------------------------------------------------
+  // EBAY STORES (several per account; one is active)
+  // ----------------------------------------------------------
+
+  const [stores, setStores] = useState<EbayStore[]>([]);
+  const [storesLoading, setStoresLoading] = useState(true);
+  const activeStore = stores.find((store) => store.active) ?? null;
+  const activeStoreId = activeStore?.id ?? null;
+  const greetingName =
+    sellerName ||
+    (activeStore && activeStore.name !== "eBay store" ? activeStore.name : "") ||
+    firstName;
+
+  const loadStores = useCallback(async () => {
+    try {
+      const response = await fetch("/api/ebay/stores", { cache: "no-store" });
+      if (!response.ok) throw new Error("Failed to load stores.");
+      const data: { stores?: EbayStore[] } = await response.json();
+      setStores(data.stores ?? []);
+    } catch (error) {
+      console.error("Loading eBay stores failed:", error);
+    } finally {
+      setStoresLoading(false);
+    }
+  }, []);
+
+  // Switch the whole dashboard to another connected store.
+  async function switchStore(id: string) {
+    const response = await fetch("/api/ebay/stores", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    const data: { success?: boolean; error?: string } = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || "Couldn't switch stores.");
+    setSellerName("");
+    setSyncMessage("");
+    setSelectedOrderId(null);
+    await Promise.all([loadStores(), loadOrders(), loadListings()]);
+  }
+
+  // Store name for the greeting, refreshed whenever the active store changes.
+  useEffect(() => {
+    if (!activeStoreId) return;
+    let active = true;
+    fetch(`/api/ebay/profile?store=${encodeURIComponent(activeStoreId)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((profile: { storeName?: string | null; username?: string | null } | null) => {
+        if (active && profile) setSellerName(profile.storeName || profile.username || "");
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [activeStoreId]);
+
   // Save a listing's cost per item; optionally fill it into past sales.
   async function saveListingCost(itemId: string, field: "unitCost" | "shippingCost", value: string, applyToPast: boolean) {
     const response = await fetch(`/api/listings/${encodeURIComponent(itemId)}`, {
@@ -1753,6 +1804,7 @@ export default function Home() {
 
   useEffect(() => {
     async function initialLoad() {
+      const storesLoaded = loadStores();
       const listingsLoaded = loadListings();
       try {
         await loadOrders();
@@ -1766,10 +1818,11 @@ export default function Home() {
         setLoading(false);
       }
       await listingsLoaded;
+      await storesLoaded;
     }
 
     void initialLoad();
-  }, [loadOrders, loadListings]);
+  }, [loadOrders, loadListings, loadStores]);
 
   // ----------------------------------------------------------
   // EDIT PRODUCT COST
@@ -1971,6 +2024,28 @@ export default function Home() {
       setSyncing(false);
     }
   }
+
+  // Coming back from eBay after adding a store: show the result, and bring
+  // in the new store's orders and listings straight away.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const connected = params.get("ebay") === "connected";
+    const failed = params.get("ebay_error");
+    if (!connected && !failed) return;
+    history.replaceState(null, "", window.location.pathname + window.location.hash);
+    void (async () => {
+      await Promise.resolve();
+      if (failed) {
+        setSyncError(true);
+        setSyncMessage(`eBay store not connected: ${failed}`);
+        return;
+      }
+      await loadStores();
+      await syncEbayOrders();
+    })();
+    // Runs once when the page opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ----------------------------------------------------------
   // SELECTED DATE RANGE
@@ -2407,31 +2482,9 @@ export default function Home() {
 
           </nav>
 
-          {/* Integration */}
+          {/* eBay stores: switch between them or add another */}
 
-          <div className="mt-10 rounded-2xl border border-blue-500/15 bg-blue-500/[0.06] p-4">
-            <div className="mb-3 flex items-center gap-2 text-blue-400">
-              <Icon name="check" size={16} />
-
-              <span className="text-xs font-semibold">
-                eBay Integration
-              </span>
-            </div>
-
-            <p className="text-xs leading-5 text-slate-400">
-              Synchronize your connected seller
-              account and manage your imported
-              orders.
-            </p>
-
-            <button
-              type="button"
-              onClick={() => goToOrders()}
-              className="mt-4 text-xs font-semibold text-blue-400 hover:text-blue-300"
-            >
-              View Orders →
-            </button>
-          </div>
+          <StoreSwitcher stores={stores} loading={storesLoading} onSwitch={switchStore} />
         </div>
 
         {/* Logout */}
@@ -2489,7 +2542,7 @@ export default function Home() {
                 <>
                   <h2 className="text-3xl font-bold tracking-tight text-white">
                     {greeting}
-                    {sellerName || firstName ? `, ${sellerName || firstName}` : ""}{" "}
+                    {greetingName ? `, ${greetingName}` : ""}{" "}
                     <span aria-hidden="true">👋</span>
                   </h2>
 

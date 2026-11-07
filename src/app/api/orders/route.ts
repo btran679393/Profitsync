@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { Pool } from "pg";
 import { existingColumns } from "@/lib/db/optionalColumns";
+import { resolveActiveEbayUserId } from "@/lib/ebay/activeStore";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -17,14 +18,18 @@ export async function GET() {
   try {
     const optional = await existingColumns(pool, "order", OPTIONAL_COLUMNS);
     const extra = OPTIONAL_COLUMNS.filter((c) => optional.has(c)).map((c) => ` "${c}",`).join("");
+    // Only the store the seller is viewing (all orders if none is connected).
+    const store = await resolveActiveEbayUserId(pool, user);
     const result = await pool.query(`
       SELECT id, "ebayOrderId", "ebayUserId", "ebayBuyerId", "userId",
         item, "imageUrl", "salePrice", "ebayFees", "productCost", status,
         "refundAmount", "refundedAt", "refundOutcome", "refundShippingLoss", "refundFeeLoss",
         "ebayItemId", quantity,${extra}
         "orderDate", "createdAt", "updatedAt"
-      FROM public."order" WHERE "userId" = $1 ORDER BY "orderDate" DESC, id DESC
-    `, [user.id]);
+      FROM public."order"
+      WHERE "userId" = $1 AND ($2::text IS NULL OR "ebayUserId" = $2)
+      ORDER BY "orderDate" DESC, id DESC
+    `, [user.id, store]);
     return NextResponse.json(result.rows, {
       headers: {
         "Cache-Control": "private, no-store, max-age=0",

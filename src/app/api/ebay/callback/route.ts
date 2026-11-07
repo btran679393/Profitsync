@@ -15,6 +15,7 @@ type EbayTokenResponse = {
 
 type EbayUserResponse = {
   userId?: string;
+  username?: string;
 };
 
 type ExistingConnection = {
@@ -33,11 +34,20 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 export async function GET(request: NextRequest) {
+  // The seller arrives here from eBay in their browser, so send them back
+  // to the dashboard with a short success or error message to show.
   const respond = (
     body: Record<string, unknown>,
     status = 200
   ) => {
-    const response = NextResponse.json(body, { status });
+    const url = new URL("/", request.nextUrl.origin);
+    if (status >= 400 || body.error) {
+      url.searchParams.set("ebay_error", String(body.error ?? "Couldn't connect eBay."));
+    } else {
+      url.searchParams.set("ebay", "connected");
+    }
+    url.hash = "listings";
+    const response = NextResponse.redirect(url, 303);
 
     response.cookies.delete("ebay_oauth_state");
 
@@ -424,7 +434,31 @@ export async function GET(request: NextRequest) {
       await pool.end();
     }
 
-    // STEP 10: Return success without exposing tokens.
+    // STEP 10: Switch the dashboard to the store just connected, and save
+    // its eBay username for the store switcher. Neither can fail the connect.
+    try {
+      await supabase.auth.updateUser({ data: { activeEbayUserId: ebayUserId } });
+    } catch (error) {
+      console.error("Setting active eBay store failed:", error);
+    }
+    if (typeof userData.username === "string" && userData.username.trim()) {
+      const namePool = new Pool({ connectionString: databaseUrl, max: 1 });
+      try {
+        await namePool.query(
+          `UPDATE public."ebayConnection" SET "ebayUsername" = $1
+           WHERE "userId" = $2 AND environment = $3 AND "ebayUserId" = $4`,
+          [userData.username.trim(), user.id, environment, ebayUserId]
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code !== "42703") {
+          console.error("Saving eBay username failed:", error);
+        }
+      } finally {
+        await namePool.end();
+      }
+    }
+
+    // STEP 11: Return success without exposing tokens.
     return respond({
       success: true,
       message:

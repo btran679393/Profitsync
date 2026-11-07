@@ -3,6 +3,7 @@ import { Pool } from "pg";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/prisma/db";
 import { fetchSellerProfile, saveSellerProfile } from "@/lib/ebay/sellerProfile";
+import { activeStoreId, pickConnection } from "@/lib/ebay/activeStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -183,9 +184,10 @@ export async function POST() {
       environment,
     }).all();
 
-    const connection = connections
-      .filter((c) => Boolean(c.ebayUserId) && Boolean(c.accessToken))
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0];
+    const connection = pickConnection(
+      connections.filter((c) => Boolean(c.accessToken)),
+      activeStoreId(user)
+    );
 
     if (!connection?.ebayUserId) {
       return NextResponse.json(
