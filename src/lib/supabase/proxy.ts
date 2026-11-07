@@ -3,6 +3,19 @@ import { createServerClient } from "@supabase/ssr";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function updateSession(request: NextRequest) {
+  // Pages that finish a sign-in (social login callback, password-reset link)
+  // must not touch the session first. If the browser still has an old, expired
+  // login, refreshing it fails and Supabase then clears *all* auth cookies —
+  // including the one-time PKCE code verifier the new sign-in needs. That made
+  // the first sign-in attempt fail and only the second one work.
+  const { pathname: path, searchParams } = request.nextUrl;
+  if (
+    path.startsWith("/auth/callback") ||
+    (path === "/reset-password" && searchParams.has("code"))
+  ) {
+    return NextResponse.next({ request });
+  }
+
   let response = NextResponse.next({
     request,
   });
