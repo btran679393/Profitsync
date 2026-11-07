@@ -1345,6 +1345,38 @@ export default function Home() {
   const [listingsError, setListingsError] = useState(false);
   const [listingRange, setListingRange] = useState<ListingRange>("all");
   const [recentlySavedId, setRecentlySavedId] = useState<number | null>(null);
+  const [firstName, setFirstName] = useState("");
+  const [sellerName, setSellerName] = useState("");
+
+  // Name for the greeting: the eBay store name, else the eBay username,
+  // else the person's first name (from their sign-in profile or email).
+  useEffect(() => {
+    let active = true;
+    fetch("/api/ebay/profile")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((profile: { storeName?: string | null; username?: string | null } | null) => {
+        if (active && profile) setSellerName(profile.storeName || profile.username || "");
+      })
+      .catch(() => undefined);
+    createClient()
+      .auth.getUser()
+      .then(({ data }) => {
+        const user = data.user;
+        if (!active || !user) return;
+        const meta = user.user_metadata ?? {};
+        const full = String(meta.full_name ?? meta.name ?? "").trim();
+        const fromEmail = (user.email ?? "").split("@")[0].split(/[._\-+\d]/)[0];
+        const name = full ? full.split(/\s+/)[0] : fromEmail;
+        setFirstName(name ? name.charAt(0).toUpperCase() + name.slice(1) : "");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const hour = now?.getHours();
+  const greeting =
+    hour === undefined ? "Welcome back" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   const savedFlashTimer = useRef<number | undefined>(undefined);
 
   // Enter in a cost box: save it (by leaving the box) and jump to the next
@@ -2225,13 +2257,57 @@ export default function Home() {
                 </span>
               </div>
 
-              <h2 className="text-3xl font-bold tracking-tight text-white">
-                {VIEW_COPY[view].title}
-              </h2>
+              {view === "dashboard" ? (
+                <>
+                  <h2 className="text-3xl font-bold tracking-tight text-white">
+                    {greeting}
+                    {sellerName || firstName ? `, ${sellerName || firstName}` : ""}{" "}
+                    <span aria-hidden="true">👋</span>
+                  </h2>
 
-              <p className="mt-2 text-sm text-slate-400">
-                {VIEW_COPY[view].subtitle}
-              </p>
+                  <p className="mt-2 text-sm leading-6 text-slate-400">
+                    {loading ? (
+                      "Loading your latest numbers…"
+                    ) : totals.orderCount === 0 ? (
+                      <>No sales in the {dateRangeLabel(dateRange).toLowerCase()} yet. Sync your eBay orders to see how you&apos;re doing.</>
+                    ) : (
+                      <>
+                        You&apos;ve made{" "}
+                        <span className={`font-semibold ${totals.netProfit < 0 ? "text-red-400" : "text-emerald-400"}`}>
+                          {money(totals.netProfit)} profit
+                        </span>{" "}
+                        from{" "}
+                        <span className="font-semibold text-slate-200">
+                          {totals.orderCount} sale{totals.orderCount === 1 ? "" : "s"}
+                        </span>{" "}
+                        {dateRange === "all" ? "all time" : `in the ${dateRangeLabel(dateRange).toLowerCase()}`}.
+                        {totals.pendingOrders > 0 && (
+                          <>
+                            {" · "}
+                            <button
+                              type="button"
+                              onClick={() => goToOrders("pending")}
+                              className="font-semibold text-amber-400 transition hover:text-amber-300"
+                            >
+                              {totals.pendingOrders} order{totals.pendingOrders === 1 ? " needs" : "s need"} a cost →
+                            </button>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h2 className="text-3xl font-bold tracking-tight text-white">
+                    {VIEW_COPY[view].title}
+                  </h2>
+
+                  <p className="mt-2 text-sm text-slate-400">
+                    {VIEW_COPY[view].subtitle}
+                  </p>
+                </>
+              )}
             </div>
 
             <button

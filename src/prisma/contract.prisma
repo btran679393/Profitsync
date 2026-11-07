@@ -66,6 +66,11 @@ model EbayConnection {
   accessTokenExpiresAt  TimestamptzString
   refreshTokenExpiresAt TimestamptzString
 
+  // Shown in the dashboard greeting; refreshed on every listing sync.
+  // Added by docs/sql/2026-11-07_ebay_store_name.sql
+  ebayUsername          String?
+  storeName             String?
+
   createdAt             TimestamptzString @default(now())
   updatedAt             temporal.updatedAtString()
 }

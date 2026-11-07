@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { Pool } from "pg";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/prisma/db";
+import { fetchSellerProfile, saveSellerProfile } from "@/lib/ebay/sellerProfile";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -279,6 +280,15 @@ export async function POST() {
       throw error;
     } finally {
       client.release();
+    }
+
+    // Keep the seller's eBay username / store name current for the greeting.
+    // Never fails the listing sync.
+    try {
+      const profile = await fetchSellerProfile(connection.accessToken);
+      if (profile) await saveSellerProfile(pool, connection.id, user.id, profile);
+    } catch (error) {
+      console.error("Refreshing eBay store name failed:", error);
     }
 
     return NextResponse.json({
