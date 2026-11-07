@@ -60,7 +60,20 @@ type EbayTransaction = {
   totalFeeAmount?: Money;
   amount?: Money;
   bookingEntry?: string;
+  references?: Array<{
+    referenceId?: string;
+    referenceType?: string;
+  }>;
 };
+// Shipping label transactions don't always carry orderId at the top level;
+// eBay may list it under references instead.
+function transactionOrderId(transaction: EbayTransaction): string | undefined {
+  return (
+    transaction.orderId ||
+    transaction.references?.find((ref) => ref.referenceType === "ORDER_ID")?.referenceId ||
+    undefined
+  );
+}
 type EbayTransactionsResponse = {
   total?: number;
   transactions?: EbayTransaction[];
@@ -77,6 +90,9 @@ type RefundInfo = {
 type FinancialData = {
   feesByOrder: Map<string, number>;
   refundsByOrder: Map<string, RefundInfo>;
+  // Net shipping label spend per order in cents (purchases minus voids).
+  // null when eBay's label records couldn't be read this time.
+  labelsByOrder: Map<string, number> | null;
 };
 type ExistingOrder = {
   id: number;
@@ -545,7 +561,7 @@ async function getHistoricalOrders(
 async function getFinancialTransactions(
   ebayFinancesBase: string,
   accessToken: string,
-  transactionType: "SALE" | "REFUND"
+  transactionType: "SALE" | "REFUND" | "SHIPPING_LABEL"
 ): Promise<EbayTransaction[]> {
   const transactions: EbayTransaction[] = [];
   const seenTransactions = new Set<string>();
@@ -592,13 +608,15 @@ async function getFinancialTransactions(
       await response.json();
     const pageTransactions = data.transactions ?? [];
     for (const transaction of pageTransactions) {
+      const orderId = transactionOrderId(transaction);
       if (
         transaction.transactionType !== transactionType ||
-        !transaction.orderId ||
+        !orderId ||
         !transaction.transactionId
       ) {
         continue;
       }
+      transaction.orderId = orderId;
       if (
         seenTransactions.has(transaction.transactionId)
       ) {
@@ -716,15 +734,47 @@ async function getFinancialData(
       }
     );
   }
+  // --------------------------------------------
+  // Retrieve SHIPPING_LABEL transactions
+  // (labels bought through eBay; voided labels come back as credits)
+  // Never fails the sync: without them, profit just excludes labels.
+  // --------------------------------------------
+  let labelsByOrder: Map<string, number> | null = new Map();
+  let labelTransactions = 0;
+  try {
+    const labels = await getFinancialTransactions(
+      ebayFinancesBase,
+      accessToken,
+      "SHIPPING_LABEL"
+    );
+    labelTransactions = labels.length;
+    for (const transaction of labels) {
+      if (!transaction.orderId) continue;
+      const amount = parseMoney(transaction.amount);
+      if (amount === null) continue;
+      const cents = Math.abs(amount);
+      const signed = transaction.bookingEntry === "CREDIT" ? -cents : cents;
+      labelsByOrder.set(
+        transaction.orderId,
+        (labelsByOrder.get(transaction.orderId) ?? 0) + signed
+      );
+    }
+  } catch (error) {
+    console.error("Shipping label transactions unavailable:", error);
+    labelsByOrder = null;
+  }
   console.log("ProfitSync financial data:", {
     saleTransactions: sales.length,
     refundTransactions: refunds.length,
+    labelTransactions,
     ordersWithFees: feesByOrder.size,
     ordersWithRefunds: refundsByOrder.size,
+    ordersWithLabels: labelsByOrder?.size ?? null,
   });
   return {
     feesByOrder,
     refundsByOrder,
+    labelsByOrder,
   };
 }
 // ============================================================
@@ -1154,6 +1204,7 @@ export async function POST() {
     const {
       feesByOrder,
       refundsByOrder,
+      labelsByOrder,
     } = financialData;
     // Order-level buyer refunds take priority over seller-side adjustments.
     const buyerRefundsByOrder = new Map<string, RefundInfo>();
@@ -1256,6 +1307,8 @@ export async function POST() {
     let refundedImported = 0;
     let refundsUpdated = 0;
     let listingsLinked = 0;
+    let labelCostsUpdated = 0;
+    let labelColumnMissing = false;
     let fullyRefunded = 0;
     let partiallyRefunded = 0;
     // --------------------------------------------------------
@@ -1581,6 +1634,38 @@ export async function POST() {
             listingsLinked++;
           }
         }
+        // ====================================================
+        // SHIPPING LABEL COSTS
+        // ====================================================
+        // Save each order's net label spend. Needs the optional
+        // "shippingLabelCost" column (docs/sql/2026-11-07_shipping_label_cost.sql);
+        // skipped quietly until it exists.
+        if (labelsByOrder && labelsByOrder.size > 0) {
+          const orderIds = [...labelsByOrder.keys()];
+          const costs = orderIds.map((id) =>
+            formatMoney(Math.max(0, labelsByOrder.get(id) ?? 0))
+          );
+          try {
+            const result = await client.query(
+              `
+                UPDATE public."order" o
+                SET "shippingLabelCost" = v.cost,
+                    "updatedAt" = NOW()
+                FROM unnest($1::text[], $2::numeric[]) AS v(order_id, cost)
+                WHERE o."ebayOrderId" = v.order_id
+                  AND o."userId" = $3
+                  AND o."ebayUserId" = $4
+                  AND o.environment = $5
+                  AND o."shippingLabelCost" IS DISTINCT FROM v.cost
+              `,
+              [orderIds, costs, userId, ebayUserId, environment]
+            );
+            labelCostsUpdated = result.rowCount ?? 0;
+          } catch (error) {
+            if ((error as { code?: string }).code !== "42703") throw error;
+            labelColumnMissing = true;
+          }
+        }
       } finally {
         client.release();
       }
@@ -1604,6 +1689,9 @@ export async function POST() {
       refundedImported,
       refundsUpdated,
       listingsLinked,
+      labelCostsUpdated,
+      labelOrdersFound: labelsByOrder?.size ?? null,
+      labelColumnMissing,
       fullyRefunded,
       partiallyRefunded,
       financialOrdersMatched:

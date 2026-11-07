@@ -17,6 +17,7 @@ export type ListingRow = {
   orderCount: number;
   revenue: number;
   fees: number;
+  shipping: number;
   costs: number;
   refundedCount: number;
   refundLoss: number;
@@ -432,7 +433,7 @@ export default function ListingsSection({
                 <th className="px-3 py-3">Cost / item</th>
                 <th className="px-3 py-3 text-right">Sold</th>
                 <th className="px-3 py-3 text-right">Revenue</th>
-                <th className="px-3 py-3 text-right">Fees + costs</th>
+                <th className="px-3 py-3 text-right">Fees, shipping + costs</th>
                 <th className="px-3 py-3 text-right">Net profit</th>
                 <th className="px-3 py-3">Margin</th>
                 <th className="px-6 py-3 text-right">Last sale</th>
@@ -482,8 +483,10 @@ export default function ListingsSection({
                     </td>
                     <td className="px-3 py-4 text-right text-sm font-medium text-slate-200">{money(row.revenue)}</td>
                     <td className="px-3 py-4 text-right text-sm">
-                      <p className="text-slate-300">{money(row.fees + row.costs)}</p>
-                      <p className="mt-0.5 text-xs text-slate-500">{money(row.fees)} fees</p>
+                      <p className="text-slate-300">{money(row.fees + row.shipping + row.costs)}</p>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {money(row.fees)} fees{row.shipping > 0 ? ` · ${money(row.shipping)} ship` : ""}
+                      </p>
                     </td>
                     <td className="px-3 py-4 text-right text-sm">
                       <p className={`font-semibold ${row.netProfit < 0 ? "text-rose-400" : row.netProfit > 0 ? "text-emerald-400" : "text-slate-400"}`}>

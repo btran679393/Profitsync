@@ -28,6 +28,10 @@ model Order {
   ebayFees     Decimal
   productCost  Decimal?
 
+  // Net shipping label spend through eBay (labels bought minus voided).
+  // Added by docs/sql/2026-11-07_shipping_label_cost.sql
+  shippingLabelCost Decimal?
+
   // Actual eBay listing image URL
   imageUrl     String?
 

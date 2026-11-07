@@ -30,6 +30,7 @@ type ApiListing = {
 
 type Order = {
   id: number;
+  shippingLabelCost: number;
   ebayOrderId: string | null;
   ebayBuyerId: string | null;
   ebayItemId: string | null;
@@ -67,6 +68,7 @@ type ApiOrder = {
   orderDate?: string | null;
   ebayItemId?: string | null;
   quantity?: number | null;
+  shippingLabelCost?: string | number | null;
 };
 
 type SyncResponse = {
@@ -166,6 +168,7 @@ function formatOrders(data: ApiOrder[]): Order[] {
       ebayBuyerId: order.ebayBuyerId ?? null,
       ebayItemId: order.ebayItemId ?? null,
       quantity: Math.max(1, Number(order.quantity) || 1),
+      shippingLabelCost: Math.max(0, Number(order.shippingLabelCost ?? 0) || 0),
       item: order.item,
       imageUrl: order.imageUrl ?? null,
       salePrice: Number(order.salePrice),
@@ -216,7 +219,7 @@ function getOrderProfit(order: Order) {
   if (isFullyRefunded(order)) return null;
   if (!hasRecordedCost(order)) return null;
   return order.salePrice - order.refundAmount -
-    order.ebayFees - Number(order.savedProductCost);
+    order.ebayFees - order.shippingLabelCost - Number(order.savedProductCost);
 }
 
 // ============================================================
@@ -276,7 +279,7 @@ function buildListingRows(orders: Order[], listings: ApiListing[]): ListingRow[]
     key, ebayItemId: null, title, imageUrl: null,
     status: "UNLINKED" as ListingRow["status"],
     price: null, available: null, unitCost: null, unitsSold: 0, orderCount: 0,
-    revenue: 0, fees: 0, costs: 0, refundedCount: 0, refundLoss: 0,
+    revenue: 0, fees: 0, shipping: 0, costs: 0, refundedCount: 0, refundLoss: 0,
     netProfit: 0, margin: null, costMissing: 0, lastSold: null,
     completedRevenue: 0, completedProfit: 0,
   });
@@ -318,6 +321,7 @@ function buildListingRows(orders: Order[], listings: ApiListing[]): ListingRow[]
     const revenue = Math.max(0, order.salePrice - order.refundAmount);
     row.revenue += revenue;
     row.fees += order.ebayFees;
+    row.shipping += order.shippingLabelCost;
     if (hasRecordedCost(order)) {
       row.costs += Number(order.savedProductCost);
       row.completedRevenue += revenue;
@@ -1016,7 +1020,7 @@ function OrderDetailsPanel({
 
   const calculatedProfit = !refunded && validDraft
     ? order.salePrice - order.refundAmount -
-      order.ebayFees - Number(order.productCost)
+      order.ebayFees - order.shippingLabelCost - Number(order.productCost)
     : null;
 
   const profitMargin =
@@ -1175,6 +1179,13 @@ function OrderDetailsPanel({
                   −{money(order.ebayFees)}
                 </span>
               </div>
+
+              {order.shippingLabelCost > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-slate-400">Shipping Label</span>
+                  <span className="text-sm font-semibold text-red-400">−{money(order.shippingLabelCost)}</span>
+                </div>
+              )}
 
               {order.refundAmount > 0 && (
                 <div className="flex items-center justify-between">
@@ -1374,9 +1385,25 @@ export default function Home() {
     };
   }, []);
 
-  const hour = now?.getHours();
+  // Ticks every minute so the greeting and "today" roll over on their own.
+  const [clock, setClock] = useState<Date | null>(null);
+  useEffect(() => {
+    const id = window.setInterval(() => setClock(new Date()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const currentTime = clock ?? now;
+
+  const hour = currentTime?.getHours();
   const greeting =
-    hour === undefined ? "Welcome back" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+    hour === undefined
+      ? "Welcome back"
+      : hour < 5
+        ? "Good evening" // midnight–5 AM still feels like evening
+        : hour < 12
+          ? "Good morning"
+          : hour < 18
+            ? "Good afternoon"
+            : "Good evening";
   const savedFlashTimer = useRef<number | undefined>(undefined);
 
   // Enter in a cost box: save it (by leaving the box) and jump to the next
@@ -1785,6 +1812,7 @@ export default function Home() {
       (sum, order) => sum + Math.max(0, order.salePrice - order.refundAmount), 0
     );
     const totalFees = activeOrders.reduce((sum, order) => sum + order.ebayFees, 0);
+    const totalLabels = activeOrders.reduce((sum, order) => sum + order.shippingLabelCost, 0);
     const completedOrders = activeOrders.filter(hasRecordedCost);
     const totalProductCosts = completedOrders.reduce(
       (sum, order) => sum + Number(order.savedProductCost), 0
@@ -1801,7 +1829,7 @@ export default function Home() {
       ? (netProfit / completedRevenue) * 100 : 0;
     const pendingOrders = activeOrders.length - completedOrders.length;
     return {
-      totalRevenue, totalFees, totalProductCosts, netProfit, refundLosses, profitMargin,
+      totalRevenue, totalFees, totalLabels, totalProductCosts, netProfit, refundLosses, profitMargin,
       completedCount: completedOrders.length, pendingOrders,
       orderCount: activeOrders.length, refundedCount,
     };
@@ -1839,6 +1867,32 @@ export default function Home() {
       null
     );
   }
+
+  // Today / last 7 days activity for the line under the greeting (always
+  // based on the clock, not the date picker, so it never repeats the cards).
+  const activity = useMemo(() => {
+    const summarize = (from: Date) => {
+      const sales = orders.filter((order) => {
+        if (!order.orderDate || isFullyRefunded(order)) return false;
+        const date = new Date(order.orderDate);
+        return date >= from && (!currentTime || date <= currentTime);
+      });
+      return {
+        sales: sales.reduce((sum, order) => sum + order.quantity, 0),
+        profit: sales.reduce((sum, order) => sum + (getOrderProfit(order) ?? 0), 0),
+      };
+    };
+    if (!currentTime) return null;
+    const startOfToday = new Date(currentTime);
+    startOfToday.setHours(0, 0, 0, 0);
+    const startOfWeek = new Date(startOfToday);
+    startOfWeek.setDate(startOfWeek.getDate() - 6);
+    return {
+      today: summarize(startOfToday),
+      week: summarize(startOfWeek),
+      needsCost: orders.filter((order) => !isFullyRefunded(order) && !hasRecordedCost(order)).length,
+    };
+  }, [orders, currentTime]);
 
   const recentOrders = useMemo(
     () =>
@@ -2266,30 +2320,47 @@ export default function Home() {
                   </h2>
 
                   <p className="mt-2 text-sm leading-6 text-slate-400">
-                    {loading ? (
+                    {loading || !activity ? (
                       "Loading your latest numbers…"
-                    ) : totals.orderCount === 0 ? (
-                      <>No sales in the {dateRangeLabel(dateRange).toLowerCase()} yet. Sync your eBay orders to see how you&apos;re doing.</>
+                    ) : orders.length === 0 ? (
+                      <>No sales yet. Click &ldquo;Sync eBay Orders&rdquo; to bring in your eBay sales.</>
                     ) : (
                       <>
-                        You&apos;ve made{" "}
-                        <span className={`font-semibold ${totals.netProfit < 0 ? "text-red-400" : "text-emerald-400"}`}>
-                          {money(totals.netProfit)} profit
-                        </span>{" "}
-                        from{" "}
-                        <span className="font-semibold text-slate-200">
-                          {totals.orderCount} sale{totals.orderCount === 1 ? "" : "s"}
-                        </span>{" "}
-                        {dateRange === "all" ? "all time" : `in the ${dateRangeLabel(dateRange).toLowerCase()}`}.
-                        {totals.pendingOrders > 0 && (
+                        <span className="font-semibold text-slate-200">Today:</span>{" "}
+                        {activity.today.sales === 0 ? (
+                          "no sales yet"
+                        ) : (
                           <>
-                            {" · "}
+                            {activity.today.sales} sale{activity.today.sales === 1 ? "" : "s"} ·{" "}
+                            <span className={`font-semibold ${activity.today.profit < 0 ? "text-red-400" : "text-emerald-400"}`}>
+                              {activity.today.profit < 0 ? "−" : "+"}{money(Math.abs(activity.today.profit))}
+                            </span>
+                          </>
+                        )}
+                        <span className="mx-2 text-slate-600">|</span>
+                        <span className="font-semibold text-slate-200">Last 7 days:</span>{" "}
+                        {activity.week.sales === 0 ? (
+                          "no sales"
+                        ) : (
+                          <>
+                            {activity.week.sales} sale{activity.week.sales === 1 ? "" : "s"} ·{" "}
+                            <span className={`font-semibold ${activity.week.profit < 0 ? "text-red-400" : "text-emerald-400"}`}>
+                              {activity.week.profit < 0 ? "−" : "+"}{money(Math.abs(activity.week.profit))}
+                            </span>
+                          </>
+                        )}
+                        {activity.needsCost > 0 && (
+                          <>
+                            <span className="mx-2 text-slate-600">|</span>
                             <button
                               type="button"
-                              onClick={() => goToOrders("pending")}
+                              onClick={() => {
+                                setDateRange("all");
+                                goToOrders("pending");
+                              }}
                               className="font-semibold text-amber-400 transition hover:text-amber-300"
                             >
-                              {totals.pendingOrders} order{totals.pendingOrders === 1 ? " needs" : "s need"} a cost →
+                              {activity.needsCost} order{activity.needsCost === 1 ? " needs" : "s need"} a cost →
                             </button>
                           </>
                         )}
@@ -2447,9 +2518,11 @@ export default function Home() {
             />
 
             <MetricCard
-              title="eBay Fees"
-              value={money(totals.totalFees)}
-              description="Fees on non-fully-refunded orders"
+              title={totals.totalLabels > 0 ? "eBay Fees & Shipping" : "eBay Fees"}
+              value={money(totals.totalFees + totals.totalLabels)}
+              description={totals.totalLabels > 0
+                ? `${money(totals.totalFees)} fees · ${money(totals.totalLabels)} shipping labels`
+                : "Fees on non-fully-refunded orders"}
               icon="dollar"
               accent="amber"
             />
@@ -2977,7 +3050,7 @@ export default function Home() {
 
                       const profit =
                         order.salePrice - order.refundAmount -
-                        order.ebayFees - Number(order.productCost);
+                        order.ebayFees - order.shippingLabelCost - Number(order.productCost);
 
                       const isSaving =
                         savingId === order.id;
@@ -3041,6 +3114,11 @@ export default function Home() {
 
                           <td className="px-3 py-4 text-sm text-slate-400">
                             {money(order.ebayFees)}
+                            {order.shippingLabelCost > 0 && (
+                              <p className="mt-0.5 text-[11px] text-slate-500" title="Shipping label bought through eBay">
+                                + {money(order.shippingLabelCost)} label
+                              </p>
+                            )}
                           </td>
 
                           {/* Product cost */}

@@ -10,14 +10,22 @@ export async function GET() {
   if (!process.env.DATABASE_URL) return NextResponse.json({ error: "Database configuration unavailable." }, { status: 503 });
   const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 10000 });
   try {
-    const result = await pool.query(`
+    const selectOrders = (extraColumns: string) => pool.query(`
       SELECT id, "ebayOrderId", "ebayUserId", "ebayBuyerId", "userId",
         item, "imageUrl", "salePrice", "ebayFees", "productCost", status,
         "refundAmount", "refundedAt", "refundOutcome", "refundShippingLoss", "refundFeeLoss",
-        "ebayItemId", quantity,
+        "ebayItemId", quantity,${extraColumns}
         "orderDate", "createdAt", "updatedAt"
       FROM public."order" WHERE "userId" = $1 ORDER BY "orderDate" DESC, id DESC
     `, [user.id]);
+    let result;
+    try {
+      result = await selectOrders(` "shippingLabelCost",`);
+    } catch (e) {
+      // Optional column not added yet (docs/sql/2026-11-07_shipping_label_cost.sql).
+      if ((e as { code?: string }).code !== "42703") throw e;
+      result = await selectOrders("");
+    }
     return NextResponse.json(result.rows, { headers: { "Cache-Control": "private, no-store, max-age=0" } });
   } catch (e) {
     console.error("Failed to retrieve orders:", e);
