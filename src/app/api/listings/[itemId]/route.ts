@@ -40,10 +40,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ it
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const clearing = body.unitCost === null || body.unitCost === "";
-  const unitCost = clearing ? null : parseMoney(body.unitCost);
+  // Which default to save: cost per item, or shipping per order.
+  const field = body.field === "shippingCost" ? "shippingCost" : "unitCost";
+  const raw = body[field];
+  const clearing = raw === null || raw === "";
+  const unitCost = clearing ? null : parseMoney(raw);
   if (!clearing && unitCost === null) {
-    return NextResponse.json({ error: "Enter a cost like 8 or 8.50." }, { status: 400 });
+    return NextResponse.json({ error: "Enter an amount like 8 or 8.50." }, { status: 400 });
   }
   const applyToPast = body.applyToPast === true && unitCost !== null;
 
@@ -57,7 +60,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ it
     const listing = await client.query<{ title: string; ebayUserId: string }>(
       `
       UPDATE public."EbayListing"
-      SET "unitCost" = $1::numeric, "updatedAt" = NOW()
+      SET "${field}" = $1::numeric, "updatedAt" = NOW()
       WHERE "userId" = $2 AND "ebayItemId" = $3 AND environment = 'PRODUCTION'
       RETURNING title, "ebayUserId"
       `,
@@ -72,15 +75,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ it
     if (applyToPast) {
       // Same matching as the Listings page: the saved listing ID, or (for
       // older orders without one) the exact same item title.
+      // Cost per item is multiplied by units sold; shipping is per order.
+      const setClause =
+        field === "unitCost"
+          ? `"productCost" = ROUND($1::numeric * GREATEST(COALESCE(o.quantity, 1), 1), 2), status = 'COMPLETED'`
+          : `"shippingCost" = $1::numeric`;
+      const target = field === "unitCost" ? `"productCost"` : `"shippingCost"`;
       const result = await client.query(
         `
         UPDATE public."order" o
-        SET "productCost" = ROUND($1::numeric * GREATEST(COALESCE(o.quantity, 1), 1), 2),
-            status = 'COMPLETED',
+        SET ${setClause},
             "updatedAt" = NOW()
         WHERE o."userId" = $2
           AND o.environment = 'PRODUCTION'
-          AND o."productCost" IS NULL
+          AND o.${target} IS NULL
           AND o.status NOT IN ('REFUNDED', 'PARTIALLY_REFUNDED')
           AND COALESCE(o."refundAmount", 0) = 0
           AND (
@@ -98,9 +106,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ it
     }
 
     await client.query("COMMIT");
-    return NextResponse.json({ success: true, unitCost, applied });
+    return NextResponse.json({ success: true, field, value: unitCost, applied });
   } catch (e) {
     await client.query("ROLLBACK").catch(() => undefined);
+    if ((e as { code?: string }).code === "42703") {
+      return NextResponse.json(
+        { error: "Shipping defaults need a one-time database update first (docs/sql/2026-11-07_shipping_cost.sql)." },
+        { status: 409 }
+      );
+    }
     console.error("Saving listing cost failed:", e);
     return NextResponse.json({ error: "Couldn't save the cost. Please try again." }, { status: 500 });
   } finally {

@@ -26,11 +26,15 @@ type ApiListing = {
   quantity: number;
   status: string;
   unitCost: string | number | null;
+  shippingCost?: string | number | null;
 };
 
 type Order = {
   id: number;
   shippingLabelCost: number;
+  // Shipping paid outside eBay, typed by the seller ("" = not set).
+  shippingCost: string;
+  savedShippingCost: string;
   ebayOrderId: string | null;
   ebayBuyerId: string | null;
   ebayItemId: string | null;
@@ -69,6 +73,7 @@ type ApiOrder = {
   ebayItemId?: string | null;
   quantity?: number | null;
   shippingLabelCost?: string | number | null;
+  shippingCost?: string | number | null;
 };
 
 type SyncResponse = {
@@ -169,6 +174,8 @@ function formatOrders(data: ApiOrder[]): Order[] {
       ebayItemId: order.ebayItemId ?? null,
       quantity: Math.max(1, Number(order.quantity) || 1),
       shippingLabelCost: Math.max(0, Number(order.shippingLabelCost ?? 0) || 0),
+      shippingCost: order.shippingCost === null || order.shippingCost === undefined ? "" : Number(order.shippingCost).toFixed(2),
+      savedShippingCost: order.shippingCost === null || order.shippingCost === undefined ? "" : Number(order.shippingCost).toFixed(2),
       item: order.item,
       imageUrl: order.imageUrl ?? null,
       salePrice: Number(order.salePrice),
@@ -212,6 +219,14 @@ function hasRecordedCost(order: Order) {
   return isValidCost(order.savedProductCost);
 }
 
+// Shipping counted against profit: what the seller typed in, otherwise any
+// shipping label bought through eBay. Never both, so nothing is counted twice.
+function getShippingCost(order: Order) {
+  return order.savedShippingCost !== ""
+    ? Number(order.savedShippingCost)
+    : order.shippingLabelCost;
+}
+
 function getOrderProfit(order: Order) {
   // A fully refunded order is removed from profit reporting.
   // Its retained seller fees or other sunk costs may still need
@@ -219,7 +234,7 @@ function getOrderProfit(order: Order) {
   if (isFullyRefunded(order)) return null;
   if (!hasRecordedCost(order)) return null;
   return order.salePrice - order.refundAmount -
-    order.ebayFees - order.shippingLabelCost - Number(order.savedProductCost);
+    order.ebayFees - getShippingCost(order) - Number(order.savedProductCost);
 }
 
 // ============================================================
@@ -278,9 +293,9 @@ function buildListingRows(orders: Order[], listings: ApiListing[]): ListingRow[]
   const blankRow = (key: string, title: string) => ({
     key, ebayItemId: null, title, imageUrl: null,
     status: "UNLINKED" as ListingRow["status"],
-    price: null, available: null, unitCost: null, unitsSold: 0, orderCount: 0,
+    price: null, available: null, unitCost: null, shippingDefault: null, unitsSold: 0, orderCount: 0,
     revenue: 0, fees: 0, shipping: 0, costs: 0, refundedCount: 0, refundLoss: 0,
-    netProfit: 0, margin: null, costMissing: 0, lastSold: null,
+    netProfit: 0, margin: null, costMissing: 0, shippingMissing: 0, lastSold: null,
     completedRevenue: 0, completedProfit: 0,
   });
 
@@ -294,6 +309,7 @@ function buildListingRows(orders: Order[], listings: ApiListing[]): ListingRow[]
       price: Number(listing.listingPrice),
       available: listing.status === "ACTIVE" ? listing.quantity : 0,
       unitCost: listing.unitCost === null || listing.unitCost === undefined ? null : Number(listing.unitCost),
+      shippingDefault: listing.shippingCost === null || listing.shippingCost === undefined ? null : Number(listing.shippingCost),
     });
     listingIdByTitle.set(normalizeTitle(listing.title), listing.ebayItemId);
   }
@@ -321,7 +337,8 @@ function buildListingRows(orders: Order[], listings: ApiListing[]): ListingRow[]
     const revenue = Math.max(0, order.salePrice - order.refundAmount);
     row.revenue += revenue;
     row.fees += order.ebayFees;
-    row.shipping += order.shippingLabelCost;
+    row.shipping += getShippingCost(order);
+    if (order.savedShippingCost === "") row.shippingMissing++;
     if (hasRecordedCost(order)) {
       row.costs += Number(order.savedProductCost);
       row.completedRevenue += revenue;
@@ -965,6 +982,91 @@ function ProfitChart({
 // ORDER DETAILS PANEL
 // ============================================================
 
+// ============================================================
+// SHIPPING COST INPUT (shipping paid outside eBay)
+// ============================================================
+
+function ShippingInput({
+  order,
+  enabled,
+  onSave,
+  className = "",
+}: {
+  order: Order;
+  enabled: boolean;
+  onSave: (id: number, value: string) => Promise<void>;
+  className?: string;
+}) {
+  const [value, setValue] = useState(order.savedShippingCost);
+  const [lastSaved, setLastSaved] = useState(order.savedShippingCost);
+  const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+
+  // Pick up changes saved elsewhere (table vs. details panel, listing defaults).
+  if (order.savedShippingCost !== lastSaved && state !== "saving") {
+    setLastSaved(order.savedShippingCost);
+    setValue(order.savedShippingCost);
+  }
+
+  const valid = value.trim() === "" || isValidCost(value);
+
+  async function save() {
+    const trimmed = value.trim();
+    if (!valid || trimmed === lastSaved) return;
+    setState("saving");
+    try {
+      await onSave(order.id, trimmed);
+      setState("saved");
+    } catch {
+      setState("error");
+      setValue(lastSaved);
+    }
+  }
+
+  const placeholder =
+    order.shippingLabelCost > 0 ? `${order.shippingLabelCost.toFixed(2)} eBay label` : "Shipping";
+
+  return (
+    <div className={className}>
+      <div className="relative">
+        <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-500">$</span>
+        <input
+          type="text"
+          inputMode="decimal"
+          value={value}
+          placeholder={placeholder}
+          disabled={!enabled}
+          title={
+            enabled
+              ? "What shipping cost you for this order (outside eBay). Leave blank to use any eBay label."
+              : "Run docs/sql/2026-11-07_shipping_cost.sql in Supabase to turn on shipping costs."
+          }
+          aria-label={`Shipping cost for ${order.item}`}
+          onChange={(event) => {
+            setValue(event.target.value);
+            setState("idle");
+          }}
+          onBlur={() => void save()}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+            if (event.key === "Escape") setValue(lastSaved);
+          }}
+          className={`w-full rounded-lg border bg-[#0b1120] py-1.5 pl-6 pr-6 text-xs text-white outline-none transition placeholder:text-slate-600 focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-40 ${
+            valid ? "border-white/10" : "border-red-500/60"
+          }`}
+        />
+        <span className="absolute right-2 top-1/2 -translate-y-1/2" aria-live="polite">
+          {state === "saving" ? (
+            <span className="block h-3 w-3 animate-spin rounded-full border-2 border-slate-500 border-t-transparent" aria-label="Saving" />
+          ) : state === "saved" ? (
+            <Icon name="check" size={12} className="text-emerald-400" />
+          ) : null}
+        </span>
+      </div>
+      {state === "error" && <p className="mt-1 text-[11px] text-red-400">Couldn&apos;t save shipping</p>}
+    </div>
+  );
+}
+
 function OrderDetailsPanel({
   order,
   saving,
@@ -974,6 +1076,8 @@ function OrderDetailsPanel({
   onChangeCost,
   onSaveCost,
   onSaveRefund,
+  shippingEnabled,
+  onSaveShipping,
 }: {
   order: Order;
   saving: boolean;
@@ -982,6 +1086,8 @@ function OrderDetailsPanel({
   onClose: () => void;
   onChangeCost: (id: number, value: string) => void;
   onSaveCost: (id: number, value: string) => Promise<void>;
+  shippingEnabled: boolean;
+  onSaveShipping: (id: number, value: string) => Promise<void>;
   onSaveRefund: (id: number, data: { refundOutcome: string; productCost: number | null; refundShippingLoss: number; refundFeeLoss: number }) => Promise<void>;
 }) {
   const [refundOutcome, setRefundOutcome] = useState(order.refundOutcome ?? "NOT_SHIPPED");
@@ -1020,7 +1126,7 @@ function OrderDetailsPanel({
 
   const calculatedProfit = !refunded && validDraft
     ? order.salePrice - order.refundAmount -
-      order.ebayFees - order.shippingLabelCost - Number(order.productCost)
+      order.ebayFees - getShippingCost(order) - Number(order.productCost)
     : null;
 
   const profitMargin =
@@ -1180,12 +1286,20 @@ function OrderDetailsPanel({
                 </span>
               </div>
 
-              {order.shippingLabelCost > 0 && (
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-slate-400">Shipping Label</span>
-                  <span className="text-sm font-semibold text-red-400">−{money(order.shippingLabelCost)}</span>
-                </div>
-              )}
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-sm text-slate-400">
+                  Shipping
+                  {order.savedShippingCost === "" && order.shippingLabelCost > 0 && (
+                    <span className="ml-1 text-xs text-slate-500">(eBay label)</span>
+                  )}
+                </span>
+                <ShippingInput
+                  order={order}
+                  enabled={shippingEnabled}
+                  onSave={onSaveShipping}
+                  className="w-36"
+                />
+              </div>
 
               {order.refundAmount > 0 && (
                 <div className="flex items-center justify-between">
@@ -1356,6 +1470,7 @@ export default function Home() {
   const [listingsError, setListingsError] = useState(false);
   const [listingRange, setListingRange] = useState<ListingRange>("all");
   const [recentlySavedId, setRecentlySavedId] = useState<number | null>(null);
+  const [shippingEnabled, setShippingEnabled] = useState(false);
   const [firstName, setFirstName] = useState("");
   const [sellerName, setSellerName] = useState("");
 
@@ -1510,8 +1625,29 @@ export default function Home() {
     const data: ApiOrder[] = await response.json();
 
     setOrders(formatOrders(data));
+    setShippingEnabled(response.headers.get("X-Shipping-Cost-Enabled") === "1");
     setLoadError("");
   }, []);
+
+  // Save what shipping cost for one order (blank clears it).
+  async function saveShippingCost(id: number, value: string) {
+    const response = await fetch(`/api/orders/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shippingCost: value === "" ? null : value }),
+    });
+    if (!response.ok) {
+      const data: { error?: string } = await response.json().catch(() => ({}));
+      setLoadError(data.error || "Failed to save shipping cost. Please try again.");
+      throw new Error(data.error || "Failed to save shipping cost.");
+    }
+    const formatted = value === "" ? "" : Number(value).toFixed(2);
+    setOrders((current) =>
+      current.map((order) =>
+        order.id === id ? { ...order, shippingCost: formatted, savedShippingCost: formatted } : order
+      )
+    );
+  }
 
   // ----------------------------------------------------------
   // LOAD + SYNC LISTINGS
@@ -1530,11 +1666,11 @@ export default function Home() {
   }, []);
 
   // Save a listing's cost per item; optionally fill it into past sales.
-  async function saveListingCost(itemId: string, unitCost: string, applyToPast: boolean) {
+  async function saveListingCost(itemId: string, field: "unitCost" | "shippingCost", value: string, applyToPast: boolean) {
     const response = await fetch(`/api/listings/${encodeURIComponent(itemId)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ unitCost: unitCost === "" ? null : unitCost, applyToPast }),
+      body: JSON.stringify({ field, [field]: value === "" ? null : value, applyToPast }),
     });
     const data: { success?: boolean; applied?: number; error?: string } = await response.json();
     if (!response.ok || !data.success) throw new Error(data.error || "Couldn't save the cost.");
@@ -1812,7 +1948,7 @@ export default function Home() {
       (sum, order) => sum + Math.max(0, order.salePrice - order.refundAmount), 0
     );
     const totalFees = activeOrders.reduce((sum, order) => sum + order.ebayFees, 0);
-    const totalLabels = activeOrders.reduce((sum, order) => sum + order.shippingLabelCost, 0);
+    const totalLabels = activeOrders.reduce((sum, order) => sum + getShippingCost(order), 0);
     const completedOrders = activeOrders.filter(hasRecordedCost);
     const totalProductCosts = completedOrders.reduce(
       (sum, order) => sum + Number(order.savedProductCost), 0
@@ -2521,7 +2657,7 @@ export default function Home() {
               title={totals.totalLabels > 0 ? "eBay Fees & Shipping" : "eBay Fees"}
               value={money(totals.totalFees + totals.totalLabels)}
               description={totals.totalLabels > 0
-                ? `${money(totals.totalFees)} fees · ${money(totals.totalLabels)} shipping labels`
+                ? `${money(totals.totalFees)} fees · ${money(totals.totalLabels)} shipping`
                 : "Fees on non-fully-refunded orders"}
               icon="dollar"
               accent="amber"
@@ -3013,7 +3149,7 @@ export default function Home() {
                       </th>
 
                       <th className="px-3 py-4">
-                        eBay Fees
+                        Fees · Shipping
                       </th>
 
                       <th className="px-3 py-4">
@@ -3050,7 +3186,7 @@ export default function Home() {
 
                       const profit =
                         order.salePrice - order.refundAmount -
-                        order.ebayFees - order.shippingLabelCost - Number(order.productCost);
+                        order.ebayFees - getShippingCost(order) - Number(order.productCost);
 
                       const isSaving =
                         savingId === order.id;
@@ -3114,10 +3250,13 @@ export default function Home() {
 
                           <td className="px-3 py-4 text-sm text-slate-400">
                             {money(order.ebayFees)}
-                            {order.shippingLabelCost > 0 && (
-                              <p className="mt-0.5 text-[11px] text-slate-500" title="Shipping label bought through eBay">
-                                + {money(order.shippingLabelCost)} label
-                              </p>
+                            {!refunded && (
+                              <ShippingInput
+                                order={order}
+                                enabled={shippingEnabled}
+                                onSave={saveShippingCost}
+                                className="mt-1.5 w-28"
+                              />
                             )}
                           </td>
 
@@ -3310,6 +3449,7 @@ export default function Home() {
               hasSyncedListings={listings.length > 0}
               onRefresh={() => void syncListings()}
               onSaveCost={saveListingCost}
+              shippingEnabled={shippingEnabled}
             />
           )}
 
@@ -3344,6 +3484,8 @@ export default function Home() {
           onChangeCost={updateProductCost}
           onSaveCost={saveProductCost}
           onSaveRefund={saveRefundOutcome}
+          shippingEnabled={shippingEnabled}
+          onSaveShipping={saveShippingCost}
         />
       )}
     </div>

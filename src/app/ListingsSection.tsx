@@ -13,6 +13,7 @@ export type ListingRow = {
   price: number | null;
   available: number | null;
   unitCost: number | null;
+  shippingDefault: number | null;
   unitsSold: number;
   orderCount: number;
   revenue: number;
@@ -24,6 +25,7 @@ export type ListingRow = {
   netProfit: number;
   margin: number | null;
   costMissing: number;
+  shippingMissing: number;
   lastSold: string | null;
 };
 
@@ -129,16 +131,32 @@ function Thumb({ src, alt }: { src: string | null; alt: string }) {
   );
 }
 
+export type ListingCostField = "unitCost" | "shippingCost";
+
 export type SaveListingCost = (
   itemId: string,
-  unitCost: string,
+  field: ListingCostField,
+  value: string,
   applyToPast: boolean
 ) => Promise<number>;
 
-// "Cost per item" box: saves on Enter or when you click away, then offers
-// to fill the same cost into this listing's past sales that have none.
-function CostCell({ row, onSave }: { row: ListingRow; onSave: SaveListingCost }) {
-  const initial = row.unitCost === null ? "" : row.unitCost.toFixed(2);
+// "Cost / item" or "Ship / order" box: saves on Enter or when you click away,
+// then offers to fill the same amount into this listing's past sales that
+// have none.
+function CostCell({
+  row,
+  onSave,
+  field = "unitCost",
+  disabled = false,
+}: {
+  row: ListingRow;
+  onSave: SaveListingCost;
+  field?: ListingCostField;
+  disabled?: boolean;
+}) {
+  const saved = field === "unitCost" ? row.unitCost : row.shippingDefault;
+  const missing = field === "unitCost" ? row.costMissing : row.shippingMissing;
+  const initial = saved === null ? "" : saved.toFixed(2);
   const [value, setValue] = useState(initial);
   const [lastSaved, setLastSaved] = useState(initial);
   const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -162,7 +180,7 @@ function CostCell({ row, onSave }: { row: ListingRow; onSave: SaveListingCost })
     setState("saving");
     setNote("");
     try {
-      const applied = await onSave(itemId, trimmed, applyToPast);
+      const applied = await onSave(itemId, field, trimmed, applyToPast);
       const formatted = trimmed === "" ? "" : Number(trimmed).toFixed(2);
       setValue(formatted);
       setLastSaved(formatted);
@@ -175,14 +193,16 @@ function CostCell({ row, onSave }: { row: ListingRow; onSave: SaveListingCost })
   }
 
   return (
-    <div className="w-32">
+    <div className={field === "unitCost" ? "w-32" : "w-28"}>
       <div className="relative">
         <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-slate-500">$</span>
         <input
           inputMode="decimal"
           value={value}
-          placeholder="Cost"
-          aria-label={`Cost per item for ${row.title}`}
+          disabled={disabled}
+          title={disabled ? "Run docs/sql/2026-11-07_shipping_cost.sql in Supabase to turn on shipping costs." : undefined}
+          placeholder={field === "unitCost" ? "Cost" : "Ship"}
+          aria-label={`${field === "unitCost" ? "Cost per item" : "Shipping per order"} for ${row.title}`}
           onChange={(e) => {
             setValue(e.target.value);
             setState("idle");
@@ -195,7 +215,7 @@ function CostCell({ row, onSave }: { row: ListingRow; onSave: SaveListingCost })
               e.currentTarget.blur();
             }
           }}
-          className={`w-full rounded-lg border bg-[#0b1120] py-1.5 pl-6 pr-7 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-blue-500 ${
+          className={`w-full rounded-lg border bg-[#0b1120] py-1.5 pl-6 pr-7 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-40 ${
             valid ? "border-white/10" : "border-rose-500/60"
           }`}
         />
@@ -208,14 +228,14 @@ function CostCell({ row, onSave }: { row: ListingRow; onSave: SaveListingCost })
       </div>
       {note ? (
         <p className={`mt-1 text-[11px] ${state === "error" ? "text-rose-400" : "text-emerald-400"}`}>{note}</p>
-      ) : lastSaved !== "" && row.costMissing > 0 ? (
+      ) : lastSaved !== "" && missing > 0 ? (
         <button
           type="button"
           onClick={() => void save(true)}
           disabled={state === "saving"}
           className="mt-1 text-[11px] font-semibold text-blue-400 transition hover:text-blue-300"
         >
-          Fill {row.costMissing} past sale{row.costMissing === 1 ? "" : "s"}
+          Fill {missing} past sale{missing === 1 ? "" : "s"}
         </button>
       ) : !valid ? (
         <p className="mt-1 text-[11px] text-rose-400">Like 8 or 8.50</p>
@@ -251,6 +271,7 @@ export default function ListingsSection({
   hasSyncedListings,
   onRefresh,
   onSaveCost,
+  shippingEnabled,
 }: {
   rows: ListingRow[];
   loading: boolean;
@@ -262,6 +283,7 @@ export default function ListingsSection({
   hasSyncedListings: boolean;
   onRefresh: () => void;
   onSaveCost: SaveListingCost;
+  shippingEnabled: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -425,12 +447,13 @@ export default function ListingsSection({
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1200px]">
+          <table className="w-full min-w-[1320px]">
             <thead>
               <tr className="border-b border-white/[0.07] text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                 <th className="px-6 py-3">Listing</th>
                 <th className="px-3 py-3 text-right">Price · Stock</th>
                 <th className="px-3 py-3">Cost / item</th>
+                <th className="px-3 py-3">Ship / order</th>
                 <th className="px-3 py-3 text-right">Sold</th>
                 <th className="px-3 py-3 text-right">Revenue</th>
                 <th className="px-3 py-3 text-right">Fees, shipping + costs</th>
@@ -476,6 +499,9 @@ export default function ListingsSection({
                     </td>
                     <td className="px-3 py-4">
                       <CostCell row={row} onSave={onSaveCost} />
+                    </td>
+                    <td className="px-3 py-4">
+                      <CostCell row={row} onSave={onSaveCost} field="shippingCost" disabled={!shippingEnabled} />
                     </td>
                     <td className="px-3 py-4 text-right text-sm">
                       <p className="font-semibold text-white">{row.unitsSold}</p>

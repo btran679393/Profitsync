@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { Pool } from "pg";
 import { createClient } from "@/lib/supabase/server";
+import { existingColumns } from "@/lib/db/optionalColumns";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,9 +24,12 @@ export async function GET() {
 
   const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 10000 });
   try {
+    // "shippingCost" is added by docs/sql/2026-11-07_shipping_cost.sql.
+    const optional = await existingColumns(pool, "EbayListing", ["shippingCost"]);
+    const shipping = optional.has("shippingCost") ? `"shippingCost",` : "";
     const result = await pool.query(
       `
-      SELECT "ebayItemId", title, sku, "imageUrl", "listingPrice", quantity, status, "unitCost", "updatedAt"
+      SELECT "ebayItemId", title, sku, "imageUrl", "listingPrice", quantity, status, "unitCost", ${shipping} "updatedAt"
       FROM public."EbayListing"
       WHERE "userId" = $1 AND environment = 'PRODUCTION'
       ORDER BY status = 'ACTIVE' DESC, "updatedAt" DESC

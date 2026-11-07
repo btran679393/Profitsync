@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { Pool } from "pg";
+import { existingColumns } from "@/lib/db/optionalColumns";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+// Columns added by optional SQL files in docs/sql.
+const OPTIONAL_COLUMNS = ["shippingLabelCost", "shippingCost"];
+
 export async function GET() {
   const supabase = await createClient();
   const { data: { user }, error } = await supabase.auth.getUser();
@@ -10,23 +15,23 @@ export async function GET() {
   if (!process.env.DATABASE_URL) return NextResponse.json({ error: "Database configuration unavailable." }, { status: 503 });
   const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 10000 });
   try {
-    const selectOrders = (extraColumns: string) => pool.query(`
+    const optional = await existingColumns(pool, "order", OPTIONAL_COLUMNS);
+    const extra = OPTIONAL_COLUMNS.filter((c) => optional.has(c)).map((c) => ` "${c}",`).join("");
+    const result = await pool.query(`
       SELECT id, "ebayOrderId", "ebayUserId", "ebayBuyerId", "userId",
         item, "imageUrl", "salePrice", "ebayFees", "productCost", status,
         "refundAmount", "refundedAt", "refundOutcome", "refundShippingLoss", "refundFeeLoss",
-        "ebayItemId", quantity,${extraColumns}
+        "ebayItemId", quantity,${extra}
         "orderDate", "createdAt", "updatedAt"
       FROM public."order" WHERE "userId" = $1 ORDER BY "orderDate" DESC, id DESC
     `, [user.id]);
-    let result;
-    try {
-      result = await selectOrders(` "shippingLabelCost",`);
-    } catch (e) {
-      // Optional column not added yet (docs/sql/2026-11-07_shipping_label_cost.sql).
-      if ((e as { code?: string }).code !== "42703") throw e;
-      result = await selectOrders("");
-    }
-    return NextResponse.json(result.rows, { headers: { "Cache-Control": "private, no-store, max-age=0" } });
+    return NextResponse.json(result.rows, {
+      headers: {
+        "Cache-Control": "private, no-store, max-age=0",
+        // Lets the dashboard know whether shipping costs can be saved yet.
+        "X-Shipping-Cost-Enabled": optional.has("shippingCost") ? "1" : "0",
+      },
+    });
   } catch (e) {
     console.error("Failed to retrieve orders:", e);
     return NextResponse.json({ error: "Failed to retrieve orders." }, { status: 500 });

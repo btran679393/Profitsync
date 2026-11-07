@@ -32,6 +32,10 @@ model Order {
   // Added by docs/sql/2026-11-07_shipping_label_cost.sql
   shippingLabelCost Decimal?
 
+  // Shipping the seller paid outside eBay (typed in). Overrides the eBay
+  // label cost in profit. Added by docs/sql/2026-11-07_shipping_cost.sql
+  shippingCost      Decimal?
+
   // Actual eBay listing image URL
   imageUrl     String?
 
@@ -108,6 +112,10 @@ model EbayListing {
   // What one unit costs the seller. New sales from this listing get
   // productCost = unitCost × quantity automatically.
   unitCost      Decimal?
+
+  // Default shipping per order for new sales from this listing.
+  // Added by docs/sql/2026-11-07_shipping_cost.sql
+  shippingCost  Decimal?
 
   // Listing status:
   // ACTIVE

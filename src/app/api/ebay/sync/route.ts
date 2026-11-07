@@ -1309,6 +1309,8 @@ export async function POST() {
     let listingsLinked = 0;
     let labelCostsUpdated = 0;
     let labelColumnMissing = false;
+    let shippingDefaultsApplied = 0;
+    const syncStartedAt = new Date().toISOString();
     let fullyRefunded = 0;
     let partiallyRefunded = 0;
     // --------------------------------------------------------
@@ -1666,6 +1668,35 @@ export async function POST() {
             labelColumnMissing = true;
           }
         }
+        // ====================================================
+        // DEFAULT SHIPPING FROM LISTINGS (new orders only)
+        // ====================================================
+        // Needs docs/sql/2026-11-07_shipping_cost.sql; skipped until then.
+        if (imported > 0) {
+          try {
+            const result = await client.query(
+              `
+                UPDATE public."order" o
+                SET "shippingCost" = l."shippingCost", "updatedAt" = NOW()
+                FROM public."EbayListing" l
+                WHERE o."userId" = $1
+                  AND o."ebayUserId" = $2
+                  AND o.environment = $3
+                  AND o."createdAt" >= $4::timestamptz
+                  AND o."shippingCost" IS NULL
+                  AND l."userId" = o."userId"
+                  AND l."ebayUserId" = o."ebayUserId"
+                  AND l.environment = o.environment
+                  AND l."ebayItemId" = o."ebayItemId"
+                  AND l."shippingCost" IS NOT NULL
+              `,
+              [userId, ebayUserId, environment, syncStartedAt]
+            );
+            shippingDefaultsApplied = result.rowCount ?? 0;
+          } catch (error) {
+            if ((error as { code?: string }).code !== "42703") throw error;
+          }
+        }
       } finally {
         client.release();
       }
@@ -1692,6 +1723,7 @@ export async function POST() {
       labelCostsUpdated,
       labelOrdersFound: labelsByOrder?.size ?? null,
       labelColumnMissing,
+      shippingDefaultsApplied,
       fullyRefunded,
       partiallyRefunded,
       financialOrdersMatched:

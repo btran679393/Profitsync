@@ -27,6 +27,32 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw Error();
     body = raw as Record<string, unknown>;
   } catch { return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 }); }
+  // Shipping you paid outside eBay for this order; null/"" clears it.
+  if ("shippingCost" in body && !("productCost" in body) && !("refundOutcome" in body)) {
+    const clearing = body.shippingCost === null || body.shippingCost === "";
+    const shippingCost = clearing ? null : parseMoney(body.shippingCost);
+    if (!clearing && shippingCost === null) return NextResponse.json({ error: "Enter a shipping cost like 4.50." }, { status: 400 });
+    if (!process.env.DATABASE_URL) return NextResponse.json({ error: "Database configuration unavailable." }, { status: 503 });
+    const shipPool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 10000 });
+    try {
+      const result = await shipPool.query(
+        `UPDATE public."order" SET "shippingCost" = $1::numeric, "updatedAt" = NOW()
+         WHERE id = $2 AND "userId" = $3 RETURNING id, "shippingCost"`,
+        [shippingCost, orderId, user.id]
+      );
+      if (!result.rowCount) return NextResponse.json({ error: "Order not found." }, { status: 404 });
+      return NextResponse.json(result.rows[0]);
+    } catch (e) {
+      if ((e as { code?: string }).code === "42703") {
+        return NextResponse.json(
+          { error: "Shipping costs need a one-time database update first (docs/sql/2026-11-07_shipping_cost.sql)." },
+          { status: 409 }
+        );
+      }
+      console.error("Saving shipping cost failed:", e);
+      return NextResponse.json({ error: "Couldn't save the shipping cost." }, { status: 500 });
+    } finally { await shipPool.end(); }
+  }
   const refundMode = "refundOutcome" in body;
   let cost: number | null = null;
   let shipping: number | null = null;
