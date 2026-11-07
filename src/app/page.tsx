@@ -6,11 +6,12 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import AccountBadge from "./AccountBadge";
-import ListingsSection, { type ListingRow } from "./ListingsSection";
+import ListingsSection, { type ListingRange, type ListingRow } from "./ListingsSection";
 
 // ============================================================
 // TYPES
@@ -215,6 +216,47 @@ function getOrderProfit(order: Order) {
   if (!hasRecordedCost(order)) return null;
   return order.salePrice - order.refundAmount -
     order.ebayFees - Number(order.savedProductCost);
+}
+
+// ============================================================
+// VIEWS: Dashboard / Orders / Listings, kept in the URL hash
+// so Back, refresh and shared links open the same view.
+// ============================================================
+
+type View = "dashboard" | "orders" | "listings";
+
+function subscribeToHash(onChange: () => void) {
+  window.addEventListener("hashchange", onChange);
+  return () => window.removeEventListener("hashchange", onChange);
+}
+
+function viewFromHash(hash: string): View {
+  if (hash === "#orders") return "orders";
+  if (hash === "#listings") return "listings";
+  return "dashboard";
+}
+
+const VIEW_COPY: Record<View, { title: string; subtitle: string }> = {
+  dashboard: {
+    title: "Dashboard Overview",
+    subtitle: "Understand your sales, expenses, and profitability.",
+  },
+  orders: {
+    title: "Orders",
+    subtitle: "Review your orders and manage product costs.",
+  },
+  listings: {
+    title: "Listings",
+    subtitle: "See how every listing is selling and what it earns.",
+  },
+};
+
+function isOrderInListingRange(order: Order, range: ListingRange, now: Date) {
+  if (range === "all") return true;
+  if (range !== "year") return isOrderInDateRange(order, range, now);
+  if (!order.orderDate) return false;
+  const date = new Date(order.orderDate);
+  return date.getFullYear() === now.getFullYear() && date <= now;
 }
 
 // ============================================================
@@ -1299,6 +1341,42 @@ export default function Home() {
   const [listingsSyncing, setListingsSyncing] = useState(false);
   const [listingsMessage, setListingsMessage] = useState("");
   const [listingsError, setListingsError] = useState(false);
+  const [listingRange, setListingRange] = useState<ListingRange>("all");
+
+  const hash = useSyncExternalStore(
+    subscribeToHash,
+    () => window.location.hash,
+    () => ""
+  );
+  const view = viewFromHash(hash);
+
+  function navigate(target: View | "performance") {
+    setSidebarOpen(false);
+    const nextHash = target === "dashboard" ? "" : `#${target}`;
+    if (window.location.hash === nextHash) {
+      if (target === "performance") {
+        document.getElementById("performance")?.scrollIntoView({ behavior: "smooth" });
+      } else {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+      return;
+    }
+    if (nextHash) {
+      window.location.hash = nextHash;
+    } else {
+      history.pushState(null, "", window.location.pathname + window.location.search);
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    }
+  }
+
+  // Each view starts at the top; "Performance" jumps to its chart.
+  useEffect(() => {
+    if (hash === "#performance") {
+      document.getElementById("performance")?.scrollIntoView({ behavior: "smooth" });
+    } else {
+      window.scrollTo({ top: 0 });
+    }
+  }, [hash]);
 
   // ----------------------------------------------------------
   // INITIAL DATE
@@ -1668,10 +1746,11 @@ export default function Home() {
   // FILTERED ORDERS
   // ----------------------------------------------------------
 
-  const listingRows = useMemo(
-    () => buildListingRows(periodOrders, listings),
-    [periodOrders, listings]
-  );
+  const listingRows = useMemo(() => {
+    if (!now) return [];
+    const inRange = orders.filter((order) => isOrderInListingRange(order, listingRange, now));
+    return buildListingRows(inRange, listings);
+  }, [orders, listings, listingRange, now]);
 
   const filteredOrders = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -1862,14 +1941,15 @@ export default function Home() {
   ) {
     setFilter(selectedFilter);
     setSearch("");
-    setSidebarOpen(false);
-
-    document
-      .getElementById("orders")
-      ?.scrollIntoView({
-        behavior: "smooth",
-      });
+    navigate("orders");
   }
+
+  const navItemClass = (active: boolean) =>
+    `flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm transition ${
+      active
+        ? "border border-blue-500/20 bg-blue-600/15 font-semibold text-blue-400"
+        : "border border-transparent font-medium text-slate-400 hover:bg-white/5 hover:text-white"
+    }`;
 
   // ==========================================================
   // RENDER
@@ -1956,41 +2036,45 @@ export default function Home() {
           </p>
 
           <nav className="space-y-2">
-            <a
-              href="#dashboard"
-              onClick={() => setSidebarOpen(false)}
-              className="flex items-center gap-3 rounded-xl border border-blue-500/20 bg-blue-600/15 px-4 py-3 text-sm font-semibold text-blue-400"
+            <button
+              type="button"
+              onClick={() => navigate("dashboard")}
+              aria-current={view === "dashboard" && hash !== "#performance" ? "page" : undefined}
+              className={navItemClass(view === "dashboard" && hash !== "#performance")}
             >
               <Icon name="dashboard" size={19} />
               Dashboard
-            </a>
+            </button>
 
             <button
               type="button"
               onClick={() => goToOrders()}
-              className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-medium text-slate-400 transition hover:bg-white/5 hover:text-white"
+              aria-current={view === "orders" ? "page" : undefined}
+              className={navItemClass(view === "orders")}
             >
               <Icon name="orders" size={19} />
               Orders
             </button>
 
-            <a
-              href="#listings"
-              onClick={() => setSidebarOpen(false)}
-              className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-slate-400 transition hover:bg-white/5 hover:text-white"
+            <button
+              type="button"
+              onClick={() => navigate("listings")}
+              aria-current={view === "listings" ? "page" : undefined}
+              className={navItemClass(view === "listings")}
             >
               <Icon name="box" size={19} />
               Listings
-            </a>
+            </button>
 
-            <a
-              href="#performance"
-              onClick={() => setSidebarOpen(false)}
-              className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-slate-400 transition hover:bg-white/5 hover:text-white"
+            <button
+              type="button"
+              onClick={() => navigate("performance")}
+              aria-current={hash === "#performance" ? "page" : undefined}
+              className={navItemClass(hash === "#performance")}
             >
               <Icon name="chart" size={19} />
               Performance
-            </a>
+            </button>
           </nav>
 
           {/* Integration */}
@@ -2067,17 +2151,16 @@ export default function Home() {
                 <span>Workspace</span>
                 <span>/</span>
                 <span className="text-blue-400">
-                  Dashboard
+                  {view === "dashboard" ? "Dashboard" : VIEW_COPY[view].title}
                 </span>
               </div>
 
               <h2 className="text-3xl font-bold tracking-tight text-white">
-                Dashboard Overview
+                {VIEW_COPY[view].title}
               </h2>
 
               <p className="mt-2 text-sm text-slate-400">
-                Understand your sales, expenses,
-                and profitability.
+                {VIEW_COPY[view].subtitle}
               </p>
             </div>
 
@@ -2141,6 +2224,8 @@ export default function Home() {
             </div>
           )}
 
+          {view !== "listings" && (
+          <>
           {/* =================================================
               OVERVIEW HEADER + DATE FILTER
           ================================================= */}
@@ -2148,11 +2233,11 @@ export default function Home() {
           <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h3 className="text-lg font-semibold text-white">
-                Financial Overview
+                {view === "orders" ? "Order history" : "Financial Overview"}
               </h3>
 
               <p className="mt-1 text-xs text-slate-500">
-                Your store at a glance
+                {view === "orders" ? "Choose which orders to show" : "Your store at a glance"}
               </p>
             </div>
 
@@ -2198,6 +2283,10 @@ export default function Home() {
             </div>
           </div>
 
+          </>
+          )}
+          {view === "dashboard" && (
+          <>
           {/* =================================================
               FINANCIAL METRIC CARDS
           ================================================= */}
@@ -2504,7 +2593,11 @@ export default function Home() {
               )}
             </div>
           </section>
+          </>
+          )}
 
+          {view === "orders" && (
+          <>
           {/* =================================================
               ORDER MANAGEMENT
           ================================================= */}
@@ -2895,21 +2988,26 @@ export default function Home() {
               </div>
             )}
           </section>
+          </>
+          )}
 
           {/* =================================================
               LISTINGS
           ================================================= */}
 
-          <ListingsSection
-            rows={listingRows}
-            loading={loading || listingsLoading}
-            syncing={listingsSyncing}
-            message={listingsMessage}
-            messageIsError={listingsError}
-            periodLabel={dateRangeLabel(dateRange).toLowerCase()}
-            hasSyncedListings={listings.length > 0}
-            onRefresh={() => void syncListings()}
-          />
+          {view === "listings" && (
+            <ListingsSection
+              rows={listingRows}
+              loading={loading || listingsLoading}
+              syncing={listingsSyncing}
+              message={listingsMessage}
+              messageIsError={listingsError}
+              range={listingRange}
+              onRangeChange={setListingRange}
+              hasSyncedListings={listings.length > 0}
+              onRefresh={() => void syncListings()}
+            />
+          )}
 
           {/* =================================================
               FOOTER

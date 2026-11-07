@@ -28,6 +28,72 @@ export type ListingRow = {
 type SortKey = "profit" | "units" | "revenue" | "margin" | "recent" | "stock";
 type StatusFilter = "all" | "ACTIVE" | "selling" | "unsold" | "ENDED";
 
+export type ListingRange = "all" | "year" | "90d" | "30d" | "7d";
+
+const RANGES: ReadonlyArray<readonly [ListingRange, string]> = [
+  ["all", "All time"],
+  ["year", "This year"],
+  ["90d", "90 days"],
+  ["30d", "30 days"],
+  ["7d", "7 days"],
+];
+
+const RANGE_TEXT: Record<ListingRange, string> = {
+  all: "all time",
+  year: "this year",
+  "90d": "the last 90 days",
+  "30d": "the last 30 days",
+  "7d": "the last 7 days",
+};
+
+const FILTERS: ReadonlyArray<readonly [StatusFilter, string]> = [
+  ["all", "All"],
+  ["selling", "Sold"],
+  ["ACTIVE", "Active"],
+  ["unsold", "Active, not sold"],
+  ["ENDED", "Ended / past"],
+];
+
+function Pills<T extends string>({
+  options,
+  value,
+  onChange,
+  label,
+  counts,
+}: {
+  options: ReadonlyArray<readonly [T, string]>;
+  value: T;
+  onChange: (value: T) => void;
+  label: string;
+  counts?: Partial<Record<T, number>>;
+}) {
+  return (
+    <div role="group" aria-label={label} className="flex flex-wrap gap-1.5 rounded-xl bg-[#0b1120] p-1 ring-1 ring-white/10">
+      {options.map(([key, text]) => {
+        const active = key === value;
+        return (
+          <button
+            key={key}
+            type="button"
+            onClick={() => onChange(key)}
+            aria-pressed={active}
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+              active ? "bg-blue-600 text-white shadow-sm shadow-blue-600/30" : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+            }`}
+          >
+            {text}
+            {counts?.[key] !== undefined && (
+              <span className={`rounded-md px-1.5 text-[10px] ${active ? "bg-white/20" : "bg-white/[0.06] text-slate-500"}`}>
+                {counts[key]}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 const money = (value: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
 
@@ -83,7 +149,8 @@ export default function ListingsSection({
   syncing,
   message,
   messageIsError,
-  periodLabel,
+  range,
+  onRangeChange,
   hasSyncedListings,
   onRefresh,
 }: {
@@ -92,7 +159,8 @@ export default function ListingsSection({
   syncing: boolean;
   message: string;
   messageIsError: boolean;
-  periodLabel: string;
+  range: ListingRange;
+  onRangeChange: (range: ListingRange) => void;
   hasSyncedListings: boolean;
   onRefresh: () => void;
 }) {
@@ -117,6 +185,14 @@ export default function ListingsSection({
     };
   }, [rows]);
 
+  const filterCounts = useMemo<Record<StatusFilter, number>>(() => ({
+    all: rows.length,
+    selling: rows.filter((r) => r.unitsSold > 0).length,
+    ACTIVE: rows.filter((r) => r.status === "ACTIVE").length,
+    unsold: rows.filter((r) => r.status === "ACTIVE" && r.unitsSold === 0).length,
+    ENDED: rows.filter((r) => r.status !== "ACTIVE").length,
+  }), [rows]);
+
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     const filtered = rows.filter((r) => {
@@ -139,16 +215,18 @@ export default function ListingsSection({
   }, [rows, query, status, sort]);
 
   return (
-    <section id="listings" className="mt-7 overflow-hidden rounded-2xl border border-white/[0.07] bg-[#151d2d]">
+    <section id="listings" className="overflow-hidden rounded-2xl border border-white/[0.07] bg-[#151d2d]">
       {/* Header */}
       <div className="border-b border-white/[0.07] px-6 py-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-white">Listings</h3>
+            <h3 className="text-lg font-semibold text-white">Your eBay listings</h3>
             <p className="mt-1 text-sm text-slate-500">
-              Every eBay listing with how many you&apos;ve sold and what each one earned · {periodLabel}
+              Sales, revenue and profit from {RANGE_TEXT[range]}
             </p>
           </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <Pills label="Time period" options={RANGES} value={range} onChange={onRangeChange} />
           <button
             type="button"
             onClick={onRefresh}
@@ -160,6 +238,7 @@ export default function ListingsSection({
             </svg>
             {syncing ? "Loading listings…" : hasSyncedListings ? "Refresh listings" : "Load my eBay listings"}
           </button>
+          </div>
         </div>
 
         {message && (
@@ -193,8 +272,13 @@ export default function ListingsSection({
           />
         </div>
 
-        {/* Controls */}
-        <div className="mt-5 flex flex-col gap-3 md:flex-row md:items-center">
+        {/* Filters */}
+        <div className="mt-5">
+          <Pills label="Show listings" options={FILTERS} value={status} onChange={setStatus} counts={filterCounts} />
+        </div>
+
+        {/* Search + sort */}
+        <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-center">
           <div className="relative flex-1">
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
               <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
@@ -209,18 +293,6 @@ export default function ListingsSection({
             />
           </div>
           <div className="flex gap-3">
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value as StatusFilter)}
-              aria-label="Filter listings"
-              className="rounded-xl border border-white/10 bg-[#0b1120] px-3 py-2.5 text-sm text-slate-300 outline-none focus:border-blue-500"
-            >
-              <option value="all">All listings</option>
-              <option value="ACTIVE">Active</option>
-              <option value="selling">With sales</option>
-              <option value="unsold">Active, no sales</option>
-              <option value="ENDED">Ended / past</option>
-            </select>
             <select
               value={sort}
               onChange={(e) => setSort(e.target.value as SortKey)}
