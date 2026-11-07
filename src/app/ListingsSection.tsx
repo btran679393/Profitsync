@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import StoreShippingSetting from "./StoreShippingSetting";
 
 // One row per eBay listing (or per item title for sales that couldn't be
 // matched to a saved listing). Figures are for the dashboard's date range.
@@ -140,106 +141,257 @@ export type SaveListingCost = (
   applyToPast: boolean
 ) => Promise<number>;
 
-// "Cost / item" or "Ship / order" box: saves on Enter or when you click away,
-// then offers to fill the same amount into this listing's past sales that
-// have none.
-function CostCell({
-  row,
-  onSave,
-  field = "unitCost",
+export type BulkSaveListingCost = (
+  itemIds: string[],
+  field: ListingCostField,
+  value: string,
+  applyToPast: boolean
+) => Promise<number>;
+
+const MONEY_PATTERN = /^\d+(\.\d{1,2})?$/;
+
+// One amount shown as plain text ("$23.50") or a quiet "+ Add" link; click it
+// to edit in place. Enter saves, Escape cancels. When some of this listing's
+// past sales have no amount yet, a tick box offers to fill them too.
+function InlineAmount({
+  label,
+  value,
+  fallback,
+  missing,
   disabled = false,
+  disabledHint,
+  emptyTone = "text-slate-500",
+  onSave,
 }: {
-  row: ListingRow;
-  onSave: SaveListingCost;
-  field?: ListingCostField;
+  label: string;
+  value: number | null;
+  fallback: string;
+  missing: number;
   disabled?: boolean;
+  disabledHint?: string;
+  emptyTone?: string;
+  onSave: (value: string, applyToPast: boolean) => Promise<number>;
 }) {
-  const saved = field === "unitCost" ? row.unitCost : row.shippingDefault;
-  const missing = field === "unitCost" ? row.costMissing : row.shippingMissing;
-  const initial = saved === null ? "" : saved.toFixed(2);
-  const [value, setValue] = useState(initial);
-  const [lastSaved, setLastSaved] = useState(initial);
-  const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [fillPast, setFillPast] = useState(true);
+  const [state, setState] = useState<"idle" | "saving" | "error">("idle");
   const [note, setNote] = useState("");
 
-  // Pick up changes made elsewhere (e.g. after a refresh).
-  if (initial !== lastSaved && state !== "saving") {
-    setLastSaved(initial);
-    setValue(initial);
-  }
+  const valid = draft.trim() === "" || MONEY_PATTERN.test(draft.trim());
 
-  if (!row.ebayItemId || row.status === "UNLINKED") {
-    return <span className="text-xs text-slate-600" title="Set costs on the order itself for past sales">—</span>;
-  }
-  const itemId = row.ebayItemId;
-  const valid = value.trim() === "" || /^\d+(\.\d{1,2})?$/.test(value.trim());
-
-  async function save(applyToPast: boolean) {
-    const trimmed = value.trim();
-    if (!valid || (!applyToPast && trimmed === lastSaved)) return;
+  async function save() {
+    if (!valid) return;
     setState("saving");
-    setNote("");
     try {
-      const applied = await onSave(itemId, field, trimmed, applyToPast);
-      const formatted = trimmed === "" ? "" : Number(trimmed).toFixed(2);
-      setValue(formatted);
-      setLastSaved(formatted);
-      setState("saved");
-      if (applyToPast) setNote(applied === 1 ? "Filled 1 sale" : `Filled ${applied} sales`);
+      const applied = await onSave(draft.trim(), fillPast && missing > 0 && draft.trim() !== "");
+      setEditing(false);
+      setState("idle");
+      setNote(applied > 0 ? `Filled ${applied} past sale${applied === 1 ? "" : "s"}` : "");
     } catch (error) {
       setState("error");
       setNote(error instanceof Error ? error.message : "Couldn't save");
     }
   }
 
-  return (
-    <div className={field === "unitCost" ? "w-32" : "w-28"}>
-      <div className="relative">
-        <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-slate-500">$</span>
-        <input
-          inputMode="decimal"
-          value={value}
-          disabled={disabled}
-          title={disabled ? "Run docs/sql/2026-11-07_shipping_cost.sql in Supabase to turn on shipping costs." : undefined}
-          placeholder={field === "unitCost" ? "Cost" : "Ship"}
-          aria-label={`${field === "unitCost" ? "Cost per item" : "Shipping per order"} for ${row.title}`}
-          onChange={(e) => {
-            setValue(e.target.value);
-            setState("idle");
-          }}
-          onBlur={() => void save(false)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") e.currentTarget.blur();
-            if (e.key === "Escape") {
-              setValue(lastSaved);
-              e.currentTarget.blur();
-            }
-          }}
-          className={`w-full rounded-lg border bg-[#0b1120] py-1.5 pl-6 pr-7 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-40 ${
-            valid ? "border-white/10" : "border-rose-500/60"
-          }`}
-        />
-        <span className="absolute right-2 top-1/2 -translate-y-1/2" aria-live="polite">
-          {state === "saving" && <span className="block h-3 w-3 animate-spin rounded-full border-2 border-slate-500 border-t-transparent" />}
-          {state === "saved" && (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#34d399" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-label="Saved"><path d="M5 12l4 4L19 6" /></svg>
-          )}
-        </span>
-      </div>
-      {note ? (
-        <p className={`mt-1 text-[11px] ${state === "error" ? "text-rose-400" : "text-emerald-400"}`}>{note}</p>
-      ) : lastSaved !== "" && missing > 0 ? (
+  if (!editing) {
+    return (
+      <div className="flex items-baseline gap-2 text-xs">
+        <span className="w-8 shrink-0 text-slate-500">{label}</span>
         <button
           type="button"
-          onClick={() => void save(true)}
-          disabled={state === "saving"}
-          className="mt-1 text-[11px] font-semibold text-blue-400 transition hover:text-blue-300"
+          disabled={disabled}
+          title={disabled ? disabledHint : `Edit ${label.toLowerCase()} for this listing`}
+          onClick={() => {
+            setDraft(value === null ? "" : value.toFixed(2));
+            setFillPast(true);
+            setNote("");
+            setEditing(true);
+          }}
+          className="group inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-left transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Fill {missing} past sale{missing === 1 ? "" : "s"}
+          {value !== null ? (
+            <span className="font-semibold text-slate-100">${value.toFixed(2)}</span>
+          ) : (
+            <span className={emptyTone}>{fallback}</span>
+          )}
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-600 opacity-0 transition group-hover:opacity-100" aria-hidden="true">
+            <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+          </svg>
         </button>
-      ) : !valid ? (
-        <p className="mt-1 text-[11px] text-rose-400">Like 8 or 8.50</p>
-      ) : null}
+        {note && <span className="text-[11px] text-emerald-400">{note}</span>}
+      </div>
+    );
+  }
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        void save();
+      }}
+      className="space-y-1.5 text-xs"
+    >
+      <div className="flex items-center gap-1.5">
+        <span className="w-8 shrink-0 text-slate-500">{label}</span>
+        <div className="relative">
+          <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-500">$</span>
+          <input
+            autoFocus
+            inputMode="decimal"
+            value={draft}
+            placeholder="0.00"
+            aria-label={`${label} for this listing`}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setEditing(false);
+            }}
+            className={`w-20 rounded-lg border bg-[#0b1120] py-1 pl-5 pr-1.5 text-white outline-none focus:border-blue-500 ${valid ? "border-white/10" : "border-rose-500/60"}`}
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={!valid || state === "saving"}
+          className="rounded-md bg-blue-600 px-2 py-1 font-semibold text-white transition hover:bg-blue-500 disabled:opacity-50"
+        >
+          {state === "saving" ? "…" : "Save"}
+        </button>
+        <button type="button" onClick={() => setEditing(false)} className="text-slate-500 hover:text-slate-300" aria-label="Cancel">
+          ✕
+        </button>
+      </div>
+      {missing > 0 && draft.trim() !== "" && (
+        <label className="ml-9 flex items-center gap-1.5 text-[11px] text-slate-400">
+          <input type="checkbox" checked={fillPast} onChange={(event) => setFillPast(event.target.checked)} className="accent-blue-500" />
+          Also fill {missing} past sale{missing === 1 ? "" : "s"} without one
+        </label>
+      )}
+      {state === "error" && <p className="ml-9 text-[11px] text-rose-400">{note}</p>}
+    </form>
+  );
+}
+
+// Cost per item + shipping per order for one listing, as two quiet lines.
+function CostsCell({
+  row,
+  onSave,
+  shippingEnabled,
+  storeShipping,
+}: {
+  row: ListingRow;
+  onSave: SaveListingCost;
+  shippingEnabled: boolean;
+  storeShipping: number | null;
+}) {
+  if (!row.ebayItemId || row.status === "UNLINKED") {
+    return <span className="text-xs text-slate-600" title="Set costs on the order itself for past sales">Set on each order</span>;
+  }
+  const itemId = row.ebayItemId;
+  return (
+    <div className="space-y-1">
+      <InlineAmount
+        label="Item"
+        value={row.unitCost}
+        fallback="+ Add cost"
+        emptyTone={row.costMissing > 0 ? "font-semibold text-amber-400" : "text-blue-400"}
+        missing={row.costMissing}
+        onSave={(value, applyToPast) => onSave(itemId, "unitCost", value, applyToPast)}
+      />
+      <InlineAmount
+        label="Ship"
+        value={row.shippingDefault}
+        fallback={storeShipping !== null ? `$${storeShipping.toFixed(2)} default` : "+ Add"}
+        missing={row.shippingMissing}
+        disabled={!shippingEnabled}
+        disabledHint="Run docs/sql/2026-11-07_shipping_cost.sql in Supabase to turn on shipping costs."
+        onSave={(value, applyToPast) => onSave(itemId, "shippingCost", value, applyToPast)}
+      />
+    </div>
+  );
+}
+
+// Shown when listings are ticked: set cost and/or shipping for all of them.
+function BulkBar({
+  count,
+  shippingEnabled,
+  onApply,
+  onClear,
+}: {
+  count: number;
+  shippingEnabled: boolean;
+  onApply: (unitCost: string, shippingCost: string, applyToPast: boolean) => Promise<string>;
+  onClear: () => void;
+}) {
+  const [unitCost, setUnitCost] = useState("");
+  const [shippingCost, setShippingCost] = useState("");
+  const [fillPast, setFillPast] = useState(true);
+  const [state, setState] = useState<"idle" | "saving" | "done" | "error">("idle");
+  const [note, setNote] = useState("");
+
+  const costValid = unitCost.trim() === "" || MONEY_PATTERN.test(unitCost.trim());
+  const shipValid = shippingCost.trim() === "" || MONEY_PATTERN.test(shippingCost.trim());
+  const ready = costValid && shipValid && (unitCost.trim() !== "" || shippingCost.trim() !== "");
+
+  async function apply() {
+    if (!ready) return;
+    setState("saving");
+    setNote("");
+    try {
+      const summary = await onApply(unitCost.trim(), shippingCost.trim(), fillPast);
+      setState("done");
+      setNote(summary);
+      setUnitCost("");
+      setShippingCost("");
+    } catch (error) {
+      setState("error");
+      setNote(error instanceof Error ? error.message : "Couldn't update the listings");
+    }
+  }
+
+  const input = "w-24 rounded-lg border bg-[#0b1120] py-1.5 pl-5 pr-2 text-sm text-white outline-none focus:border-blue-500";
+
+  return (
+    <div className="ps-fade-up mt-4 flex flex-col gap-3 rounded-xl border border-blue-500/30 bg-blue-600/10 px-4 py-3 text-sm lg:flex-row lg:items-center">
+      <span className="font-semibold text-blue-200">
+        {count} listing{count === 1 ? "" : "s"} selected
+      </span>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void apply();
+        }}
+        className="flex flex-1 flex-wrap items-center gap-3"
+      >
+        <label className="flex items-center gap-2 text-slate-300">
+          Cost / item
+          <span className="relative">
+            <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-500">$</span>
+            <input inputMode="decimal" value={unitCost} onChange={(e) => setUnitCost(e.target.value)} placeholder="23.50" className={`${input} ${costValid ? "border-white/10" : "border-rose-500/60"}`} />
+          </span>
+        </label>
+        <label className={`flex items-center gap-2 text-slate-300 ${shippingEnabled ? "" : "opacity-40"}`}>
+          Ship / order
+          <span className="relative">
+            <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-500">$</span>
+            <input inputMode="decimal" value={shippingCost} disabled={!shippingEnabled} onChange={(e) => setShippingCost(e.target.value)} placeholder="4.50" className={`${input} ${shipValid ? "border-white/10" : "border-rose-500/60"}`} />
+          </span>
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-slate-400">
+          <input type="checkbox" checked={fillPast} onChange={(e) => setFillPast(e.target.checked)} className="accent-blue-500" />
+          Also fill past sales without one
+        </label>
+        <button
+          type="submit"
+          disabled={!ready || state === "saving"}
+          className="rounded-lg bg-blue-600 px-3.5 py-1.5 font-semibold text-white transition hover:bg-blue-500 disabled:opacity-50"
+        >
+          {state === "saving" ? "Applying…" : "Apply"}
+        </button>
+        {note && <span className={`text-xs ${state === "error" ? "text-rose-400" : "text-emerald-400"}`}>{note}</span>}
+      </form>
+      <button type="button" onClick={onClear} className="text-xs font-semibold text-slate-400 hover:text-white">
+        Clear selection
+      </button>
     </div>
   );
 }
@@ -272,6 +424,9 @@ export default function ListingsSection({
   onRefresh,
   onSaveCost,
   shippingEnabled,
+  onBulkSaveCost,
+  storeShipping,
+  onSaveStoreShipping,
 }: {
   rows: ListingRow[];
   loading: boolean;
@@ -284,10 +439,14 @@ export default function ListingsSection({
   onRefresh: () => void;
   onSaveCost: SaveListingCost;
   shippingEnabled: boolean;
+  onBulkSaveCost: BulkSaveListingCost;
+  storeShipping: number | null;
+  onSaveStoreShipping: (value: string) => Promise<void>;
 }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
   const [sort, setSort] = useState<SortKey>("profit");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const summary = useMemo(() => {
     const active = rows.filter((r) => r.status === "ACTIVE");
@@ -335,6 +494,39 @@ export default function ListingsSection({
     return filtered.sort((a, b) => by[sort](b) - by[sort](a) || a.title.localeCompare(b.title));
   }, [rows, query, status, sort]);
 
+  // Only real eBay listings can be bulk-edited (not unmatched past sales).
+  const selectable = visible.filter((r) => r.ebayItemId && r.status !== "UNLINKED");
+  const allVisibleSelected = selectable.length > 0 && selectable.every((r) => selected.has(r.ebayItemId!));
+
+  function toggleRow(itemId: string) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  }
+
+  function toggleAllVisible() {
+    setSelected((current) => {
+      const next = new Set(current);
+      for (const row of selectable) {
+        if (allVisibleSelected) next.delete(row.ebayItemId!);
+        else next.add(row.ebayItemId!);
+      }
+      return next;
+    });
+  }
+
+  async function applyBulk(unitCost: string, shippingCost: string, applyToPast: boolean) {
+    const ids = [...selected];
+    let filled = 0;
+    if (unitCost) filled += await onBulkSaveCost(ids, "unitCost", unitCost, applyToPast);
+    if (shippingCost) filled += await onBulkSaveCost(ids, "shippingCost", shippingCost, applyToPast);
+    return `Updated ${ids.length} listing${ids.length === 1 ? "" : "s"}` +
+      (filled > 0 ? ` · filled ${filled} past sale${filled === 1 ? "" : "s"}` : "");
+  }
+
   return (
     <section id="listings" className="overflow-hidden rounded-2xl border border-white/[0.07] bg-[#151d2d]">
       {/* Header */}
@@ -346,7 +538,8 @@ export default function ListingsSection({
               Sales, revenue and profit from {RANGE_TEXT[range]}
             </p>
           </div>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+          {shippingEnabled && <StoreShippingSetting value={storeShipping} onSave={onSaveStoreShipping} />}
           <Pills label="Time period" options={RANGES} value={range} onChange={onRangeChange} />
           <button
             type="button"
@@ -431,6 +624,17 @@ export default function ListingsSection({
         </div>
       </div>
 
+      {selected.size > 0 && (
+        <div className="border-b border-white/[0.07] px-6 pb-4">
+          <BulkBar
+            count={selected.size}
+            shippingEnabled={shippingEnabled}
+            onApply={applyBulk}
+            onClear={() => setSelected(new Set())}
+          />
+        </div>
+      )}
+
       {/* Table */}
       {loading ? (
         <div className="py-20 text-center text-sm text-slate-400">Loading your listings…</div>
@@ -447,13 +651,23 @@ export default function ListingsSection({
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1320px]">
+          <table className="w-full min-w-[1240px]">
             <thead>
               <tr className="border-b border-white/[0.07] text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                <th className="px-6 py-3">Listing</th>
+                <th className="w-10 py-3 pl-6">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    disabled={selectable.length === 0}
+                    onChange={toggleAllVisible}
+                    aria-label="Select all listings shown"
+                    title="Select all listings shown (tip: search first, e.g. “1998”)"
+                    className="h-4 w-4 accent-blue-500"
+                  />
+                </th>
+                <th className="px-3 py-3">Listing</th>
                 <th className="px-3 py-3 text-right">Price · Stock</th>
-                <th className="px-3 py-3">Cost / item</th>
-                <th className="px-3 py-3">Ship / order</th>
+                <th className="px-3 py-3">Costs</th>
                 <th className="px-3 py-3 text-right">Sold</th>
                 <th className="px-3 py-3 text-right">Revenue</th>
                 <th className="px-3 py-3 text-right">Fees, shipping + costs</th>
@@ -467,8 +681,24 @@ export default function ListingsSection({
                 const badge = STATUS_BADGE[row.status];
                 const marginWidth = row.margin === null ? 0 : Math.max(0, Math.min(100, row.margin));
                 return (
-                  <tr key={row.key} className="align-middle transition hover:bg-white/[0.025]">
-                    <td className="px-6 py-4">
+                  <tr
+                    key={row.key}
+                    className={`align-middle transition hover:bg-white/[0.025] ${
+                      row.ebayItemId && selected.has(row.ebayItemId) ? "bg-blue-500/[0.06]" : ""
+                    }`}
+                  >
+                    <td className="w-10 py-4 pl-6">
+                      {row.ebayItemId && row.status !== "UNLINKED" && (
+                        <input
+                          type="checkbox"
+                          checked={selected.has(row.ebayItemId)}
+                          onChange={() => toggleRow(row.ebayItemId!)}
+                          aria-label={`Select ${row.title}`}
+                          className="h-4 w-4 accent-blue-500"
+                        />
+                      )}
+                    </td>
+                    <td className="px-3 py-4">
                       <div className="flex items-center gap-3">
                         <Thumb src={row.imageUrl} alt={row.title} />
                         <div className="min-w-0 max-w-[360px]">
@@ -498,10 +728,7 @@ export default function ListingsSection({
                       </p>
                     </td>
                     <td className="px-3 py-4">
-                      <CostCell row={row} onSave={onSaveCost} />
-                    </td>
-                    <td className="px-3 py-4">
-                      <CostCell row={row} onSave={onSaveCost} field="shippingCost" disabled={!shippingEnabled} />
+                      <CostsCell row={row} onSave={onSaveCost} shippingEnabled={shippingEnabled} storeShipping={storeShipping} />
                     </td>
                     <td className="px-3 py-4 text-right text-sm">
                       <p className="font-semibold text-white">{row.unitsSold}</p>

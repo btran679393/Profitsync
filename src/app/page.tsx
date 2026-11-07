@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import AccountBadge from "./AccountBadge";
 import ListingsSection, { type ListingRange, type ListingRow } from "./ListingsSection";
+import StoreShippingSetting from "./StoreShippingSetting";
 
 // ============================================================
 // TYPES
@@ -35,6 +36,8 @@ type Order = {
   // Shipping paid outside eBay, typed by the seller ("" = not set).
   shippingCost: string;
   savedShippingCost: string;
+  // Store-wide "shipping per order" default (0 = not set).
+  storeShipping: number;
   ebayOrderId: string | null;
   ebayBuyerId: string | null;
   ebayItemId: string | null;
@@ -159,7 +162,7 @@ function isValidCost(value: string) {
   );
 }
 
-function formatOrders(data: ApiOrder[]): Order[] {
+function formatOrders(data: ApiOrder[], storeShipping = 0): Order[] {
   return data.map((order) => {
     const cost =
       order.productCost === null ||
@@ -176,6 +179,7 @@ function formatOrders(data: ApiOrder[]): Order[] {
       shippingLabelCost: Math.max(0, Number(order.shippingLabelCost ?? 0) || 0),
       shippingCost: order.shippingCost === null || order.shippingCost === undefined ? "" : Number(order.shippingCost).toFixed(2),
       savedShippingCost: order.shippingCost === null || order.shippingCost === undefined ? "" : Number(order.shippingCost).toFixed(2),
+      storeShipping,
       item: order.item,
       imageUrl: order.imageUrl ?? null,
       salePrice: Number(order.salePrice),
@@ -219,12 +223,14 @@ function hasRecordedCost(order: Order) {
   return isValidCost(order.savedProductCost);
 }
 
-// Shipping counted against profit: what the seller typed in, otherwise any
-// shipping label bought through eBay. Never both, so nothing is counted twice.
+// Shipping counted against profit, first match wins (never added together):
+// 1. what the seller typed for this order (or a listing default filled in),
+// 2. a shipping label actually bought through eBay,
+// 3. the store-wide "shipping per order" default.
 function getShippingCost(order: Order) {
-  return order.savedShippingCost !== ""
-    ? Number(order.savedShippingCost)
-    : order.shippingLabelCost;
+  if (order.savedShippingCost !== "") return Number(order.savedShippingCost);
+  if (order.shippingLabelCost > 0) return order.shippingLabelCost;
+  return order.storeShipping;
 }
 
 function getOrderProfit(order: Order) {
@@ -1023,7 +1029,11 @@ function ShippingInput({
   }
 
   const placeholder =
-    order.shippingLabelCost > 0 ? `${order.shippingLabelCost.toFixed(2)} eBay label` : "Shipping";
+    order.shippingLabelCost > 0
+      ? `${order.shippingLabelCost.toFixed(2)} eBay label`
+      : order.storeShipping > 0
+        ? `${order.storeShipping.toFixed(2)} default`
+        : "Shipping";
 
   return (
     <div className={className}>
@@ -1292,6 +1302,9 @@ function OrderDetailsPanel({
                   {order.savedShippingCost === "" && order.shippingLabelCost > 0 && (
                     <span className="ml-1 text-xs text-slate-500">(eBay label)</span>
                   )}
+                  {order.savedShippingCost === "" && order.shippingLabelCost === 0 && order.storeShipping > 0 && (
+                    <span className="ml-1 text-xs text-slate-500">(store default)</span>
+                  )}
                 </span>
                 <ShippingInput
                   order={order}
@@ -1471,6 +1484,23 @@ export default function Home() {
   const [listingRange, setListingRange] = useState<ListingRange>("all");
   const [recentlySavedId, setRecentlySavedId] = useState<number | null>(null);
   const [shippingEnabled, setShippingEnabled] = useState(false);
+  // Store-wide "shipping per order" default, saved on the ProfitSync account.
+  const [storeShipping, setStoreShipping] = useState<number | null>(null);
+  const storeShippingRef = useRef(0);
+
+  function applyStoreShipping(value: number | null) {
+    setStoreShipping(value);
+    storeShippingRef.current = value ?? 0;
+    setOrders((current) => current.map((order) => ({ ...order, storeShipping: value ?? 0 })));
+  }
+
+  async function saveStoreShipping(value: string) {
+    const amount = value === "" ? null : Math.round(Number(value) * 100) / 100;
+    const { error } = await createClient().auth.updateUser({ data: { defaultShippingCost: amount } });
+    if (error) throw error;
+    applyStoreShipping(amount);
+  }
+
   const [firstName, setFirstName] = useState("");
   const [sellerName, setSellerName] = useState("");
 
@@ -1494,11 +1524,14 @@ export default function Home() {
         const fromEmail = (user.email ?? "").split("@")[0].split(/[._\-+\d]/)[0];
         const name = full ? full.split(/\s+/)[0] : fromEmail;
         setFirstName(name ? name.charAt(0).toUpperCase() + name.slice(1) : "");
+        const stored = Number(meta.defaultShippingCost);
+        applyStoreShipping(meta.defaultShippingCost == null || !Number.isFinite(stored) ? null : stored);
       });
     return () => {
       active = false;
     };
   }, []);
+
 
   // Ticks every minute so the greeting and "today" roll over on their own.
   const [clock, setClock] = useState<Date | null>(null);
@@ -1624,7 +1657,7 @@ export default function Home() {
 
     const data: ApiOrder[] = await response.json();
 
-    setOrders(formatOrders(data));
+    setOrders(formatOrders(data, storeShippingRef.current));
     setShippingEnabled(response.headers.get("X-Shipping-Cost-Enabled") === "1");
     setLoadError("");
   }, []);
@@ -1674,6 +1707,20 @@ export default function Home() {
     });
     const data: { success?: boolean; applied?: number; error?: string } = await response.json();
     if (!response.ok || !data.success) throw new Error(data.error || "Couldn't save the cost.");
+    await loadListings();
+    if (data.applied) await loadOrders();
+    return data.applied ?? 0;
+  }
+
+  // Same, for many listings at once (the Listings page's bulk bar).
+  async function saveListingCostBulk(itemIds: string[], field: "unitCost" | "shippingCost", value: string, applyToPast: boolean) {
+    const response = await fetch("/api/listings/bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemIds, field, value, applyToPast }),
+    });
+    const data: { success?: boolean; applied?: number; error?: string } = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || "Couldn't update the listings.");
     await loadListings();
     if (data.applied) await loadOrders();
     return data.applied ?? 0;
@@ -2331,8 +2378,8 @@ export default function Home() {
             <button
               type="button"
               onClick={() => navigate("dashboard")}
-              aria-current={view === "dashboard" && hash !== "#performance" ? "page" : undefined}
-              className={navItemClass(view === "dashboard" && hash !== "#performance")}
+              aria-current={view === "dashboard" ? "page" : undefined}
+              className={navItemClass(view === "dashboard")}
             >
               <Icon name="dashboard" size={19} />
               Dashboard
@@ -2358,15 +2405,6 @@ export default function Home() {
               Listings
             </button>
 
-            <button
-              type="button"
-              onClick={() => navigate("performance")}
-              aria-current={hash === "#performance" ? "page" : undefined}
-              className={navItemClass(hash === "#performance")}
-            >
-              <Icon name="chart" size={19} />
-              Performance
-            </button>
           </nav>
 
           {/* Integration */}
@@ -2593,6 +2631,12 @@ export default function Home() {
                 {view === "orders" ? "Choose which orders to show" : "Your store at a glance"}
               </p>
             </div>
+
+            {view === "orders" && (
+              <div className="sm:ml-auto sm:mr-3">
+                <StoreShippingSetting value={storeShipping} onSave={saveStoreShipping} />
+              </div>
+            )}
 
             <div className="relative flex items-center gap-2">
               <Icon
@@ -3449,7 +3493,10 @@ export default function Home() {
               hasSyncedListings={listings.length > 0}
               onRefresh={() => void syncListings()}
               onSaveCost={saveListingCost}
+              onBulkSaveCost={saveListingCostBulk}
               shippingEnabled={shippingEnabled}
+              storeShipping={storeShipping}
+              onSaveStoreShipping={saveStoreShipping}
             />
           )}
 
