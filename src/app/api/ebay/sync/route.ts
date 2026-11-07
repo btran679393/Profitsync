@@ -94,7 +94,32 @@ type PreparedOrder = {
   imageUrl: string | null;
   creationDate: string | null;
   refund: RefundInfo | undefined;
+  listing: ListingInfo;
 };
+type ListingInfo = {
+  // Set only when every line item in the order comes from the same
+  // listing, so the whole sale can be credited to that listing.
+  itemId: string | null;
+  sku: string | null;
+  quantity: number;
+};
+function getListingInfo(order: EbayOrder): ListingInfo {
+  const lineItems = order.lineItems ?? [];
+  const itemIds = new Set(
+    lineItems
+      .map((lineItem) => lineItem.legacyItemId)
+      .filter((id): id is string => Boolean(id))
+  );
+  const quantity = lineItems.reduce(
+    (sum, lineItem) => sum + Math.max(1, Number(lineItem.quantity) || 1),
+    0
+  );
+  return {
+    itemId: itemIds.size === 1 ? [...itemIds][0] : null,
+    sku: lineItems.length === 1 ? lineItems[0].sku ?? null : null,
+    quantity: Math.max(1, quantity),
+  };
+}
 // ============================================================
 // CONFIGURATION
 // ============================================================
@@ -735,14 +760,18 @@ async function insertOrder(
         "refundAmount",
         "refundedAt",
         "orderDate",
-        "updatedAt"
+        "updatedAt",
+        "ebayItemId",
+        sku,
+        quantity
       )
       VALUES (
         $1, $2, $3, $4, $5,
         $6, $7, $8, $9, $10,
         $11, $12, $13,
         COALESCE($14::timestamptz, NOW()),
-        NOW()
+        NOW(),
+        $15, $16, $17
       )
     `,
     [
@@ -762,8 +791,37 @@ async function insertOrder(
       formatMoney(refundCents),
       order.refund?.refundedAt ?? null,
       order.creationDate,
+      order.listing.itemId,
+      order.listing.sku,
+      order.listing.quantity,
     ]
   );
+}
+// Fill in which listing an already-saved order came from (orders saved
+// before ProfitSync started recording it). Never overwrites a value.
+async function backfillListingInfo(
+  client: PoolClient,
+  orderId: number,
+  userId: string,
+  listing: ListingInfo
+): Promise<boolean> {
+  if (!listing.itemId) return false;
+  const result = await client.query(
+    `
+      UPDATE public."order"
+      SET
+        "ebayItemId" = $1,
+        sku = COALESCE(sku, $2),
+        quantity = $3,
+        "updatedAt" = NOW()
+      WHERE id = $4
+        AND "userId" = $5
+        AND "ebayItemId" IS NULL
+      RETURNING id
+    `,
+    [listing.itemId, listing.sku, listing.quantity, orderId, userId]
+  );
+  return Boolean(result.rowCount);
 }
 async function updateExistingOrder(
   client: PoolClient,
@@ -1177,6 +1235,7 @@ export async function POST() {
     let imagesUpdated = 0;
     let refundedImported = 0;
     let refundsUpdated = 0;
+    let listingsLinked = 0;
     let fullyRefunded = 0;
     let partiallyRefunded = 0;
     // --------------------------------------------------------
@@ -1243,6 +1302,7 @@ export async function POST() {
             creationDate:
               ebayOrder.creationDate ?? null,
             refund,
+            listing: getListingInfo(ebayOrder),
           };
           let transactionStarted = false;
           try {
@@ -1467,6 +1527,40 @@ export async function POST() {
             throw error;
           }
         }
+        // ====================================================
+        // LINK SAVED ORDERS TO THEIR LISTINGS
+        // ====================================================
+        // Orders saved before ProfitSync recorded the listing ID get it
+        // filled in here so the Listings page can group them correctly.
+        const ebayOrdersById = new Map(
+          ebayOrders.map((ebayOrder) => [ebayOrder.orderId, ebayOrder])
+        );
+        const unlinked = await client.query<{ id: number; ebayOrderId: string }>(
+          `
+            SELECT id, "ebayOrderId"
+            FROM public."order"
+            WHERE "userId" = $1
+              AND "ebayUserId" = $2
+              AND environment = $3
+              AND "ebayOrderId" IS NOT NULL
+              AND "ebayItemId" IS NULL
+          `,
+          [userId, ebayUserId, environment]
+        );
+        for (const order of unlinked.rows) {
+          const ebayOrder = ebayOrdersById.get(order.ebayOrderId);
+          if (!ebayOrder) continue;
+          if (
+            await backfillListingInfo(
+              client,
+              order.id,
+              userId,
+              getListingInfo(ebayOrder)
+            )
+          ) {
+            listingsLinked++;
+          }
+        }
       } finally {
         client.release();
       }
@@ -1489,6 +1583,7 @@ export async function POST() {
       imagesUpdated,
       refundedImported,
       refundsUpdated,
+      listingsLinked,
       fullyRefunded,
       partiallyRefunded,
       financialOrdersMatched:

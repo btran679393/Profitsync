@@ -14,6 +14,7 @@ export async function GET() {
       SELECT id, "ebayOrderId", "ebayUserId", "ebayBuyerId", "userId",
         item, "imageUrl", "salePrice", "ebayFees", "productCost", status,
         "refundAmount", "refundedAt", "refundOutcome", "refundShippingLoss", "refundFeeLoss",
+        "ebayItemId", quantity,
         "orderDate", "createdAt", "updatedAt"
       FROM public."order" WHERE "userId" = $1 ORDER BY "orderDate" DESC, id DESC
     `, [user.id]);

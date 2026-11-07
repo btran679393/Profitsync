@@ -10,15 +10,28 @@ import {
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import AccountBadge from "./AccountBadge";
+import ListingsSection, { type ListingRow } from "./ListingsSection";
 
 // ============================================================
 // TYPES
 // ============================================================
 
+type ApiListing = {
+  ebayItemId: string;
+  title: string;
+  sku: string | null;
+  imageUrl: string | null;
+  listingPrice: string | number;
+  quantity: number;
+  status: string;
+};
+
 type Order = {
   id: number;
   ebayOrderId: string | null;
   ebayBuyerId: string | null;
+  ebayItemId: string | null;
+  quantity: number;
   item: string;
   imageUrl: string | null;
   salePrice: number;
@@ -50,6 +63,8 @@ type ApiOrder = {
   refundFeeLoss?: string | number | null;
   status: string;
   orderDate?: string | null;
+  ebayItemId?: string | null;
+  quantity?: number | null;
 };
 
 type SyncResponse = {
@@ -147,6 +162,8 @@ function formatOrders(data: ApiOrder[]): Order[] {
       id: order.id,
       ebayOrderId: order.ebayOrderId,
       ebayBuyerId: order.ebayBuyerId ?? null,
+      ebayItemId: order.ebayItemId ?? null,
+      quantity: Math.max(1, Number(order.quantity) || 1),
       item: order.item,
       imageUrl: order.imageUrl ?? null,
       salePrice: Number(order.salePrice),
@@ -198,6 +215,82 @@ function getOrderProfit(order: Order) {
   if (!hasRecordedCost(order)) return null;
   return order.salePrice - order.refundAmount -
     order.ebayFees - Number(order.savedProductCost);
+}
+
+// ============================================================
+// LISTINGS: group orders by the listing they came from
+// ============================================================
+
+function normalizeTitle(title: string) {
+  return title.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function buildListingRows(orders: Order[], listings: ApiListing[]): ListingRow[] {
+  const rows = new Map<string, ListingRow & { completedRevenue: number; completedProfit: number }>();
+  const listingIdByTitle = new Map<string, string>();
+
+  const blankRow = (key: string, title: string) => ({
+    key, ebayItemId: null, title, imageUrl: null,
+    status: "UNLINKED" as ListingRow["status"],
+    price: null, available: null, unitsSold: 0, orderCount: 0,
+    revenue: 0, fees: 0, costs: 0, refundedCount: 0, refundLoss: 0,
+    netProfit: 0, margin: null, costMissing: 0, lastSold: null,
+    completedRevenue: 0, completedProfit: 0,
+  });
+
+  for (const listing of listings) {
+    const key = `item:${listing.ebayItemId}`;
+    rows.set(key, {
+      ...blankRow(key, listing.title),
+      ebayItemId: listing.ebayItemId,
+      imageUrl: listing.imageUrl,
+      status: listing.status === "ACTIVE" ? "ACTIVE" : "ENDED",
+      price: Number(listing.listingPrice),
+      available: listing.status === "ACTIVE" ? listing.quantity : 0,
+    });
+    listingIdByTitle.set(normalizeTitle(listing.title), listing.ebayItemId);
+  }
+
+  for (const order of orders) {
+    // Prefer the saved listing ID; otherwise match on the exact title;
+    // otherwise group past sales of the same item title together.
+    const itemId = order.ebayItemId ?? listingIdByTitle.get(normalizeTitle(order.item)) ?? null;
+    const key = itemId ? `item:${itemId}` : `title:${normalizeTitle(order.item)}`;
+    let row = rows.get(key);
+    if (!row) {
+      row = { ...blankRow(key, order.item), ebayItemId: itemId };
+      rows.set(key, row);
+    }
+    if (!row.imageUrl && order.imageUrl) row.imageUrl = order.imageUrl;
+    if (order.orderDate && (!row.lastSold || order.orderDate > row.lastSold)) row.lastSold = order.orderDate;
+
+    if (isFullyRefunded(order)) {
+      row.refundedCount++;
+      row.refundLoss += getRefundLoss(order);
+      continue;
+    }
+    row.orderCount++;
+    row.unitsSold += order.quantity;
+    const revenue = Math.max(0, order.salePrice - order.refundAmount);
+    row.revenue += revenue;
+    row.fees += order.ebayFees;
+    if (hasRecordedCost(order)) {
+      row.costs += Number(order.savedProductCost);
+      row.completedRevenue += revenue;
+      row.completedProfit += getOrderProfit(order) ?? 0;
+    } else {
+      row.costMissing++;
+    }
+  }
+
+  return [...rows.values()].map(({ completedRevenue, completedProfit, ...row }) => {
+    const netProfit = completedProfit - row.refundLoss;
+    return {
+      ...row,
+      netProfit,
+      margin: completedRevenue > 0 ? (netProfit / completedRevenue) * 100 : null,
+    };
+  });
 }
 
 function getDateRangeStart(
@@ -1201,6 +1294,12 @@ export default function Home() {
 
   const [now, setNow] = useState<Date | null>(null);
 
+  const [listings, setListings] = useState<ApiListing[]>([]);
+  const [listingsLoading, setListingsLoading] = useState(true);
+  const [listingsSyncing, setListingsSyncing] = useState(false);
+  const [listingsMessage, setListingsMessage] = useState("");
+  const [listingsError, setListingsError] = useState(false);
+
   // ----------------------------------------------------------
   // INITIAL DATE
   // ----------------------------------------------------------
@@ -1262,8 +1361,50 @@ export default function Home() {
     setLoadError("");
   }, []);
 
+  // ----------------------------------------------------------
+  // LOAD + SYNC LISTINGS
+  // ----------------------------------------------------------
+
+  const loadListings = useCallback(async () => {
+    try {
+      const response = await fetch("/api/listings", { cache: "no-store" });
+      if (!response.ok) throw new Error("Failed to load listings.");
+      setListings((await response.json()) as ApiListing[]);
+    } catch (error) {
+      console.error("Loading listings failed:", error);
+    } finally {
+      setListingsLoading(false);
+    }
+  }, []);
+
+  // quiet: used right after an order sync, so only problems are shown.
+  async function syncListings(quiet = false) {
+    if (listingsSyncing) return;
+    setListingsSyncing(true);
+    if (!quiet) {
+      setListingsMessage("");
+      setListingsError(false);
+    }
+    try {
+      const response = await fetch("/api/ebay/listings/sync", { method: "POST", cache: "no-store" });
+      const data: { success?: boolean; message?: string; error?: string; needsOrderSync?: boolean } =
+        await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Couldn't load your eBay listings.");
+      }
+      await loadListings();
+      if (!quiet) setListingsMessage(data.message ?? "Listings updated.");
+    } catch (error) {
+      setListingsError(true);
+      setListingsMessage(error instanceof Error ? error.message : "Couldn't load your eBay listings.");
+    } finally {
+      setListingsSyncing(false);
+    }
+  }
+
   useEffect(() => {
     async function initialLoad() {
+      const listingsLoaded = loadListings();
       try {
         await loadOrders();
       } catch (error) {
@@ -1275,10 +1416,11 @@ export default function Home() {
       } finally {
         setLoading(false);
       }
+      await listingsLoaded;
     }
 
     void initialLoad();
-  }, [loadOrders]);
+  }, [loadOrders, loadListings]);
 
   // ----------------------------------------------------------
   // EDIT PRODUCT COST
@@ -1435,6 +1577,9 @@ export default function Home() {
 
       await loadOrders();
 
+      // Also refresh listings (the order sync renews the eBay sign-in first).
+      void syncListings(true);
+
       const found = data.found ?? 0;
       const imported = data.imported ?? 0;
       const skipped = data.skipped ?? 0;
@@ -1522,6 +1667,11 @@ export default function Home() {
   // ----------------------------------------------------------
   // FILTERED ORDERS
   // ----------------------------------------------------------
+
+  const listingRows = useMemo(
+    () => buildListingRows(periodOrders, listings),
+    [periodOrders, listings]
+  );
 
   const filteredOrders = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -1823,6 +1973,15 @@ export default function Home() {
               <Icon name="orders" size={19} />
               Orders
             </button>
+
+            <a
+              href="#listings"
+              onClick={() => setSidebarOpen(false)}
+              className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-slate-400 transition hover:bg-white/5 hover:text-white"
+            >
+              <Icon name="box" size={19} />
+              Listings
+            </a>
 
             <a
               href="#performance"
@@ -2736,6 +2895,21 @@ export default function Home() {
               </div>
             )}
           </section>
+
+          {/* =================================================
+              LISTINGS
+          ================================================= */}
+
+          <ListingsSection
+            rows={listingRows}
+            loading={loading || listingsLoading}
+            syncing={listingsSyncing}
+            message={listingsMessage}
+            messageIsError={listingsError}
+            periodLabel={dateRangeLabel(dateRange).toLowerCase()}
+            hasSyncedListings={listings.length > 0}
+            onRefresh={() => void syncListings()}
+          />
 
           {/* =================================================
               FOOTER
