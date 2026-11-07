@@ -767,8 +767,28 @@ async function insertOrder(
       )
       VALUES (
         $1, $2, $3, $4, $5,
-        $6, $7, $8, $9, $10,
-        $11, $12, $13,
+        $6, $7, $8,
+        -- Use the listing's saved cost per item, if the seller set one.
+        CASE WHEN $11::text = 'COST_NEEDED'
+          THEN COALESCE($9::numeric, (
+            SELECT l."unitCost" * $17::int
+            FROM public."EbayListing" l
+            WHERE l."userId" = $1 AND l."ebayUserId" = $3
+              AND l.environment = $5 AND l."ebayItemId" = $15::text
+              AND l."unitCost" IS NOT NULL
+            LIMIT 1
+          ))
+          ELSE $9::numeric
+        END,
+        $10,
+        CASE WHEN $11::text = 'COST_NEEDED' AND EXISTS (
+            SELECT 1 FROM public."EbayListing" l
+            WHERE l."userId" = $1 AND l."ebayUserId" = $3
+              AND l.environment = $5 AND l."ebayItemId" = $15::text
+              AND l."unitCost" IS NOT NULL
+          ) THEN 'COMPLETED' ELSE $11::text
+        END,
+        $12, $13,
         COALESCE($14::timestamptz, NOW()),
         NOW(),
         $15, $16, $17

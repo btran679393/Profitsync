@@ -25,7 +25,7 @@ export async function GET() {
   try {
     const result = await pool.query(
       `
-      SELECT "ebayItemId", title, sku, "imageUrl", "listingPrice", quantity, status, "updatedAt"
+      SELECT "ebayItemId", title, sku, "imageUrl", "listingPrice", quantity, status, "unitCost", "updatedAt"
       FROM public."EbayListing"
       WHERE "userId" = $1 AND environment = 'PRODUCTION'
       ORDER BY status = 'ACTIVE' DESC, "updatedAt" DESC

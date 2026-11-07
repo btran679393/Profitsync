@@ -12,6 +12,7 @@ export type ListingRow = {
   status: "ACTIVE" | "ENDED" | "UNLINKED";
   price: number | null;
   available: number | null;
+  unitCost: number | null;
   unitsSold: number;
   orderCount: number;
   revenue: number;
@@ -127,6 +128,101 @@ function Thumb({ src, alt }: { src: string | null; alt: string }) {
   );
 }
 
+export type SaveListingCost = (
+  itemId: string,
+  unitCost: string,
+  applyToPast: boolean
+) => Promise<number>;
+
+// "Cost per item" box: saves on Enter or when you click away, then offers
+// to fill the same cost into this listing's past sales that have none.
+function CostCell({ row, onSave }: { row: ListingRow; onSave: SaveListingCost }) {
+  const initial = row.unitCost === null ? "" : row.unitCost.toFixed(2);
+  const [value, setValue] = useState(initial);
+  const [lastSaved, setLastSaved] = useState(initial);
+  const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [note, setNote] = useState("");
+
+  // Pick up changes made elsewhere (e.g. after a refresh).
+  if (initial !== lastSaved && state !== "saving") {
+    setLastSaved(initial);
+    setValue(initial);
+  }
+
+  if (!row.ebayItemId || row.status === "UNLINKED") {
+    return <span className="text-xs text-slate-600" title="Set costs on the order itself for past sales">—</span>;
+  }
+  const itemId = row.ebayItemId;
+  const valid = value.trim() === "" || /^\d+(\.\d{1,2})?$/.test(value.trim());
+
+  async function save(applyToPast: boolean) {
+    const trimmed = value.trim();
+    if (!valid || (!applyToPast && trimmed === lastSaved)) return;
+    setState("saving");
+    setNote("");
+    try {
+      const applied = await onSave(itemId, trimmed, applyToPast);
+      const formatted = trimmed === "" ? "" : Number(trimmed).toFixed(2);
+      setValue(formatted);
+      setLastSaved(formatted);
+      setState("saved");
+      if (applyToPast) setNote(applied === 1 ? "Filled 1 sale" : `Filled ${applied} sales`);
+    } catch (error) {
+      setState("error");
+      setNote(error instanceof Error ? error.message : "Couldn't save");
+    }
+  }
+
+  return (
+    <div className="w-32">
+      <div className="relative">
+        <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-slate-500">$</span>
+        <input
+          inputMode="decimal"
+          value={value}
+          placeholder="Cost"
+          aria-label={`Cost per item for ${row.title}`}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setState("idle");
+          }}
+          onBlur={() => void save(false)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Escape") {
+              setValue(lastSaved);
+              e.currentTarget.blur();
+            }
+          }}
+          className={`w-full rounded-lg border bg-[#0b1120] py-1.5 pl-6 pr-7 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-blue-500 ${
+            valid ? "border-white/10" : "border-rose-500/60"
+          }`}
+        />
+        <span className="absolute right-2 top-1/2 -translate-y-1/2" aria-live="polite">
+          {state === "saving" && <span className="block h-3 w-3 animate-spin rounded-full border-2 border-slate-500 border-t-transparent" />}
+          {state === "saved" && (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#34d399" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-label="Saved"><path d="M5 12l4 4L19 6" /></svg>
+          )}
+        </span>
+      </div>
+      {note ? (
+        <p className={`mt-1 text-[11px] ${state === "error" ? "text-rose-400" : "text-emerald-400"}`}>{note}</p>
+      ) : lastSaved !== "" && row.costMissing > 0 ? (
+        <button
+          type="button"
+          onClick={() => void save(true)}
+          disabled={state === "saving"}
+          className="mt-1 text-[11px] font-semibold text-blue-400 transition hover:text-blue-300"
+        >
+          Fill {row.costMissing} past sale{row.costMissing === 1 ? "" : "s"}
+        </button>
+      ) : !valid ? (
+        <p className="mt-1 text-[11px] text-rose-400">Like 8 or 8.50</p>
+      ) : null}
+    </div>
+  );
+}
+
 const STATUS_BADGE: Record<ListingRow["status"], { label: string; className: string }> = {
   ACTIVE: { label: "Active", className: "bg-emerald-500/10 text-emerald-400 ring-emerald-500/20" },
   ENDED: { label: "Ended", className: "bg-slate-500/10 text-slate-400 ring-slate-500/20" },
@@ -153,6 +249,7 @@ export default function ListingsSection({
   onRangeChange,
   hasSyncedListings,
   onRefresh,
+  onSaveCost,
 }: {
   rows: ListingRow[];
   loading: boolean;
@@ -163,6 +260,7 @@ export default function ListingsSection({
   onRangeChange: (range: ListingRange) => void;
   hasSyncedListings: boolean;
   onRefresh: () => void;
+  onSaveCost: SaveListingCost;
 }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -326,11 +424,12 @@ export default function ListingsSection({
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1080px]">
+          <table className="w-full min-w-[1200px]">
             <thead>
               <tr className="border-b border-white/[0.07] text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                 <th className="px-6 py-3">Listing</th>
                 <th className="px-3 py-3 text-right">Price · Stock</th>
+                <th className="px-3 py-3">Cost / item</th>
                 <th className="px-3 py-3 text-right">Sold</th>
                 <th className="px-3 py-3 text-right">Revenue</th>
                 <th className="px-3 py-3 text-right">Fees + costs</th>
@@ -373,6 +472,9 @@ export default function ListingsSection({
                       <p className="mt-0.5 text-xs text-slate-500">
                         {row.available === null ? "" : row.available === 0 ? "Out of stock" : `${row.available} left`}
                       </p>
+                    </td>
+                    <td className="px-3 py-4">
+                      <CostCell row={row} onSave={onSaveCost} />
                     </td>
                     <td className="px-3 py-4 text-right text-sm">
                       <p className="font-semibold text-white">{row.unitsSold}</p>

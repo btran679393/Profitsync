@@ -25,6 +25,7 @@ type ApiListing = {
   listingPrice: string | number;
   quantity: number;
   status: string;
+  unitCost: string | number | null;
 };
 
 type Order = {
@@ -274,7 +275,7 @@ function buildListingRows(orders: Order[], listings: ApiListing[]): ListingRow[]
   const blankRow = (key: string, title: string) => ({
     key, ebayItemId: null, title, imageUrl: null,
     status: "UNLINKED" as ListingRow["status"],
-    price: null, available: null, unitsSold: 0, orderCount: 0,
+    price: null, available: null, unitCost: null, unitsSold: 0, orderCount: 0,
     revenue: 0, fees: 0, costs: 0, refundedCount: 0, refundLoss: 0,
     netProfit: 0, margin: null, costMissing: 0, lastSold: null,
     completedRevenue: 0, completedProfit: 0,
@@ -289,6 +290,7 @@ function buildListingRows(orders: Order[], listings: ApiListing[]): ListingRow[]
       status: listing.status === "ACTIVE" ? "ACTIVE" : "ENDED",
       price: Number(listing.listingPrice),
       available: listing.status === "ACTIVE" ? listing.quantity : 0,
+      unitCost: listing.unitCost === null || listing.unitCost === undefined ? null : Number(listing.unitCost),
     });
     listingIdByTitle.set(normalizeTitle(listing.title), listing.ebayItemId);
   }
@@ -1342,6 +1344,19 @@ export default function Home() {
   const [listingsMessage, setListingsMessage] = useState("");
   const [listingsError, setListingsError] = useState(false);
   const [listingRange, setListingRange] = useState<ListingRange>("all");
+  const [recentlySavedId, setRecentlySavedId] = useState<number | null>(null);
+  const savedFlashTimer = useRef<number | undefined>(undefined);
+
+  // Enter in a cost box: save it (by leaving the box) and jump to the next
+  // order further down that still needs a cost.
+  function focusNextCostInput(current: HTMLInputElement) {
+    const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input[data-cost-input]"));
+    const next = inputs
+      .slice(inputs.indexOf(current) + 1)
+      .find((input) => input.dataset.needsCost === "true" && !input.disabled);
+    current.blur();
+    next?.focus();
+  }
 
   const hash = useSyncExternalStore(
     subscribeToHash,
@@ -1454,6 +1469,20 @@ export default function Home() {
       setListingsLoading(false);
     }
   }, []);
+
+  // Save a listing's cost per item; optionally fill it into past sales.
+  async function saveListingCost(itemId: string, unitCost: string, applyToPast: boolean) {
+    const response = await fetch(`/api/listings/${encodeURIComponent(itemId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ unitCost: unitCost === "" ? null : unitCost, applyToPast }),
+    });
+    const data: { success?: boolean; applied?: number; error?: string } = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || "Couldn't save the cost.");
+    await loadListings();
+    if (data.applied) await loadOrders();
+    return data.applied ?? 0;
+  }
 
   // quiet: used right after an order sync, so only problems are shown.
   async function syncListings(quiet = false) {
@@ -1576,6 +1605,10 @@ export default function Home() {
       }
 
       const formattedCost = productCost.toFixed(2);
+
+      setRecentlySavedId(id);
+      window.clearTimeout(savedFlashTimer.current);
+      savedFlashTimer.current = window.setTimeout(() => setRecentlySavedId(null), 2500);
 
       setOrders((currentOrders) =>
         currentOrders.map((order) =>
@@ -1745,6 +1778,43 @@ export default function Home() {
   // ----------------------------------------------------------
   // FILTERED ORDERS
   // ----------------------------------------------------------
+
+  // Cost per unit to suggest for an order without a cost: the listing's saved
+  // cost per item first, otherwise the most recent cost used for the same item.
+  const costHints = useMemo(() => {
+    const fromListings = new Map<string, number>();
+    for (const listing of listings) {
+      if (listing.unitCost !== null && listing.unitCost !== undefined) {
+        fromListings.set(listing.ebayItemId, Number(listing.unitCost));
+      }
+    }
+    const fromOrders = new Map<string, number>();
+    const oldestFirst = [...orders].sort((a, b) => (a.orderDate ?? "").localeCompare(b.orderDate ?? ""));
+    for (const order of oldestFirst) {
+      if (isFullyRefunded(order) || !hasRecordedCost(order)) continue;
+      const perUnit = Number(order.savedProductCost) / order.quantity;
+      if (order.ebayItemId) fromOrders.set(`item:${order.ebayItemId}`, perUnit);
+      fromOrders.set(`title:${normalizeTitle(order.item)}`, perUnit);
+    }
+    return { fromListings, fromOrders };
+  }, [orders, listings]);
+
+  function suggestedCost(order: Order): number | null {
+    const { fromListings, fromOrders } = costHints;
+    return (
+      (order.ebayItemId ? fromListings.get(order.ebayItemId) ?? fromOrders.get(`item:${order.ebayItemId}`) : undefined) ??
+      fromOrders.get(`title:${normalizeTitle(order.item)}`) ??
+      null
+    );
+  }
+
+  const recentOrders = useMemo(
+    () =>
+      [...orders]
+        .sort((a, b) => (b.orderDate ?? "").localeCompare(a.orderDate ?? "") || b.id - a.id)
+        .slice(0, 5),
+    [orders]
+  );
 
   const listingRows = useMemo(() => {
     if (!now) return [];
@@ -2593,6 +2663,69 @@ export default function Home() {
               )}
             </div>
           </section>
+
+          {/* =================================================
+              RECENT ORDERS (preview; full table is on Orders)
+          ================================================= */}
+
+          <section className="mt-6 overflow-hidden rounded-2xl border border-white/[0.07] bg-[#151d2d]">
+            <div className="flex items-center justify-between gap-4 border-b border-white/[0.07] px-6 py-5">
+              <div>
+                <h3 className="text-base font-semibold text-white">Recent orders</h3>
+                <p className="mt-1 text-xs text-slate-500">Your latest eBay sales</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => goToOrders()}
+                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold text-blue-400 transition hover:bg-blue-500/10 hover:text-blue-300"
+              >
+                View all orders
+                <Icon name="arrow" size={15} />
+              </button>
+            </div>
+
+            {loading ? (
+              <div className="px-6 py-10 text-center text-sm text-slate-400">Loading recent orders…</div>
+            ) : recentOrders.length === 0 ? (
+              <div className="px-6 py-10 text-center text-sm text-slate-400">
+                No orders yet. Click “Sync eBay Orders” to bring in your sales.
+              </div>
+            ) : (
+              <ul className="divide-y divide-white/[0.05]">
+                {recentOrders.map((order) => {
+                  const refunded = isFullyRefunded(order);
+                  const profit = getOrderProfit(order);
+                  return (
+                    <li key={order.id}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedOrderId(order.id)}
+                        className="flex w-full items-center gap-4 px-6 py-3.5 text-left transition hover:bg-white/[0.03]"
+                      >
+                        <ListingImage imageUrl={order.imageUrl} item={order.item} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-white" title={order.item}>{order.item}</p>
+                          <p className="mt-0.5 text-xs text-slate-500">{formatOrderDate(order.orderDate)}</p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="text-sm font-semibold text-slate-200">{money(order.salePrice)}</p>
+                          {refunded ? (
+                            <span className="mt-1 inline-block rounded-md bg-rose-500/10 px-2 py-0.5 text-[11px] font-semibold text-rose-400">Refunded</span>
+                          ) : profit === null ? (
+                            <span className="mt-1 inline-block rounded-md bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-400">Needs cost</span>
+                          ) : (
+                            <p className={`mt-0.5 text-xs font-semibold ${profit < 0 ? "text-rose-400" : "text-emerald-400"}`}>
+                              {profit < 0 ? "−" : "+"}{money(Math.abs(profit))} profit
+                            </p>
+                          )}
+                        </div>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
           </>
           )}
 
@@ -2773,6 +2906,10 @@ export default function Home() {
                       const isSaving =
                         savingId === order.id;
 
+                      const draftChanged = order.productCost !== order.savedProductCost;
+                      const draftValid = order.productCost.trim() === "" || isValidCost(order.productCost);
+                      const suggestion = !refunded && order.savedProductCost === "" ? suggestedCost(order) : null;
+
                       return (
                         <tr
                           key={order.id}
@@ -2833,51 +2970,63 @@ export default function Home() {
                           {/* Product cost */}
 
                           <td className="px-3 py-4">
-                            {refunded ? <span className="text-xs text-slate-500">Not required</span> : <div className="flex items-center gap-2">
-                              <span className="text-sm text-slate-500">
-                                $
-                              </span>
-
-                              <input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={order.productCost}
-                                placeholder="0.00"
-                                aria-label={`Product cost for ${order.item}`}
-                                disabled={
-                                  isSaving ||
-                                  syncing ||
-                                  loggingOut
-                                }
-                                onChange={(event) =>
-                                  updateProductCost(
-                                    order.id,
-                                    event.target.value
-                                  )
-                                }
-                                onBlur={(event) =>
-                                  saveProductCost(
-                                    order.id,
-                                    event.target.value
-                                  )
-                                }
-                                onKeyDown={(event) => {
-                                  if (
-                                    event.key === "Enter"
-                                  ) {
-                                    event.currentTarget.blur();
-                                  }
-                                }}
-                                className="w-24 rounded-lg border border-white/10 bg-[#0b1120] px-3 py-2 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-                              />
-
-                              {isSaving && (
-                                <span className="text-[11px] text-blue-400">
-                                  Saving
-                                </span>
-                              )}
-                            </div>}
+                            {refunded ? <span className="text-xs text-slate-500">Not required</span> : (
+                                <div className="w-32">
+                                  <div className="relative">
+                                    <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-slate-500">$</span>
+                                    <input
+                                      type="text"
+                                      inputMode="decimal"
+                                      value={order.productCost}
+                                      placeholder="0.00"
+                                      aria-label={`Product cost for ${order.item}`}
+                                      data-cost-input
+                                      data-needs-cost={order.savedProductCost === "" ? "true" : undefined}
+                                      disabled={isSaving || syncing || loggingOut}
+                                      onChange={(event) => updateProductCost(order.id, event.target.value)}
+                                      onBlur={(event) => saveProductCost(order.id, event.target.value)}
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter") {
+                                          event.preventDefault();
+                                          focusNextCostInput(event.currentTarget);
+                                        }
+                                        if (event.key === "Escape") {
+                                          updateProductCost(order.id, order.savedProductCost);
+                                        }
+                                      }}
+                                      className={`w-full rounded-lg border bg-[#0b1120] py-2 pl-6 pr-7 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:opacity-50 ${
+                                        draftValid ? (order.savedProductCost === "" ? "border-amber-500/30" : "border-white/10") : "border-red-500/60"
+                                      }`}
+                                    />
+                                    <span className="absolute right-2 top-1/2 -translate-y-1/2" aria-live="polite">
+                                      {isSaving ? (
+                                        <span className="block h-3 w-3 animate-spin rounded-full border-2 border-slate-500 border-t-transparent" aria-label="Saving" />
+                                      ) : recentlySavedId === order.id ? (
+                                        <Icon name="check" size={14} className="text-emerald-400" />
+                                      ) : null}
+                                    </span>
+                                  </div>
+                                  {draftChanged && draftValid && order.productCost.trim() !== "" ? (
+                                    <p className={`mt-1 text-[11px] font-medium ${profit >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                                      = {money(profit)} profit · Enter to save
+                                    </p>
+                                  ) : !draftValid ? (
+                                    <p className="mt-1 text-[11px] text-red-400">Like 8 or 8.50</p>
+                                  ) : suggestion !== null ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const cost = (suggestion * order.quantity).toFixed(2);
+                                        updateProductCost(order.id, cost);
+                                        void saveProductCost(order.id, cost);
+                                      }}
+                                      className="mt-1 text-[11px] font-semibold text-blue-400 transition hover:text-blue-300"
+                                    >
+                                      Use {money(suggestion * order.quantity)}{order.quantity > 1 ? ` (${order.quantity}×)` : ""} · last time
+                                    </button>
+                                  ) : null}
+                                </div>
+                            )}
                           </td>
 
                           {/* Profit */}
@@ -3006,6 +3155,7 @@ export default function Home() {
               onRangeChange={setListingRange}
               hasSyncedListings={listings.length > 0}
               onRefresh={() => void syncListings()}
+              onSaveCost={saveListingCost}
             />
           )}
 

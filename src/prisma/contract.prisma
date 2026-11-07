@@ -96,6 +96,10 @@ model EbayListing {
   // Available quantity
   quantity      Int      @default(0)
 
+  // What one unit costs the seller. New sales from this listing get
+  // productCost = unitCost × quantity automatically.
+  unitCost      Decimal?
+
   // Listing status:
   // ACTIVE
   // ENDED
