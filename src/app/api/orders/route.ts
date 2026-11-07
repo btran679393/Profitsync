@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Columns added by optional SQL files in docs/sql.
-const OPTIONAL_COLUMNS = ["shippingLabelCost", "shippingCost"];
+const OPTIONAL_COLUMNS = ["shippingLabelCost", "shippingCost", "otherFees"];
 
 export async function GET() {
   const supabase = await createClient();

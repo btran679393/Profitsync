@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 
 export default function PrivacyPage() {
   return (
@@ -11,9 +13,9 @@ export default function PrivacyPage() {
         color: "#f3f4f6",
       }}
     >
-      <a href="/" style={{ color: "#60a5fa" }}>
+      <Link href="/" style={{ color: "#60a5fa" }}>
         ← Back to ProfitSync
-      </a>
+      </Link>
 
       <h1 style={{ marginTop: "32px" }}>
         ProfitSync Privacy Policy
@@ -69,7 +71,7 @@ export default function PrivacyPage() {
         Connecting an eBay account requires your authorization.
         ProfitSync stores access and refresh tokens to retrieve
         permitted account information. You may revoke
-        ProfitSync's authorization through your eBay account
+        ProfitSync&apos;s authorization through your eBay account
         settings.
       </p>
 

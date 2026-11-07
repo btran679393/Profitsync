@@ -31,7 +31,7 @@ export async function GET() {
     const store = await resolveActiveEbayUserId(pool, user);
     const result = await pool.query(
       `
-      SELECT "ebayItemId", title, sku, "imageUrl", "listingPrice", quantity, status, "unitCost", ${shipping} "updatedAt"
+      SELECT "ebayItemId", title, sku, "imageUrl", "listingPrice", quantity, status, "unitCost", ${shipping} "createdAt", "updatedAt"
       FROM public."EbayListing"
       WHERE "userId" = $1 AND environment = 'PRODUCTION'
         AND ($2::text IS NULL OR "ebayUserId" = $2)

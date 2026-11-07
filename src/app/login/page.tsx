@@ -183,9 +183,12 @@ export default function LoginPage() {
 
   useEffect(() => {
     // Show errors passed back from /auth/callback (e.g. cancelled consent).
+    // Set after the first render so server and browser HTML match.
     const params = new URLSearchParams(window.location.search);
     const urlError = params.get("error_description") || params.get("error");
-    if (urlError) setError(friendlyAuthError(urlError));
+    const showError = window.setTimeout(() => {
+      if (urlError) setError(friendlyAuthError(urlError));
+    }, 0);
 
     // Only show buttons for providers that are enabled in the Supabase dashboard,
     // so nobody lands on a raw "provider is not enabled" error page.
@@ -198,6 +201,7 @@ export default function LoginPage() {
         setEnabledProviders(SOCIAL_PROVIDERS.map(([p]) => p).filter((p) => ext[p]));
       })
       .catch(() => setEnabledProviders(SOCIAL_PROVIDERS.map(([p]) => p)));
+    return () => window.clearTimeout(showError);
   }, []);
 
   function switchMode(next: Mode) {
@@ -256,6 +260,8 @@ export default function LoginPage() {
           options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
         });
         if (authError) throw authError;
+        // Full page load on purpose so the new sign-in cookies reach the server.
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
         if (data.session) window.location.assign("/");
         else setNotice("Check your email to confirm your account before signing in.");
       } else {
@@ -263,6 +269,7 @@ export default function LoginPage() {
           email: email.trim(), password,
         });
         if (authError) throw authError;
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
         window.location.assign("/");
       }
     } catch (err) {

@@ -289,6 +289,16 @@ export async function POST(request: NextRequest) {
       [environment, identifiers]
     );
 
+    // Delete the deleted seller's saved listings (titles, prices, costs).
+    const listingDeletion = await client.query(
+      `
+      DELETE FROM public."EbayListing"
+      WHERE environment = $1
+        AND "ebayUserId" = ANY($2::text[])
+      `,
+      [environment, identifiers]
+    );
+
     // Disconnect the deleted seller account.
     const connectionDeletion = await client.query(
       `
@@ -346,6 +356,7 @@ export async function POST(request: NextRequest) {
       environment,
       buyerOrdersDeleted: buyerDeletion.rowCount,
       sellerOrdersDeleted: sellerDeletion.rowCount,
+      listingsDeleted: listingDeletion.rowCount,
       connectionsDeleted: connectionDeletion.rowCount,
       identifierHashesRecorded: identifierHashes.length,
     });

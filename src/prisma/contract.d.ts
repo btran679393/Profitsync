@@ -33,9 +33,9 @@ import type {
 } from '@prisma/orm-postgres/contract/types';
 
 export type StorageHash =
-  StorageHashBase<'b1ddb3d3849999095328421a37b5bbc424248643ddf82544a503ea369e894de5'>;
+  StorageHashBase<'b156b3dce712c9bd8032a3dab4f28bffb0c79db82d260e7532a4d6a25b5cf2f8'>;
 export type ExecutionHash =
-  ExecutionHashBase<'fe29687f147172d6282cffa83f304852ecf3cd1fef2d6382f486c4db82ea2f30'>;
+  ExecutionHashBase<'6c89e46689d906f810ad749ad33ba10bd1b8257a52517acfb330abc03f476567'>;
 export type ProfileHash =
   ProfileHashBase<'3916f444a8a17ad749191acf9e08dad97d1a327b88c2f1d45d12f240296aa8b2'>;
 
@@ -250,6 +250,25 @@ export type FieldOutputTypes = {
       readonly refreshToken: CodecTypes['pg/text@1']['output'];
       readonly accessTokenExpiresAt: CodecTypes['pg/timestamptz-string@1']['output'];
       readonly refreshTokenExpiresAt: CodecTypes['pg/timestamptz-string@1']['output'];
+      readonly ebayUsername: CodecTypes['pg/text@1']['output'] | null;
+      readonly storeName: CodecTypes['pg/text@1']['output'] | null;
+      readonly createdAt: CodecTypes['pg/timestamptz-string@1']['output'];
+      readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['output'];
+    };
+    readonly EbayListing: {
+      readonly id: CodecTypes['pg/int4@1']['output'];
+      readonly userId: CodecTypes['pg/text@1']['output'];
+      readonly ebayUserId: CodecTypes['pg/text@1']['output'];
+      readonly environment: CodecTypes['pg/text@1']['output'];
+      readonly ebayItemId: CodecTypes['pg/text@1']['output'];
+      readonly title: CodecTypes['pg/text@1']['output'];
+      readonly sku: CodecTypes['pg/text@1']['output'] | null;
+      readonly imageUrl: CodecTypes['pg/text@1']['output'] | null;
+      readonly listingPrice: CodecTypes['pg/numeric@1']['output'];
+      readonly quantity: CodecTypes['pg/int4@1']['output'];
+      readonly unitCost: CodecTypes['pg/numeric@1']['output'] | null;
+      readonly shippingCost: CodecTypes['pg/numeric@1']['output'] | null;
+      readonly status: CodecTypes['pg/text@1']['output'];
       readonly createdAt: CodecTypes['pg/timestamptz-string@1']['output'];
       readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['output'];
     };
@@ -261,11 +280,19 @@ export type FieldOutputTypes = {
       readonly ebayBuyerId: CodecTypes['pg/text@1']['output'] | null;
       readonly environment: CodecTypes['pg/text@1']['output'];
       readonly item: CodecTypes['pg/text@1']['output'];
+      readonly ebayItemId: CodecTypes['pg/text@1']['output'] | null;
+      readonly ebayVariationId: CodecTypes['pg/text@1']['output'] | null;
+      readonly sku: CodecTypes['pg/text@1']['output'] | null;
+      readonly quantity: CodecTypes['pg/int4@1']['output'];
       readonly salePrice: CodecTypes['pg/numeric@1']['output'];
       readonly ebayFees: CodecTypes['pg/numeric@1']['output'];
       readonly productCost: CodecTypes['pg/numeric@1']['output'] | null;
+      readonly shippingLabelCost: CodecTypes['pg/numeric@1']['output'] | null;
+      readonly shippingCost: CodecTypes['pg/numeric@1']['output'] | null;
       readonly imageUrl: CodecTypes['pg/text@1']['output'] | null;
       readonly status: CodecTypes['pg/text@1']['output'];
+      readonly refundAmount: CodecTypes['pg/numeric@1']['output'] | null;
+      readonly refundedAt: CodecTypes['pg/timestamptz-string@1']['output'] | null;
       readonly orderDate: CodecTypes['pg/timestamptz-string@1']['output'];
       readonly createdAt: CodecTypes['pg/timestamptz-string@1']['output'];
       readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['output'];
@@ -283,6 +310,25 @@ export type FieldInputTypes = {
       readonly refreshToken: CodecTypes['pg/text@1']['input'];
       readonly accessTokenExpiresAt: CodecTypes['pg/timestamptz-string@1']['input'];
       readonly refreshTokenExpiresAt: CodecTypes['pg/timestamptz-string@1']['input'];
+      readonly ebayUsername: CodecTypes['pg/text@1']['input'] | null;
+      readonly storeName: CodecTypes['pg/text@1']['input'] | null;
+      readonly createdAt: CodecTypes['pg/timestamptz-string@1']['input'];
+      readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['input'];
+    };
+    readonly EbayListing: {
+      readonly id: CodecTypes['pg/int4@1']['input'];
+      readonly userId: CodecTypes['pg/text@1']['input'];
+      readonly ebayUserId: CodecTypes['pg/text@1']['input'];
+      readonly environment: CodecTypes['pg/text@1']['input'];
+      readonly ebayItemId: CodecTypes['pg/text@1']['input'];
+      readonly title: CodecTypes['pg/text@1']['input'];
+      readonly sku: CodecTypes['pg/text@1']['input'] | null;
+      readonly imageUrl: CodecTypes['pg/text@1']['input'] | null;
+      readonly listingPrice: CodecTypes['pg/numeric@1']['input'];
+      readonly quantity: CodecTypes['pg/int4@1']['input'];
+      readonly unitCost: CodecTypes['pg/numeric@1']['input'] | null;
+      readonly shippingCost: CodecTypes['pg/numeric@1']['input'] | null;
+      readonly status: CodecTypes['pg/text@1']['input'];
       readonly createdAt: CodecTypes['pg/timestamptz-string@1']['input'];
       readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['input'];
     };
@@ -294,11 +340,19 @@ export type FieldInputTypes = {
       readonly ebayBuyerId: CodecTypes['pg/text@1']['input'] | null;
       readonly environment: CodecTypes['pg/text@1']['input'];
       readonly item: CodecTypes['pg/text@1']['input'];
+      readonly ebayItemId: CodecTypes['pg/text@1']['input'] | null;
+      readonly ebayVariationId: CodecTypes['pg/text@1']['input'] | null;
+      readonly sku: CodecTypes['pg/text@1']['input'] | null;
+      readonly quantity: CodecTypes['pg/int4@1']['input'];
       readonly salePrice: CodecTypes['pg/numeric@1']['input'];
       readonly ebayFees: CodecTypes['pg/numeric@1']['input'];
       readonly productCost: CodecTypes['pg/numeric@1']['input'] | null;
+      readonly shippingLabelCost: CodecTypes['pg/numeric@1']['input'] | null;
+      readonly shippingCost: CodecTypes['pg/numeric@1']['input'] | null;
       readonly imageUrl: CodecTypes['pg/text@1']['input'] | null;
       readonly status: CodecTypes['pg/text@1']['input'];
+      readonly refundAmount: CodecTypes['pg/numeric@1']['input'] | null;
+      readonly refundedAt: CodecTypes['pg/timestamptz-string@1']['input'] | null;
       readonly orderDate: CodecTypes['pg/timestamptz-string@1']['input'];
       readonly createdAt: CodecTypes['pg/timestamptz-string@1']['input'];
       readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['input'];
@@ -312,26 +366,53 @@ export type StorageColumnTypes = {
       readonly accessTokenExpiresAt: CodecTypes['pg/timestamptz-string@1']['output'];
       readonly createdAt: CodecTypes['pg/timestamptz-string@1']['output'];
       readonly ebayUserId: CodecTypes['pg/text@1']['output'] | null;
+      readonly ebayUsername: CodecTypes['pg/text@1']['output'] | null;
       readonly environment: CodecTypes['pg/text@1']['output'];
       readonly id: CodecTypes['pg/int4@1']['output'];
       readonly refreshToken: CodecTypes['pg/text@1']['output'];
       readonly refreshTokenExpiresAt: CodecTypes['pg/timestamptz-string@1']['output'];
+      readonly storeName: CodecTypes['pg/text@1']['output'] | null;
       readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['output'];
       readonly userId: CodecTypes['pg/text@1']['output'] | null;
+    };
+    readonly ebayListing: {
+      readonly createdAt: CodecTypes['pg/timestamptz-string@1']['output'];
+      readonly ebayItemId: CodecTypes['pg/text@1']['output'];
+      readonly ebayUserId: CodecTypes['pg/text@1']['output'];
+      readonly environment: CodecTypes['pg/text@1']['output'];
+      readonly id: CodecTypes['pg/int4@1']['output'];
+      readonly imageUrl: CodecTypes['pg/text@1']['output'] | null;
+      readonly listingPrice: CodecTypes['pg/numeric@1']['output'];
+      readonly quantity: CodecTypes['pg/int4@1']['output'];
+      readonly shippingCost: CodecTypes['pg/numeric@1']['output'] | null;
+      readonly sku: CodecTypes['pg/text@1']['output'] | null;
+      readonly status: CodecTypes['pg/text@1']['output'];
+      readonly title: CodecTypes['pg/text@1']['output'];
+      readonly unitCost: CodecTypes['pg/numeric@1']['output'] | null;
+      readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['output'];
+      readonly userId: CodecTypes['pg/text@1']['output'];
     };
     readonly order: {
       readonly createdAt: CodecTypes['pg/timestamptz-string@1']['output'];
       readonly ebayBuyerId: CodecTypes['pg/text@1']['output'] | null;
       readonly ebayFees: CodecTypes['pg/numeric@1']['output'];
+      readonly ebayItemId: CodecTypes['pg/text@1']['output'] | null;
       readonly ebayOrderId: CodecTypes['pg/text@1']['output'] | null;
       readonly ebayUserId: CodecTypes['pg/text@1']['output'] | null;
+      readonly ebayVariationId: CodecTypes['pg/text@1']['output'] | null;
       readonly environment: CodecTypes['pg/text@1']['output'];
       readonly id: CodecTypes['pg/int4@1']['output'];
       readonly imageUrl: CodecTypes['pg/text@1']['output'] | null;
       readonly item: CodecTypes['pg/text@1']['output'];
       readonly orderDate: CodecTypes['pg/timestamptz-string@1']['output'];
       readonly productCost: CodecTypes['pg/numeric@1']['output'] | null;
+      readonly quantity: CodecTypes['pg/int4@1']['output'];
+      readonly refundAmount: CodecTypes['pg/numeric@1']['output'] | null;
+      readonly refundedAt: CodecTypes['pg/timestamptz-string@1']['output'] | null;
       readonly salePrice: CodecTypes['pg/numeric@1']['output'];
+      readonly shippingCost: CodecTypes['pg/numeric@1']['output'] | null;
+      readonly shippingLabelCost: CodecTypes['pg/numeric@1']['output'] | null;
+      readonly sku: CodecTypes['pg/text@1']['output'] | null;
       readonly status: CodecTypes['pg/text@1']['output'];
       readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['output'];
       readonly userId: CodecTypes['pg/text@1']['output'] | null;
@@ -345,26 +426,53 @@ export type StorageColumnInputTypes = {
       readonly accessTokenExpiresAt: CodecTypes['pg/timestamptz-string@1']['input'];
       readonly createdAt: CodecTypes['pg/timestamptz-string@1']['input'];
       readonly ebayUserId: CodecTypes['pg/text@1']['input'] | null;
+      readonly ebayUsername: CodecTypes['pg/text@1']['input'] | null;
       readonly environment: CodecTypes['pg/text@1']['input'];
       readonly id: CodecTypes['pg/int4@1']['input'];
       readonly refreshToken: CodecTypes['pg/text@1']['input'];
       readonly refreshTokenExpiresAt: CodecTypes['pg/timestamptz-string@1']['input'];
+      readonly storeName: CodecTypes['pg/text@1']['input'] | null;
       readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['input'];
       readonly userId: CodecTypes['pg/text@1']['input'] | null;
+    };
+    readonly ebayListing: {
+      readonly createdAt: CodecTypes['pg/timestamptz-string@1']['input'];
+      readonly ebayItemId: CodecTypes['pg/text@1']['input'];
+      readonly ebayUserId: CodecTypes['pg/text@1']['input'];
+      readonly environment: CodecTypes['pg/text@1']['input'];
+      readonly id: CodecTypes['pg/int4@1']['input'];
+      readonly imageUrl: CodecTypes['pg/text@1']['input'] | null;
+      readonly listingPrice: CodecTypes['pg/numeric@1']['input'];
+      readonly quantity: CodecTypes['pg/int4@1']['input'];
+      readonly shippingCost: CodecTypes['pg/numeric@1']['input'] | null;
+      readonly sku: CodecTypes['pg/text@1']['input'] | null;
+      readonly status: CodecTypes['pg/text@1']['input'];
+      readonly title: CodecTypes['pg/text@1']['input'];
+      readonly unitCost: CodecTypes['pg/numeric@1']['input'] | null;
+      readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['input'];
+      readonly userId: CodecTypes['pg/text@1']['input'];
     };
     readonly order: {
       readonly createdAt: CodecTypes['pg/timestamptz-string@1']['input'];
       readonly ebayBuyerId: CodecTypes['pg/text@1']['input'] | null;
       readonly ebayFees: CodecTypes['pg/numeric@1']['input'];
+      readonly ebayItemId: CodecTypes['pg/text@1']['input'] | null;
       readonly ebayOrderId: CodecTypes['pg/text@1']['input'] | null;
       readonly ebayUserId: CodecTypes['pg/text@1']['input'] | null;
+      readonly ebayVariationId: CodecTypes['pg/text@1']['input'] | null;
       readonly environment: CodecTypes['pg/text@1']['input'];
       readonly id: CodecTypes['pg/int4@1']['input'];
       readonly imageUrl: CodecTypes['pg/text@1']['input'] | null;
       readonly item: CodecTypes['pg/text@1']['input'];
       readonly orderDate: CodecTypes['pg/timestamptz-string@1']['input'];
       readonly productCost: CodecTypes['pg/numeric@1']['input'] | null;
+      readonly quantity: CodecTypes['pg/int4@1']['input'];
+      readonly refundAmount: CodecTypes['pg/numeric@1']['input'] | null;
+      readonly refundedAt: CodecTypes['pg/timestamptz-string@1']['input'] | null;
       readonly salePrice: CodecTypes['pg/numeric@1']['input'];
+      readonly shippingCost: CodecTypes['pg/numeric@1']['input'] | null;
+      readonly shippingLabelCost: CodecTypes['pg/numeric@1']['input'] | null;
+      readonly sku: CodecTypes['pg/text@1']['input'] | null;
       readonly status: CodecTypes['pg/text@1']['input'];
       readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['input'];
       readonly userId: CodecTypes['pg/text@1']['input'] | null;
@@ -439,6 +547,16 @@ type ContractBase = Omit<
                   readonly codecId: 'pg/timestamptz-string@1';
                   readonly nullable: false;
                 };
+                readonly ebayUsername: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'pg/text@1';
+                  readonly nullable: true;
+                };
+                readonly storeName: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'pg/text@1';
+                  readonly nullable: true;
+                };
                 readonly createdAt: {
                   readonly nativeType: 'timestamptz';
                   readonly codecId: 'pg/timestamptz-string@1';
@@ -453,6 +571,110 @@ type ContractBase = Omit<
               };
               primaryKey: { readonly columns: readonly ['id'] };
               uniques: readonly [];
+              indexes: readonly [];
+              foreignKeys: readonly [];
+            };
+            readonly ebayListing: {
+              columns: {
+                readonly id: {
+                  readonly nativeType: 'int4';
+                  readonly codecId: 'pg/int4@1';
+                  readonly nullable: false;
+                  readonly default: {
+                    readonly kind: 'function';
+                    readonly expression: 'autoincrement()';
+                  };
+                };
+                readonly userId: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'pg/text@1';
+                  readonly nullable: false;
+                };
+                readonly ebayUserId: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'pg/text@1';
+                  readonly nullable: false;
+                };
+                readonly environment: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'pg/text@1';
+                  readonly nullable: false;
+                  readonly default: {
+                    readonly kind: 'literal';
+                    readonly value: DefaultLiteralValue<'pg/text@1', 'PRODUCTION'>;
+                  };
+                };
+                readonly ebayItemId: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'pg/text@1';
+                  readonly nullable: false;
+                };
+                readonly title: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'pg/text@1';
+                  readonly nullable: false;
+                };
+                readonly sku: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'pg/text@1';
+                  readonly nullable: true;
+                };
+                readonly imageUrl: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'pg/text@1';
+                  readonly nullable: true;
+                };
+                readonly listingPrice: {
+                  readonly nativeType: 'numeric';
+                  readonly codecId: 'pg/numeric@1';
+                  readonly nullable: false;
+                };
+                readonly quantity: {
+                  readonly nativeType: 'int4';
+                  readonly codecId: 'pg/int4@1';
+                  readonly nullable: false;
+                  readonly default: {
+                    readonly kind: 'literal';
+                    readonly value: DefaultLiteralValue<'pg/int4@1', 0>;
+                  };
+                };
+                readonly unitCost: {
+                  readonly nativeType: 'numeric';
+                  readonly codecId: 'pg/numeric@1';
+                  readonly nullable: true;
+                };
+                readonly shippingCost: {
+                  readonly nativeType: 'numeric';
+                  readonly codecId: 'pg/numeric@1';
+                  readonly nullable: true;
+                };
+                readonly status: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'pg/text@1';
+                  readonly nullable: false;
+                  readonly default: {
+                    readonly kind: 'literal';
+                    readonly value: DefaultLiteralValue<'pg/text@1', 'ACTIVE'>;
+                  };
+                };
+                readonly createdAt: {
+                  readonly nativeType: 'timestamptz';
+                  readonly codecId: 'pg/timestamptz-string@1';
+                  readonly nullable: false;
+                  readonly default: { readonly kind: 'function'; readonly expression: 'now()' };
+                };
+                readonly updatedAt: {
+                  readonly nativeType: 'timestamptz';
+                  readonly codecId: 'pg/timestamptz-string@1';
+                  readonly nullable: false;
+                };
+              };
+              primaryKey: { readonly columns: readonly ['id'] };
+              uniques: readonly [
+                {
+                  readonly columns: readonly ['userId', 'ebayUserId', 'environment', 'ebayItemId'];
+                },
+              ];
               indexes: readonly [];
               foreignKeys: readonly [];
             };
@@ -501,6 +723,30 @@ type ContractBase = Omit<
                   readonly codecId: 'pg/text@1';
                   readonly nullable: false;
                 };
+                readonly ebayItemId: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'pg/text@1';
+                  readonly nullable: true;
+                };
+                readonly ebayVariationId: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'pg/text@1';
+                  readonly nullable: true;
+                };
+                readonly sku: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'pg/text@1';
+                  readonly nullable: true;
+                };
+                readonly quantity: {
+                  readonly nativeType: 'int4';
+                  readonly codecId: 'pg/int4@1';
+                  readonly nullable: false;
+                  readonly default: {
+                    readonly kind: 'literal';
+                    readonly value: DefaultLiteralValue<'pg/int4@1', 1>;
+                  };
+                };
                 readonly salePrice: {
                   readonly nativeType: 'numeric';
                   readonly codecId: 'pg/numeric@1';
@@ -512,6 +758,16 @@ type ContractBase = Omit<
                   readonly nullable: false;
                 };
                 readonly productCost: {
+                  readonly nativeType: 'numeric';
+                  readonly codecId: 'pg/numeric@1';
+                  readonly nullable: true;
+                };
+                readonly shippingLabelCost: {
+                  readonly nativeType: 'numeric';
+                  readonly codecId: 'pg/numeric@1';
+                  readonly nullable: true;
+                };
+                readonly shippingCost: {
                   readonly nativeType: 'numeric';
                   readonly codecId: 'pg/numeric@1';
                   readonly nullable: true;
@@ -529,6 +785,16 @@ type ContractBase = Omit<
                     readonly kind: 'literal';
                     readonly value: DefaultLiteralValue<'pg/text@1', 'COST_NEEDED'>;
                   };
+                };
+                readonly refundAmount: {
+                  readonly nativeType: 'numeric';
+                  readonly codecId: 'pg/numeric@1';
+                  readonly nullable: true;
+                };
+                readonly refundedAt: {
+                  readonly nativeType: 'timestamptz';
+                  readonly codecId: 'pg/timestamptz-string@1';
+                  readonly nullable: true;
                 };
                 readonly orderDate: {
                   readonly nativeType: 'timestamptz';
@@ -568,6 +834,10 @@ type ContractBase = Omit<
     readonly ebayConnection: {
       readonly namespace: 'public' & NamespaceId;
       readonly model: 'EbayConnection';
+    };
+    readonly ebayListing: {
+      readonly namespace: 'public' & NamespaceId;
+      readonly model: 'EbayListing';
     };
   };
   readonly domain: {
@@ -614,6 +884,14 @@ type ContractBase = Omit<
                   readonly codecId: 'pg/timestamptz-string@1';
                 };
               };
+              readonly ebayUsername: {
+                readonly nullable: true;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
+              readonly storeName: {
+                readonly nullable: true;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
               readonly createdAt: {
                 readonly nullable: false;
                 readonly type: {
@@ -642,6 +920,100 @@ type ContractBase = Omit<
                 readonly refreshToken: { readonly column: 'refreshToken' };
                 readonly accessTokenExpiresAt: { readonly column: 'accessTokenExpiresAt' };
                 readonly refreshTokenExpiresAt: { readonly column: 'refreshTokenExpiresAt' };
+                readonly ebayUsername: { readonly column: 'ebayUsername' };
+                readonly storeName: { readonly column: 'storeName' };
+                readonly createdAt: { readonly column: 'createdAt' };
+                readonly updatedAt: { readonly column: 'updatedAt' };
+              };
+            };
+          };
+          readonly EbayListing: {
+            readonly fields: {
+              readonly id: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/int4@1' };
+              };
+              readonly userId: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
+              readonly ebayUserId: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
+              readonly environment: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
+              readonly ebayItemId: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
+              readonly title: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
+              readonly sku: {
+                readonly nullable: true;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
+              readonly imageUrl: {
+                readonly nullable: true;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
+              readonly listingPrice: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/numeric@1' };
+              };
+              readonly quantity: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/int4@1' };
+              };
+              readonly unitCost: {
+                readonly nullable: true;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/numeric@1' };
+              };
+              readonly shippingCost: {
+                readonly nullable: true;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/numeric@1' };
+              };
+              readonly status: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
+              readonly createdAt: {
+                readonly nullable: false;
+                readonly type: {
+                  readonly kind: 'scalar';
+                  readonly codecId: 'pg/timestamptz-string@1';
+                };
+              };
+              readonly updatedAt: {
+                readonly nullable: false;
+                readonly type: {
+                  readonly kind: 'scalar';
+                  readonly codecId: 'pg/timestamptz-string@1';
+                };
+              };
+            };
+            readonly relations: Record<string, never>;
+            readonly storage: {
+              readonly table: 'ebayListing';
+              readonly namespaceId: 'public';
+              readonly fields: {
+                readonly id: { readonly column: 'id' };
+                readonly userId: { readonly column: 'userId' };
+                readonly ebayUserId: { readonly column: 'ebayUserId' };
+                readonly environment: { readonly column: 'environment' };
+                readonly ebayItemId: { readonly column: 'ebayItemId' };
+                readonly title: { readonly column: 'title' };
+                readonly sku: { readonly column: 'sku' };
+                readonly imageUrl: { readonly column: 'imageUrl' };
+                readonly listingPrice: { readonly column: 'listingPrice' };
+                readonly quantity: { readonly column: 'quantity' };
+                readonly unitCost: { readonly column: 'unitCost' };
+                readonly shippingCost: { readonly column: 'shippingCost' };
+                readonly status: { readonly column: 'status' };
                 readonly createdAt: { readonly column: 'createdAt' };
                 readonly updatedAt: { readonly column: 'updatedAt' };
               };
@@ -677,6 +1049,22 @@ type ContractBase = Omit<
                 readonly nullable: false;
                 readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
               };
+              readonly ebayItemId: {
+                readonly nullable: true;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
+              readonly ebayVariationId: {
+                readonly nullable: true;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
+              readonly sku: {
+                readonly nullable: true;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
+              readonly quantity: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/int4@1' };
+              };
               readonly salePrice: {
                 readonly nullable: false;
                 readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/numeric@1' };
@@ -689,6 +1077,14 @@ type ContractBase = Omit<
                 readonly nullable: true;
                 readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/numeric@1' };
               };
+              readonly shippingLabelCost: {
+                readonly nullable: true;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/numeric@1' };
+              };
+              readonly shippingCost: {
+                readonly nullable: true;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/numeric@1' };
+              };
               readonly imageUrl: {
                 readonly nullable: true;
                 readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
@@ -696,6 +1092,17 @@ type ContractBase = Omit<
               readonly status: {
                 readonly nullable: false;
                 readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
+              readonly refundAmount: {
+                readonly nullable: true;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/numeric@1' };
+              };
+              readonly refundedAt: {
+                readonly nullable: true;
+                readonly type: {
+                  readonly kind: 'scalar';
+                  readonly codecId: 'pg/timestamptz-string@1';
+                };
               };
               readonly orderDate: {
                 readonly nullable: false;
@@ -731,11 +1138,19 @@ type ContractBase = Omit<
                 readonly ebayBuyerId: { readonly column: 'ebayBuyerId' };
                 readonly environment: { readonly column: 'environment' };
                 readonly item: { readonly column: 'item' };
+                readonly ebayItemId: { readonly column: 'ebayItemId' };
+                readonly ebayVariationId: { readonly column: 'ebayVariationId' };
+                readonly sku: { readonly column: 'sku' };
+                readonly quantity: { readonly column: 'quantity' };
                 readonly salePrice: { readonly column: 'salePrice' };
                 readonly ebayFees: { readonly column: 'ebayFees' };
                 readonly productCost: { readonly column: 'productCost' };
+                readonly shippingLabelCost: { readonly column: 'shippingLabelCost' };
+                readonly shippingCost: { readonly column: 'shippingCost' };
                 readonly imageUrl: { readonly column: 'imageUrl' };
                 readonly status: { readonly column: 'status' };
+                readonly refundAmount: { readonly column: 'refundAmount' };
+                readonly refundedAt: { readonly column: 'refundedAt' };
                 readonly orderDate: { readonly column: 'orderDate' };
                 readonly createdAt: { readonly column: 'createdAt' };
                 readonly updatedAt: { readonly column: 'updatedAt' };
@@ -773,6 +1188,15 @@ type ContractBase = Omit<
           readonly ref: {
             readonly namespace: 'public';
             readonly table: 'ebayConnection';
+            readonly column: 'updatedAt';
+          };
+          readonly onCreate: { readonly kind: 'generator'; readonly id: 'timestampNow' };
+          readonly onUpdate: { readonly kind: 'generator'; readonly id: 'timestampNow' };
+        },
+        {
+          readonly ref: {
+            readonly namespace: 'public';
+            readonly table: 'ebayListing';
             readonly column: 'updatedAt';
           };
           readonly onCreate: { readonly kind: 'generator'; readonly id: 'timestampNow' };

@@ -8,6 +8,10 @@
       "model": "EbayConnection",
       "namespace": "public"
     },
+    "ebayListing": {
+      "model": "EbayListing",
+      "namespace": "public"
+    },
     "order": {
       "model": "Order",
       "namespace": "public"
@@ -47,6 +51,13 @@
                   "kind": "scalar"
                 }
               },
+              "ebayUsername": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
               "environment": {
                 "nullable": false,
                 "type": {
@@ -72,6 +83,13 @@
                 "nullable": false,
                 "type": {
                   "codecId": "pg/timestamptz-string@1",
+                  "kind": "scalar"
+                }
+              },
+              "storeName": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/text@1",
                   "kind": "scalar"
                 }
               },
@@ -105,6 +123,9 @@
                 "ebayUserId": {
                   "column": "ebayUserId"
                 },
+                "ebayUsername": {
+                  "column": "ebayUsername"
+                },
                 "environment": {
                   "column": "environment"
                 },
@@ -117,6 +138,9 @@
                 "refreshTokenExpiresAt": {
                   "column": "refreshTokenExpiresAt"
                 },
+                "storeName": {
+                  "column": "storeName"
+                },
                 "updatedAt": {
                   "column": "updatedAt"
                 },
@@ -126,6 +150,167 @@
               },
               "namespaceId": "public",
               "table": "ebayConnection"
+            }
+          },
+          "EbayListing": {
+            "fields": {
+              "createdAt": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/timestamptz-string@1",
+                  "kind": "scalar"
+                }
+              },
+              "ebayItemId": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
+              "ebayUserId": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
+              "environment": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
+              "id": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
+              "imageUrl": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
+              "listingPrice": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/numeric@1",
+                  "kind": "scalar"
+                }
+              },
+              "quantity": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
+              "shippingCost": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/numeric@1",
+                  "kind": "scalar"
+                }
+              },
+              "sku": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
+              "status": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
+              "title": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
+              "unitCost": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/numeric@1",
+                  "kind": "scalar"
+                }
+              },
+              "updatedAt": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/timestamptz-string@1",
+                  "kind": "scalar"
+                }
+              },
+              "userId": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              }
+            },
+            "relations": {},
+            "storage": {
+              "fields": {
+                "createdAt": {
+                  "column": "createdAt"
+                },
+                "ebayItemId": {
+                  "column": "ebayItemId"
+                },
+                "ebayUserId": {
+                  "column": "ebayUserId"
+                },
+                "environment": {
+                  "column": "environment"
+                },
+                "id": {
+                  "column": "id"
+                },
+                "imageUrl": {
+                  "column": "imageUrl"
+                },
+                "listingPrice": {
+                  "column": "listingPrice"
+                },
+                "quantity": {
+                  "column": "quantity"
+                },
+                "shippingCost": {
+                  "column": "shippingCost"
+                },
+                "sku": {
+                  "column": "sku"
+                },
+                "status": {
+                  "column": "status"
+                },
+                "title": {
+                  "column": "title"
+                },
+                "unitCost": {
+                  "column": "unitCost"
+                },
+                "updatedAt": {
+                  "column": "updatedAt"
+                },
+                "userId": {
+                  "column": "userId"
+                }
+              },
+              "namespaceId": "public",
+              "table": "ebayListing"
             }
           },
           "Order": {
@@ -151,6 +336,13 @@
                   "kind": "scalar"
                 }
               },
+              "ebayItemId": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
               "ebayOrderId": {
                 "nullable": true,
                 "type": {
@@ -159,6 +351,13 @@
                 }
               },
               "ebayUserId": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
+              "ebayVariationId": {
                 "nullable": true,
                 "type": {
                   "codecId": "pg/text@1",
@@ -207,10 +406,52 @@
                   "kind": "scalar"
                 }
               },
+              "quantity": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
+              "refundAmount": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/numeric@1",
+                  "kind": "scalar"
+                }
+              },
+              "refundedAt": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/timestamptz-string@1",
+                  "kind": "scalar"
+                }
+              },
               "salePrice": {
                 "nullable": false,
                 "type": {
                   "codecId": "pg/numeric@1",
+                  "kind": "scalar"
+                }
+              },
+              "shippingCost": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/numeric@1",
+                  "kind": "scalar"
+                }
+              },
+              "shippingLabelCost": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/numeric@1",
+                  "kind": "scalar"
+                }
+              },
+              "sku": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/text@1",
                   "kind": "scalar"
                 }
               },
@@ -248,11 +489,17 @@
                 "ebayFees": {
                   "column": "ebayFees"
                 },
+                "ebayItemId": {
+                  "column": "ebayItemId"
+                },
                 "ebayOrderId": {
                   "column": "ebayOrderId"
                 },
                 "ebayUserId": {
                   "column": "ebayUserId"
+                },
+                "ebayVariationId": {
+                  "column": "ebayVariationId"
                 },
                 "environment": {
                   "column": "environment"
@@ -272,8 +519,26 @@
                 "productCost": {
                   "column": "productCost"
                 },
+                "quantity": {
+                  "column": "quantity"
+                },
+                "refundAmount": {
+                  "column": "refundAmount"
+                },
+                "refundedAt": {
+                  "column": "refundedAt"
+                },
                 "salePrice": {
                   "column": "salePrice"
+                },
+                "shippingCost": {
+                  "column": "shippingCost"
+                },
+                "shippingLabelCost": {
+                  "column": "shippingLabelCost"
+                },
+                "sku": {
+                  "column": "sku"
                 },
                 "status": {
                   "column": "status"
@@ -324,6 +589,11 @@
                   "nativeType": "text",
                   "nullable": true
                 },
+                "ebayUsername": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": true
+                },
                 "environment": {
                   "codecId": "pg/text@1",
                   "default": {
@@ -352,6 +622,11 @@
                   "nativeType": "timestamptz",
                   "nullable": false
                 },
+                "storeName": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": true
+                },
                 "updatedAt": {
                   "codecId": "pg/timestamptz-string@1",
                   "nativeType": "timestamptz",
@@ -371,6 +646,122 @@
                 ]
               },
               "uniques": []
+            },
+            "ebayListing": {
+              "columns": {
+                "createdAt": {
+                  "codecId": "pg/timestamptz-string@1",
+                  "default": {
+                    "expression": "now()",
+                    "kind": "function"
+                  },
+                  "nativeType": "timestamptz",
+                  "nullable": false
+                },
+                "ebayItemId": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": false
+                },
+                "ebayUserId": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": false
+                },
+                "environment": {
+                  "codecId": "pg/text@1",
+                  "default": {
+                    "kind": "literal",
+                    "value": "PRODUCTION"
+                  },
+                  "nativeType": "text",
+                  "nullable": false
+                },
+                "id": {
+                  "codecId": "pg/int4@1",
+                  "default": {
+                    "expression": "autoincrement()",
+                    "kind": "function"
+                  },
+                  "nativeType": "int4",
+                  "nullable": false
+                },
+                "imageUrl": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": true
+                },
+                "listingPrice": {
+                  "codecId": "pg/numeric@1",
+                  "nativeType": "numeric",
+                  "nullable": false
+                },
+                "quantity": {
+                  "codecId": "pg/int4@1",
+                  "default": {
+                    "kind": "literal",
+                    "value": 0
+                  },
+                  "nativeType": "int4",
+                  "nullable": false
+                },
+                "shippingCost": {
+                  "codecId": "pg/numeric@1",
+                  "nativeType": "numeric",
+                  "nullable": true
+                },
+                "sku": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": true
+                },
+                "status": {
+                  "codecId": "pg/text@1",
+                  "default": {
+                    "kind": "literal",
+                    "value": "ACTIVE"
+                  },
+                  "nativeType": "text",
+                  "nullable": false
+                },
+                "title": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": false
+                },
+                "unitCost": {
+                  "codecId": "pg/numeric@1",
+                  "nativeType": "numeric",
+                  "nullable": true
+                },
+                "updatedAt": {
+                  "codecId": "pg/timestamptz-string@1",
+                  "nativeType": "timestamptz",
+                  "nullable": false
+                },
+                "userId": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": false
+                }
+              },
+              "foreignKeys": [],
+              "indexes": [],
+              "primaryKey": {
+                "columns": [
+                  "id"
+                ]
+              },
+              "uniques": [
+                {
+                  "columns": [
+                    "userId",
+                    "ebayUserId",
+                    "environment",
+                    "ebayItemId"
+                  ]
+                }
+              ]
             },
             "order": {
               "columns": {
@@ -393,12 +784,22 @@
                   "nativeType": "numeric",
                   "nullable": false
                 },
+                "ebayItemId": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": true
+                },
                 "ebayOrderId": {
                   "codecId": "pg/text@1",
                   "nativeType": "text",
                   "nullable": true
                 },
                 "ebayUserId": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": true
+                },
+                "ebayVariationId": {
                   "codecId": "pg/text@1",
                   "nativeType": "text",
                   "nullable": true
@@ -445,10 +846,44 @@
                   "nativeType": "numeric",
                   "nullable": true
                 },
+                "quantity": {
+                  "codecId": "pg/int4@1",
+                  "default": {
+                    "kind": "literal",
+                    "value": 1
+                  },
+                  "nativeType": "int4",
+                  "nullable": false
+                },
+                "refundAmount": {
+                  "codecId": "pg/numeric@1",
+                  "nativeType": "numeric",
+                  "nullable": true
+                },
+                "refundedAt": {
+                  "codecId": "pg/timestamptz-string@1",
+                  "nativeType": "timestamptz",
+                  "nullable": true
+                },
                 "salePrice": {
                   "codecId": "pg/numeric@1",
                   "nativeType": "numeric",
                   "nullable": false
+                },
+                "shippingCost": {
+                  "codecId": "pg/numeric@1",
+                  "nativeType": "numeric",
+                  "nullable": true
+                },
+                "shippingLabelCost": {
+                  "codecId": "pg/numeric@1",
+                  "nativeType": "numeric",
+                  "nullable": true
+                },
+                "sku": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": true
                 },
                 "status": {
                   "codecId": "pg/text@1",
@@ -491,10 +926,10 @@
         "kind": "postgres-schema"
       }
     },
-    "storageHash": "b1ddb3d3849999095328421a37b5bbc424248643ddf82544a503ea369e894de5"
+    "storageHash": "b156b3dce712c9bd8032a3dab4f28bffb0c79db82d260e7532a4d6a25b5cf2f8"
   },
   "execution": {
-    "executionHash": "fe29687f147172d6282cffa83f304852ecf3cd1fef2d6382f486c4db82ea2f30",
+    "executionHash": "6c89e46689d906f810ad749ad33ba10bd1b8257a52517acfb330abc03f476567",
     "mutations": {
       "defaults": [
         {
@@ -510,6 +945,21 @@
             "column": "updatedAt",
             "namespace": "public",
             "table": "ebayConnection"
+          }
+        },
+        {
+          "onCreate": {
+            "id": "timestampNow",
+            "kind": "generator"
+          },
+          "onUpdate": {
+            "id": "timestampNow",
+            "kind": "generator"
+          },
+          "ref": {
+            "column": "updatedAt",
+            "namespace": "public",
+            "table": "ebayListing"
           }
         },
         {

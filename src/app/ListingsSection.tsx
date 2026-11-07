@@ -28,10 +28,12 @@ export type ListingRow = {
   costMissing: number;
   shippingMissing: number;
   lastSold: string | null;
+  // Stock alert: "low" = selling but only 1–2 left; "stale" = no sale in 60+ days.
+  alert: "low" | "stale" | null;
 };
 
 type SortKey = "profit" | "units" | "revenue" | "margin" | "recent" | "stock";
-type StatusFilter = "all" | "ACTIVE" | "selling" | "unsold" | "ENDED";
+type StatusFilter = "all" | "ACTIVE" | "selling" | "unsold" | "ENDED" | "low" | "stale";
 
 export type ListingRange = "all" | "year" | "90d" | "30d" | "7d";
 
@@ -57,6 +59,8 @@ const FILTERS: ReadonlyArray<readonly [StatusFilter, string]> = [
   ["ACTIVE", "Active"],
   ["unsold", "Active, not sold"],
   ["ENDED", "Ended / past"],
+  ["low", "Running low"],
+  ["stale", "Not selling"],
 ];
 
 function Pills<T extends string>({
@@ -427,6 +431,7 @@ export default function ListingsSection({
   onBulkSaveCost,
   storeShipping,
   onSaveStoreShipping,
+  canSetStoreShipping = true,
 }: {
   rows: ListingRow[];
   loading: boolean;
@@ -442,6 +447,7 @@ export default function ListingsSection({
   onBulkSaveCost: BulkSaveListingCost;
   storeShipping: number | null;
   onSaveStoreShipping: (value: string) => Promise<void>;
+  canSetStoreShipping?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -471,6 +477,8 @@ export default function ListingsSection({
     ACTIVE: rows.filter((r) => r.status === "ACTIVE").length,
     unsold: rows.filter((r) => r.status === "ACTIVE" && r.unitsSold === 0).length,
     ENDED: rows.filter((r) => r.status !== "ACTIVE").length,
+    low: rows.filter((r) => r.alert === "low").length,
+    stale: rows.filter((r) => r.alert === "stale").length,
   }), [rows]);
 
   const visible = useMemo(() => {
@@ -481,6 +489,8 @@ export default function ListingsSection({
       if (status === "ENDED") return r.status !== "ACTIVE";
       if (status === "selling") return r.unitsSold > 0;
       if (status === "unsold") return r.status === "ACTIVE" && r.unitsSold === 0;
+      if (status === "low") return r.alert === "low";
+      if (status === "stale") return r.alert === "stale";
       return true;
     });
     const by: Record<SortKey, (r: ListingRow) => number> = {
@@ -539,7 +549,7 @@ export default function ListingsSection({
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-          {shippingEnabled && <StoreShippingSetting value={storeShipping} onSave={onSaveStoreShipping} />}
+          {shippingEnabled && canSetStoreShipping && <StoreShippingSetting value={storeShipping} onSave={onSaveStoreShipping} />}
           <Pills label="Time period" options={RANGES} value={range} onChange={onRangeChange} />
           <button
             type="button"
@@ -717,6 +727,16 @@ export default function ListingsSection({
                               </a>
                             )}
                             {row.refundedCount > 0 && <span className="text-rose-400">{row.refundedCount} refunded</span>}
+                            {row.alert === "low" && (
+                              <span className="rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-amber-300 ring-1 ring-inset ring-amber-500/20" title="Sells well but almost out of stock">
+                                Running low · {row.available} left
+                              </span>
+                            )}
+                            {row.alert === "stale" && (
+                              <span className="rounded-md bg-slate-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-slate-300 ring-1 ring-inset ring-slate-500/20" title="No sale in 60+ days. A lower price or better photos might help.">
+                                Not selling · 60+ days
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>

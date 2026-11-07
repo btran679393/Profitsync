@@ -14,6 +14,7 @@ import AccountBadge from "./AccountBadge";
 import ListingsSection, { type ListingRange, type ListingRow } from "./ListingsSection";
 import StoreShippingSetting from "./StoreShippingSetting";
 import StoreSwitcher, { type EbayStore } from "./StoreSwitcher";
+import OrderTools, { type ToolOrder } from "./OrderTools";
 
 // ============================================================
 // TYPES
@@ -29,11 +30,16 @@ type ApiListing = {
   status: string;
   unitCost: string | number | null;
   shippingCost?: string | number | null;
+  createdAt?: string | null;
 };
 
 type Order = {
   id: number;
+  // Which connected eBay store the order belongs to.
+  ebayUserId: string | null;
   shippingLabelCost: number;
+  // Other eBay charges tied to this order (e.g. promoted-listing ad fees).
+  otherFees: number;
   // Shipping paid outside eBay, typed by the seller ("" = not set).
   shippingCost: string;
   savedShippingCost: string;
@@ -60,6 +66,7 @@ type Order = {
 
 type ApiOrder = {
   id: number;
+  ebayUserId?: string | null;
   ebayOrderId: string | null;
   ebayBuyerId: string | null;
   item: string;
@@ -77,6 +84,7 @@ type ApiOrder = {
   ebayItemId?: string | null;
   quantity?: number | null;
   shippingLabelCost?: string | number | null;
+  otherFees?: string | number | null;
   shippingCost?: string | number | null;
 };
 
@@ -138,20 +146,6 @@ function money(value: number) {
   }).format(value);
 }
 
-function compactMoney(value: number) {
-  const absolute = Math.abs(value);
-
-  if (absolute >= 1000000) {
-    return `$${(value / 1000000).toFixed(1)}m`;
-  }
-
-  if (absolute >= 1000) {
-    return `$${(value / 1000).toFixed(1)}k`;
-  }
-
-  return money(value);
-}
-
 function isValidCost(value: string) {
   const trimmed = value.trim();
 
@@ -174,10 +168,12 @@ function formatOrders(data: ApiOrder[], storeShipping = 0): Order[] {
     return {
       id: order.id,
       ebayOrderId: order.ebayOrderId,
+      ebayUserId: order.ebayUserId ?? null,
       ebayBuyerId: order.ebayBuyerId ?? null,
       ebayItemId: order.ebayItemId ?? null,
       quantity: Math.max(1, Number(order.quantity) || 1),
       shippingLabelCost: Math.max(0, Number(order.shippingLabelCost ?? 0) || 0),
+      otherFees: Math.max(0, Number(order.otherFees ?? 0) || 0),
       shippingCost: order.shippingCost === null || order.shippingCost === undefined ? "" : Number(order.shippingCost).toFixed(2),
       savedShippingCost: order.shippingCost === null || order.shippingCost === undefined ? "" : Number(order.shippingCost).toFixed(2),
       storeShipping,
@@ -212,12 +208,10 @@ function getRefundLoss(order: Order) {
   return productLoss + order.refundShippingLoss + order.refundFeeLoss;
 }
 
+// Kept for callers; partial refunds are treated like full refunds today.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function isPartiallyRefunded(order: Order) {
   return false; // All confirmed refund states are excluded from active sales.
-}
-
-function requiresProductCost(order: Order) {
-  return !isFullyRefunded(order);
 }
 
 function hasRecordedCost(order: Order) {
@@ -241,7 +235,7 @@ function getOrderProfit(order: Order) {
   if (isFullyRefunded(order)) return null;
   if (!hasRecordedCost(order)) return null;
   return order.salePrice - order.refundAmount -
-    order.ebayFees - getShippingCost(order) - Number(order.savedProductCost);
+    order.ebayFees - order.otherFees - getShippingCost(order) - Number(order.savedProductCost);
 }
 
 // ============================================================
@@ -293,7 +287,17 @@ function normalizeTitle(title: string) {
   return title.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
-function buildListingRows(orders: Order[], listings: ApiListing[]): ListingRow[] {
+// Stock alerts: "low" = sells (2+ units ever) but only 1–2 left; "stale" =
+// active with no sale in 60+ days (or never, once known to ProfitSync for 60+ days).
+const LOW_STOCK_AT = 2;
+const STALE_AFTER_DAYS = 60;
+
+function buildListingRows(
+  orders: Order[],
+  listings: ApiListing[],
+  allOrders: Order[] = orders,
+  now: Date = new Date()
+): ListingRow[] {
   const rows = new Map<string, ListingRow & { completedRevenue: number; completedProfit: number }>();
   const listingIdByTitle = new Map<string, string>();
 
@@ -302,7 +306,7 @@ function buildListingRows(orders: Order[], listings: ApiListing[]): ListingRow[]
     status: "UNLINKED" as ListingRow["status"],
     price: null, available: null, unitCost: null, shippingDefault: null, unitsSold: 0, orderCount: 0,
     revenue: 0, fees: 0, shipping: 0, costs: 0, refundedCount: 0, refundLoss: 0,
-    netProfit: 0, margin: null, costMissing: 0, shippingMissing: 0, lastSold: null,
+    netProfit: 0, margin: null, costMissing: 0, shippingMissing: 0, lastSold: null, alert: null,
     completedRevenue: 0, completedProfit: 0,
   });
 
@@ -343,7 +347,7 @@ function buildListingRows(orders: Order[], listings: ApiListing[]): ListingRow[]
     row.unitsSold += order.quantity;
     const revenue = Math.max(0, order.salePrice - order.refundAmount);
     row.revenue += revenue;
-    row.fees += order.ebayFees;
+    row.fees += order.ebayFees + order.otherFees;
     row.shipping += getShippingCost(order);
     if (order.savedShippingCost === "") row.shippingMissing++;
     if (hasRecordedCost(order)) {
@@ -355,11 +359,40 @@ function buildListingRows(orders: Order[], listings: ApiListing[]): ListingRow[]
     }
   }
 
+  // All-time sales per listing (not just the chosen period) for stock alerts.
+  const lifetime = new Map<string, { units: number; lastSold: string | null }>();
+  for (const order of allOrders) {
+    if (isFullyRefunded(order)) continue;
+    const itemId = order.ebayItemId ?? listingIdByTitle.get(normalizeTitle(order.item));
+    if (!itemId) continue;
+    const entry = lifetime.get(itemId) ?? { units: 0, lastSold: null };
+    entry.units += order.quantity;
+    if (order.orderDate && (!entry.lastSold || order.orderDate > entry.lastSold)) entry.lastSold = order.orderDate;
+    lifetime.set(itemId, entry);
+  }
+  const staleBefore = now.getTime() - STALE_AFTER_DAYS * 86400000;
+  const firstSeen = new Map(listings.map((listing) => [listing.ebayItemId, listing.createdAt ?? null]));
+
   return [...rows.values()].map(({ completedRevenue, completedProfit, ...row }) => {
     const netProfit = completedProfit - row.refundLoss;
+    let alert: ListingRow["alert"] = null;
+    if (row.status === "ACTIVE" && row.ebayItemId) {
+      const ever = lifetime.get(row.ebayItemId);
+      const seen = firstSeen.get(row.ebayItemId);
+      if (ever && ever.units >= 2 && (row.available ?? 0) <= LOW_STOCK_AT) {
+        alert = "low";
+      } else if (
+        ever?.lastSold
+          ? new Date(ever.lastSold).getTime() < staleBefore
+          : seen !== null && seen !== undefined && new Date(seen).getTime() < staleBefore
+      ) {
+        alert = "stale";
+      }
+    }
     return {
       ...row,
       netProfit,
+      alert,
       margin: completedRevenue > 0 ? (netProfit / completedRevenue) * 100 : null,
     };
   });
@@ -631,11 +664,10 @@ function ListingImage({
   item: string;
   size?: "normal" | "large";
 }) {
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    setFailed(false);
-  }, [imageUrl]);
+  // Remember which picture failed, so a new picture gets a fresh try.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const failed = failedUrl !== null && failedUrl === imageUrl;
+  const setFailed = (value: boolean) => setFailedUrl(value ? imageUrl : null);
 
   const dimensions =
     size === "large" ? "h-20 w-20" : "h-12 w-12";
@@ -658,6 +690,7 @@ function ListingImage({
     <div
       className={`flex ${dimensions} shrink-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-white`}
     >
+      {/* eslint-disable-next-line @next/next/no-img-element -- eBay listing photo, already sized by eBay */}
       <img
         src={imageUrl}
         alt={item}
@@ -1137,7 +1170,7 @@ function OrderDetailsPanel({
 
   const calculatedProfit = !refunded && validDraft
     ? order.salePrice - order.refundAmount -
-      order.ebayFees - getShippingCost(order) - Number(order.productCost)
+      order.ebayFees - order.otherFees - getShippingCost(order) - Number(order.productCost)
     : null;
 
   const profitMargin =
@@ -1297,6 +1330,13 @@ function OrderDetailsPanel({
                 </span>
               </div>
 
+              {order.otherFees > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-slate-400">Other eBay Charges</span>
+                  <span className="text-sm font-semibold text-red-400">−{money(order.otherFees)}</span>
+                </div>
+              )}
+
               <div className="flex items-center justify-between gap-4">
                 <span className="text-sm text-slate-400">
                   Shipping
@@ -1447,13 +1487,15 @@ function OrderDetailsPanel({
 export default function Home() {
   const router = useRouter();
 
-  const [orders, setOrders] = useState<Order[]>([]);
+  // Orders as loaded; `orders` (below) adds the active store's shipping default.
+  const [rawOrders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<number | null>(
     null
   );
 
   const savingRef = useRef(false);
+  const syncInFlightRef = useRef(false);
 
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
@@ -1485,22 +1527,13 @@ export default function Home() {
   const [listingRange, setListingRange] = useState<ListingRange>("all");
   const [recentlySavedId, setRecentlySavedId] = useState<number | null>(null);
   const [shippingEnabled, setShippingEnabled] = useState(false);
-  // Store-wide "shipping per order" default, saved on the ProfitSync account.
-  const [storeShipping, setStoreShipping] = useState<number | null>(null);
-  const storeShippingRef = useRef(0);
-
-  function applyStoreShipping(value: number | null) {
-    setStoreShipping(value);
-    storeShippingRef.current = value ?? 0;
-    setOrders((current) => current.map((order) => ({ ...order, storeShipping: value ?? 0 })));
-  }
-
-  async function saveStoreShipping(value: string) {
-    const amount = value === "" ? null : Math.round(Number(value) * 100) / 100;
-    const { error } = await createClient().auth.updateUser({ data: { defaultShippingCost: amount } });
-    if (error) throw error;
-    applyStoreShipping(amount);
-  }
+  // "Shipping per order" default for each eBay store, saved on the ProfitSync
+  // account (user_metadata.defaultShippingByStore). The older single
+  // account-wide value (defaultShippingCost) is still used as a fallback.
+  const [shippingDefaults, setShippingDefaults] = useState<{
+    byStore: Record<string, number>;
+    legacy: number | null;
+  }>({ byStore: {}, legacy: null });
 
   const [firstName, setFirstName] = useState("");
   const [sellerName, setSellerName] = useState("");
@@ -1519,8 +1552,18 @@ export default function Home() {
         const fromEmail = (user.email ?? "").split("@")[0].split(/[._\-+\d]/)[0];
         const name = full ? full.split(/\s+/)[0] : fromEmail;
         setFirstName(name ? name.charAt(0).toUpperCase() + name.slice(1) : "");
-        const stored = Number(meta.defaultShippingCost);
-        applyStoreShipping(meta.defaultShippingCost == null || !Number.isFinite(stored) ? null : stored);
+        const legacy = Number(meta.defaultShippingCost);
+        const byStore: Record<string, number> = {};
+        const raw = meta.defaultShippingByStore;
+        if (raw && typeof raw === "object") {
+          for (const [id, amount] of Object.entries(raw as Record<string, unknown>)) {
+            if (typeof amount === "number" && Number.isFinite(amount) && amount >= 0) byStore[id] = amount;
+          }
+        }
+        setShippingDefaults({
+          byStore,
+          legacy: meta.defaultShippingCost == null || !Number.isFinite(legacy) ? null : legacy,
+        });
       });
     return () => {
       active = false;
@@ -1599,8 +1642,10 @@ export default function Home() {
   // INITIAL DATE
   // ----------------------------------------------------------
 
+  // Set after the first render (not during it) so server and browser agree.
   useEffect(() => {
-    setNow(new Date());
+    const id = window.setTimeout(() => setNow(new Date()), 0);
+    return () => window.clearTimeout(id);
   }, []);
 
   // ----------------------------------------------------------
@@ -1652,7 +1697,7 @@ export default function Home() {
 
     const data: ApiOrder[] = await response.json();
 
-    setOrders(formatOrders(data, storeShippingRef.current));
+    setOrders(formatOrders(data));
     setShippingEnabled(response.headers.get("X-Shipping-Cost-Enabled") === "1");
     setLoadError("");
   }, []);
@@ -1699,8 +1744,43 @@ export default function Home() {
 
   const [stores, setStores] = useState<EbayStore[]>([]);
   const [storesLoading, setStoresLoading] = useState(true);
-  const activeStore = stores.find((store) => store.active) ?? null;
+  // "All stores" view: every connected store's data combined.
+  const [allStores, setAllStores] = useState(false);
+  const activeStore = allStores ? null : stores.find((store) => store.active) ?? null;
   const activeStoreId = activeStore?.id ?? null;
+
+  // The active store's "shipping per order" default (null = not set).
+  const storeShipping =
+    activeStoreId && shippingDefaults.byStore[activeStoreId] !== undefined
+      ? shippingDefaults.byStore[activeStoreId]
+      : shippingDefaults.legacy;
+
+  // Each order uses its own store's default (matters in the All stores view).
+  const orders = useMemo(
+    () =>
+      rawOrders.map((order) => {
+        const fromStore = order.ebayUserId ? shippingDefaults.byStore[order.ebayUserId] : undefined;
+        return { ...order, storeShipping: fromStore ?? shippingDefaults.legacy ?? 0 };
+      }),
+    [rawOrders, shippingDefaults]
+  );
+
+  async function saveStoreShipping(value: string) {
+    const amount = value === "" ? null : Math.round(Number(value) * 100) / 100;
+    const byStore = { ...shippingDefaults.byStore };
+    let legacy = shippingDefaults.legacy;
+    if (activeStoreId) {
+      if (amount === null) delete byStore[activeStoreId];
+      else byStore[activeStoreId] = amount;
+    } else {
+      legacy = amount;
+    }
+    const { error } = await createClient().auth.updateUser({
+      data: { defaultShippingByStore: byStore, defaultShippingCost: legacy },
+    });
+    if (error) throw error;
+    setShippingDefaults({ byStore, legacy });
+  }
   const greetingName =
     sellerName ||
     (activeStore && activeStore.name !== "eBay store" ? activeStore.name : "") ||
@@ -1710,8 +1790,9 @@ export default function Home() {
     try {
       const response = await fetch("/api/ebay/stores", { cache: "no-store" });
       if (!response.ok) throw new Error("Failed to load stores.");
-      const data: { stores?: EbayStore[] } = await response.json();
+      const data: { stores?: EbayStore[]; allStores?: boolean } = await response.json();
       setStores(data.stores ?? []);
+      setAllStores(Boolean(data.allStores));
     } catch (error) {
       console.error("Loading eBay stores failed:", error);
     } finally {
@@ -1731,6 +1812,25 @@ export default function Home() {
     setSellerName("");
     setSyncMessage("");
     setSelectedOrderId(null);
+    await Promise.all([loadStores(), loadOrders(), loadListings()]);
+  }
+
+  // Remove a store and its ProfitSync data, then show whichever store is left.
+  async function removeStore(id: string) {
+    const response = await fetch("/api/ebay/stores", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    const data: { success?: boolean; error?: string } = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || "Couldn't remove the store.");
+    setSellerName("");
+    setSelectedOrderId(null);
+    setShippingDefaults((current) => {
+      const byStore = { ...current.byStore };
+      delete byStore[id];
+      return { ...current, byStore };
+    });
     await Promise.all([loadStores(), loadOrders(), loadListings()]);
   }
 
@@ -1786,12 +1886,20 @@ export default function Home() {
       setListingsError(false);
     }
     try {
-      const response = await fetch("/api/ebay/listings/sync", { method: "POST", cache: "no-store" });
-      const data: { success?: boolean; message?: string; error?: string; needsOrderSync?: boolean } =
-        await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || "Couldn't load your eBay listings.");
+      // In the "All stores" view, refresh each store's listings in turn.
+      let data: { success?: boolean; message?: string; error?: string } = {};
+      for (const target of allStores ? stores : [null]) {
+        const response = await fetch(
+          target ? `/api/ebay/listings/sync?store=${encodeURIComponent(target.id)}` : "/api/ebay/listings/sync",
+          { method: "POST", cache: "no-store" }
+        );
+        data = await response.json();
+        if (!response.ok || !data.success) {
+          const reason = data.error || "Couldn't load your eBay listings.";
+          throw new Error(target ? `${target.name}: ${reason}` : reason);
+        }
       }
+      if (allStores) data.message = `Refreshed listings for ${stores.length} stores.`;
       await loadListings();
       if (!quiet) setListingsMessage(data.message ?? "Listings updated.");
     } catch (error) {
@@ -1957,30 +2065,42 @@ export default function Home() {
   // ----------------------------------------------------------
 
   async function syncEbayOrders() {
-    if (syncing || savingRef.current || loggingOut) {
+    if (syncing || syncInFlightRef.current || savingRef.current || loggingOut) {
       return;
     }
+    syncInFlightRef.current = true;
 
     try {
       setSyncing(true);
       setSyncMessage("");
       setSyncError(false);
 
-      const response = await fetch("/api/ebay/sync", {
-        method: "POST",
-        cache: "no-store",
-      });
-
-      const data: SyncResponse = await response.json();
-
-      if (!response.ok || !data.success) {
-        throw new Error(
-          data.message ||
-            data.error ||
-            "Failed to sync eBay orders."
+      // In the "All stores" view, sync each store in turn.
+      const targets: Array<EbayStore | null> = allStores ? stores : [null];
+      const results: SyncResponse[] = [];
+      for (const target of targets) {
+        const response = await fetch(
+          target ? `/api/ebay/sync?store=${encodeURIComponent(target.id)}` : "/api/ebay/sync",
+          { method: "POST", cache: "no-store" }
         );
+        const result: SyncResponse = await response.json();
+        if (!response.ok || !result.success) {
+          const reason = result.message || result.error || "Failed to sync eBay orders.";
+          throw new Error(target ? `${target.name}: ${reason}` : reason);
+        }
+        results.push(result);
       }
+      const data: SyncResponse =
+        results.length === 1
+          ? results[0]
+          : {
+              success: true,
+              found: results.reduce((sum, r) => sum + (r.found ?? 0), 0),
+              imported: results.reduce((sum, r) => sum + (r.imported ?? 0), 0),
+              skipped: results.reduce((sum, r) => sum + (r.skipped ?? 0), 0),
+            };
 
+      recordSync();
       await loadOrders();
 
       // Also refresh listings (the order sync renews the eBay sign-in first).
@@ -2022,8 +2142,42 @@ export default function Home() {
       );
     } finally {
       setSyncing(false);
+      syncInFlightRef.current = false;
     }
   }
+
+  // ----------------------------------------------------------
+  // AUTOMATIC SYNC when the dashboard opens (at most every 6 hours per
+  // store, remembered in this browser)
+  // ----------------------------------------------------------
+
+  const AUTO_SYNC_MS = 6 * 60 * 60 * 1000;
+  const syncKey = `profitsync:lastSync:${allStores ? "all" : activeStoreId ?? "none"}`;
+
+  function recordSync() {
+    try {
+      window.localStorage.setItem(syncKey, String(Date.now()));
+    } catch {
+      // Private browsing etc.: auto-sync just runs again next time.
+    }
+  }
+
+  useEffect(() => {
+    if (storesLoading || stores.length === 0) return;
+    let last = 0;
+    try {
+      last = Number(window.localStorage.getItem(syncKey) ?? 0);
+    } catch {
+      last = 0;
+    }
+    if (Date.now() - last < AUTO_SYNC_MS) return;
+    void (async () => {
+      await Promise.resolve();
+      await syncEbayOrders();
+    })();
+    // Re-check only when the store (or All stores view) changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storesLoading, syncKey]);
 
   // Coming back from eBay after adding a store: show the result, and bring
   // in the new store's orders and listings straight away.
@@ -2063,13 +2217,33 @@ export default function Home() {
   // FINANCIAL TOTALS
   // ----------------------------------------------------------
 
+  // Orders in the chosen date range, flattened for the CSV download.
+  const toolOrders = useMemo<ToolOrder[]>(
+    () =>
+      periodOrders.map((order) => ({
+        ebayOrderId: order.ebayOrderId,
+        orderDate: order.orderDate,
+        item: order.item,
+        quantity: order.quantity,
+        status: order.status,
+        salePrice: order.salePrice,
+        refundAmount: order.refundAmount,
+        ebayFees: order.ebayFees,
+        otherFees: order.otherFees,
+        shipping: getShippingCost(order),
+        productCost: hasRecordedCost(order) ? Number(order.savedProductCost) : null,
+        profit: isFullyRefunded(order) ? -getRefundLoss(order) : getOrderProfit(order),
+      })),
+    [periodOrders]
+  );
+
   const totals = useMemo(() => {
     const activeOrders = periodOrders.filter((order) => !isFullyRefunded(order));
     const refundedCount = periodOrders.length - activeOrders.length;
     const totalRevenue = activeOrders.reduce(
       (sum, order) => sum + Math.max(0, order.salePrice - order.refundAmount), 0
     );
-    const totalFees = activeOrders.reduce((sum, order) => sum + order.ebayFees, 0);
+    const totalFees = activeOrders.reduce((sum, order) => sum + order.ebayFees + order.otherFees, 0);
     const totalLabels = activeOrders.reduce((sum, order) => sum + getShippingCost(order), 0);
     const completedOrders = activeOrders.filter(hasRecordedCost);
     const totalProductCosts = completedOrders.reduce(
@@ -2163,7 +2337,7 @@ export default function Home() {
   const listingRows = useMemo(() => {
     if (!now) return [];
     const inRange = orders.filter((order) => isOrderInListingRange(order, listingRange, now));
-    return buildListingRows(inRange, listings);
+    return buildListingRows(inRange, listings, orders, now);
   }, [orders, listings, listingRange, now]);
 
   const filteredOrders = useMemo(() => {
@@ -2484,7 +2658,7 @@ export default function Home() {
 
           {/* eBay stores: switch between them or add another */}
 
-          <StoreSwitcher stores={stores} loading={storesLoading} onSwitch={switchStore} />
+          <StoreSwitcher stores={stores} loading={storesLoading} allStores={allStores} onSwitch={switchStore} onRemove={removeStore} />
         </div>
 
         {/* Logout */}
@@ -2686,8 +2860,14 @@ export default function Home() {
             </div>
 
             {view === "orders" && (
-              <div className="sm:ml-auto sm:mr-3">
-                <StoreShippingSetting value={storeShipping} onSave={saveStoreShipping} />
+              <div className="flex flex-wrap items-center gap-2 sm:ml-auto sm:mr-3">
+                {!allStores && <StoreShippingSetting value={storeShipping} onSave={saveStoreShipping} />}
+                <OrderTools
+                  orders={toolOrders}
+                  periodLabel={dateRangeLabel(dateRange)}
+                  shippingEnabled={shippingEnabled}
+                  onImported={loadOrders}
+                />
               </div>
             )}
 
@@ -3033,7 +3213,7 @@ export default function Home() {
 
                   <div>
                     <p className="text-sm font-semibold text-white">
-                      You're all caught up
+                      You&apos;re all caught up
                     </p>
 
                     <p className="mt-1 text-xs text-slate-400">
@@ -3283,7 +3463,7 @@ export default function Home() {
 
                       const profit =
                         order.salePrice - order.refundAmount -
-                        order.ebayFees - getShippingCost(order) - Number(order.productCost);
+                        order.ebayFees - order.otherFees - getShippingCost(order) - Number(order.productCost);
 
                       const isSaving =
                         savingId === order.id;
@@ -3347,6 +3527,11 @@ export default function Home() {
 
                           <td className="px-3 py-4 text-sm text-slate-400">
                             {money(order.ebayFees)}
+                            {order.otherFees > 0 && (
+                              <p className="mt-0.5 text-[11px] text-slate-500" title="Other eBay charges for this order, e.g. promoted-listing ad fees">
+                                + {money(order.otherFees)} other eBay fees
+                              </p>
+                            )}
                             {!refunded && (
                               <ShippingInput
                                 order={order}
@@ -3550,6 +3735,7 @@ export default function Home() {
               shippingEnabled={shippingEnabled}
               storeShipping={storeShipping}
               onSaveStoreShipping={saveStoreShipping}
+              canSetStoreShipping={!allStores}
             />
           )}
 

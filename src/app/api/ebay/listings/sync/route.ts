@@ -3,7 +3,7 @@ import { Pool } from "pg";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/prisma/db";
 import { fetchSellerProfile, saveSellerProfile } from "@/lib/ebay/sellerProfile";
-import { activeStoreId, pickConnection } from "@/lib/ebay/activeStore";
+import { pickConnection, storeForSync } from "@/lib/ebay/activeStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -156,7 +156,7 @@ async function fetchActiveListings(accessToken: string) {
   throw new EbayTradingError("Too many listings to load in one go.");
 }
 
-export async function POST() {
+export async function POST(request: Request) {
   let pool: Pool | null = null;
 
   try {
@@ -186,7 +186,7 @@ export async function POST() {
 
     const connection = pickConnection(
       connections.filter((c) => Boolean(c.accessToken)),
-      activeStoreId(user)
+      storeForSync(user, request)
     );
 
     if (!connection?.ebayUserId) {

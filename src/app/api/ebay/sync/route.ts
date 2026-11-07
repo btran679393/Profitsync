@@ -2,7 +2,7 @@ import { createHmac } from "crypto";
 import { Pool, type PoolClient } from "pg";
 import { NextResponse } from "next/server";
 import { db } from "@/prisma/db";
-import { activeStoreId, pickConnection } from "@/lib/ebay/activeStore";
+import { pickConnection, storeForSync } from "@/lib/ebay/activeStore";
 import { createClient } from "@/lib/supabase/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -61,6 +61,8 @@ type EbayTransaction = {
   totalFeeAmount?: Money;
   amount?: Money;
   bookingEntry?: string;
+  feeType?: string;
+  transactionMemo?: string;
   references?: Array<{
     referenceId?: string;
     referenceType?: string;
@@ -94,6 +96,9 @@ type FinancialData = {
   // Net shipping label spend per order in cents (purchases minus voids).
   // null when eBay's label records couldn't be read this time.
   labelsByOrder: Map<string, number> | null;
+  // Other eBay charges tied to an order (e.g. promoted-listing ad fees),
+  // net of credits, in cents. null when they couldn't be read.
+  otherFeesByOrder: Map<string, number> | null;
 };
 type ExistingOrder = {
   id: number;
@@ -562,7 +567,8 @@ async function getHistoricalOrders(
 async function getFinancialTransactions(
   ebayFinancesBase: string,
   accessToken: string,
-  transactionType: "SALE" | "REFUND" | "SHIPPING_LABEL"
+  transactionType: "SALE" | "REFUND" | "SHIPPING_LABEL" | "NON_SALE_CHARGE",
+  options: { requireOrderId?: boolean } = {}
 ): Promise<EbayTransaction[]> {
   const transactions: EbayTransaction[] = [];
   const seenTransactions = new Set<string>();
@@ -612,7 +618,7 @@ async function getFinancialTransactions(
       const orderId = transactionOrderId(transaction);
       if (
         transaction.transactionType !== transactionType ||
-        !orderId ||
+        (!orderId && options.requireOrderId !== false) ||
         !transaction.transactionId
       ) {
         continue;
@@ -764,6 +770,49 @@ async function getFinancialData(
     console.error("Shipping label transactions unavailable:", error);
     labelsByOrder = null;
   }
+  // --------------------------------------------
+  // Retrieve NON_SALE_CHARGE transactions (other eBay charges such as
+  // promoted-listing ad fees, insertion fees, store subscriptions).
+  // Charges tied to an order are counted against that order's profit;
+  // the rest are summarised in the log. Never fails the sync.
+  // --------------------------------------------
+  let otherFeesByOrder: Map<string, number> | null = new Map();
+  const unattachedCharges: Record<string, { count: number; cents: number }> = {};
+  let otherChargeTransactions = 0;
+  try {
+    const charges = await getFinancialTransactions(
+      ebayFinancesBase,
+      accessToken,
+      "NON_SALE_CHARGE",
+      { requireOrderId: false }
+    );
+    otherChargeTransactions = charges.length;
+    for (const transaction of charges) {
+      const amount = parseMoney(transaction.amount);
+      if (amount === null) continue;
+      const cents = Math.abs(amount);
+      const signed = transaction.bookingEntry === "CREDIT" ? -cents : cents;
+      if (transaction.orderId) {
+        otherFeesByOrder.set(
+          transaction.orderId,
+          (otherFeesByOrder.get(transaction.orderId) ?? 0) + signed
+        );
+      } else {
+        const kind = transaction.feeType || "UNSPECIFIED";
+        const entry = (unattachedCharges[kind] ??= { count: 0, cents: 0 });
+        entry.count++;
+        entry.cents += signed;
+      }
+    }
+  } catch (error) {
+    console.error("Other eBay charges unavailable:", error);
+    otherFeesByOrder = null;
+  }
+  console.log("ProfitSync other eBay charges:", {
+    transactions: otherChargeTransactions,
+    ordersWithCharges: otherFeesByOrder?.size ?? null,
+    notTiedToAnOrder: unattachedCharges,
+  });
   console.log("ProfitSync financial data:", {
     saleTransactions: sales.length,
     refundTransactions: refunds.length,
@@ -776,6 +825,7 @@ async function getFinancialData(
     feesByOrder,
     refundsByOrder,
     labelsByOrder,
+    otherFeesByOrder,
   };
 }
 // ============================================================
@@ -971,7 +1021,7 @@ async function updateExistingOrder(
 }
 
 // ============================================================
-export async function POST() {
+export async function POST(request: Request) {
   try {
     // --------------------------------------------------------
     // STEP 1: Authenticate ProfitSync user
@@ -1049,7 +1099,7 @@ export async function POST() {
     }
     // With several stores connected, sync the one the seller is viewing.
     const connection =
-      pickConnection(identifiedConnections, activeStoreId(user)) ??
+      pickConnection(identifiedConnections, storeForSync(user, request)) ??
       identifiedConnections[0];
     const ebayUserId =
       connection.ebayUserId;
@@ -1197,6 +1247,7 @@ export async function POST() {
       feesByOrder,
       refundsByOrder,
       labelsByOrder,
+      otherFeesByOrder,
     } = financialData;
     // Order-level buyer refunds take priority over seller-side adjustments.
     const buyerRefundsByOrder = new Map<string, RefundInfo>();
@@ -1302,6 +1353,7 @@ export async function POST() {
     let labelCostsUpdated = 0;
     let labelColumnMissing = false;
     let shippingDefaultsApplied = 0;
+    let otherFeesUpdated = 0;
     const syncStartedAt = new Date().toISOString();
     let fullyRefunded = 0;
     let partiallyRefunded = 0;
@@ -1661,6 +1713,34 @@ export async function POST() {
           }
         }
         // ====================================================
+        // OTHER EBAY CHARGES PER ORDER (ad fees etc.)
+        // ====================================================
+        // Needs docs/sql/2026-11-07_other_ebay_fees.sql; skipped until then.
+        if (otherFeesByOrder && otherFeesByOrder.size > 0) {
+          const orderIds = [...otherFeesByOrder.keys()];
+          const amounts = orderIds.map((id) =>
+            formatMoney(Math.max(0, otherFeesByOrder.get(id) ?? 0))
+          );
+          try {
+            const result = await client.query(
+              `
+                UPDATE public."order" o
+                SET "otherFees" = v.amount, "updatedAt" = NOW()
+                FROM unnest($1::text[], $2::numeric[]) AS v(order_id, amount)
+                WHERE o."ebayOrderId" = v.order_id
+                  AND o."userId" = $3
+                  AND o."ebayUserId" = $4
+                  AND o.environment = $5
+                  AND o."otherFees" IS DISTINCT FROM v.amount
+              `,
+              [orderIds, amounts, userId, ebayUserId, environment]
+            );
+            otherFeesUpdated = result.rowCount ?? 0;
+          } catch (error) {
+            if ((error as { code?: string }).code !== "42703") throw error;
+          }
+        }
+        // ====================================================
         // DEFAULT SHIPPING FROM LISTINGS (new orders only)
         // ====================================================
         // Needs docs/sql/2026-11-07_shipping_cost.sql; skipped until then.
@@ -1716,6 +1796,8 @@ export async function POST() {
       labelOrdersFound: labelsByOrder?.size ?? null,
       labelColumnMissing,
       shippingDefaultsApplied,
+      otherFeesUpdated,
+      otherFeeOrdersFound: otherFeesByOrder?.size ?? null,
       fullyRefunded,
       partiallyRefunded,
       financialOrdersMatched:

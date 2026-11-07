@@ -87,6 +87,8 @@ model EbayConnection {
 // EBAY ACTIVE LISTINGS
 // ============================================================
 
+// Note: the real table is "EbayListing"; the app reads and writes it with
+// plain SQL, not through the generated ORM (which would call it "ebayListing").
 model EbayListing {
   id            Int      @id @default(autoincrement())
 
