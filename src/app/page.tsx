@@ -15,6 +15,8 @@ import ListingsSection, { type ListingRange, type ListingRow } from "./ListingsS
 import StoreShippingSetting from "./StoreShippingSetting";
 import StoreSwitcher, { type EbayStore } from "./StoreSwitcher";
 import OrderTools, { type ToolOrder } from "./OrderTools";
+import ExpensesSection, { type Expense, type NewExpense } from "./ExpensesSection";
+import MonthlyGoal from "./MonthlyGoal";
 
 // ============================================================
 // TYPES
@@ -243,7 +245,7 @@ function getOrderProfit(order: Order) {
 // so Back, refresh and shared links open the same view.
 // ============================================================
 
-type View = "dashboard" | "orders" | "listings";
+type View = "dashboard" | "orders" | "listings" | "expenses";
 
 function subscribeToHash(onChange: () => void) {
   window.addEventListener("hashchange", onChange);
@@ -253,6 +255,7 @@ function subscribeToHash(onChange: () => void) {
 function viewFromHash(hash: string): View {
   if (hash === "#orders") return "orders";
   if (hash === "#listings") return "listings";
+  if (hash === "#expenses") return "expenses";
   return "dashboard";
 }
 
@@ -268,6 +271,10 @@ const VIEW_COPY: Record<View, { title: string; subtitle: string }> = {
   listings: {
     title: "Listings",
     subtitle: "See how every listing is selling and what it earns.",
+  },
+  expenses: {
+    title: "Expenses",
+    subtitle: "Packing supplies, subscriptions and other costs that aren't tied to one sale.",
   },
 };
 
@@ -1530,6 +1537,7 @@ export default function Home() {
   // "Shipping per order" default for each eBay store, saved on the ProfitSync
   // account (user_metadata.defaultShippingByStore). The older single
   // account-wide value (defaultShippingCost) is still used as a fallback.
+  const [profitGoals, setProfitGoals] = useState<Record<string, number>>({});
   const [shippingDefaults, setShippingDefaults] = useState<{
     byStore: Record<string, number>;
     legacy: number | null;
@@ -1560,6 +1568,13 @@ export default function Home() {
             if (typeof amount === "number" && Number.isFinite(amount) && amount >= 0) byStore[id] = amount;
           }
         }
+        const goals: Record<string, number> = {};
+        if (meta.profitGoalByStore && typeof meta.profitGoalByStore === "object") {
+          for (const [key, amount] of Object.entries(meta.profitGoalByStore as Record<string, unknown>)) {
+            if (typeof amount === "number" && Number.isFinite(amount) && amount > 0) goals[key] = amount;
+          }
+        }
+        setProfitGoals(goals);
         setShippingDefaults({
           byStore,
           legacy: meta.defaultShippingCost == null || !Number.isFinite(legacy) ? null : legacy,
@@ -1765,6 +1780,21 @@ export default function Home() {
     [rawOrders, shippingDefaults]
   );
 
+  // Monthly profit goal per store ("all" for the All stores view), saved on
+  // the ProfitSync account (user_metadata.profitGoalByStore).
+  const goalKey = allStores ? "all" : activeStoreId ?? "default";
+  const monthlyGoal = profitGoals[goalKey] ?? null;
+
+  async function saveMonthlyGoal(value: string) {
+    const amount = value === "" ? null : Math.round(Number(value) * 100) / 100;
+    const next = { ...profitGoals };
+    if (amount === null || amount <= 0) delete next[goalKey];
+    else next[goalKey] = amount;
+    const { error } = await createClient().auth.updateUser({ data: { profitGoalByStore: next } });
+    if (error) throw error;
+    setProfitGoals(next);
+  }
+
   async function saveStoreShipping(value: string) {
     const amount = value === "" ? null : Math.round(Number(value) * 100) / 100;
     const byStore = { ...shippingDefaults.byStore };
@@ -1800,6 +1830,49 @@ export default function Home() {
     }
   }, []);
 
+  // ----------------------------------------------------------
+  // EXPENSES (costs not tied to one sale)
+  // ----------------------------------------------------------
+
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [expensesEnabled, setExpensesEnabled] = useState(true);
+  const [expensesLoading, setExpensesLoading] = useState(true);
+
+  const loadExpenses = useCallback(async () => {
+    try {
+      const response = await fetch("/api/expenses", { cache: "no-store" });
+      if (!response.ok) throw new Error("Failed to load expenses.");
+      const data: { enabled?: boolean; expenses?: Expense[] } = await response.json();
+      setExpensesEnabled(data.enabled !== false);
+      setExpenses(data.expenses ?? []);
+    } catch (error) {
+      console.error("Loading expenses failed:", error);
+    } finally {
+      setExpensesLoading(false);
+    }
+  }, []);
+
+  async function addExpense(expense: NewExpense) {
+    const response = await fetch("/api/expenses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(expense),
+    });
+    const data: { success?: boolean; error?: string } = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || "Couldn't add the expense.");
+    await loadExpenses();
+  }
+
+  async function deleteExpense(id: number) {
+    const response = await fetch("/api/expenses", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    if (!response.ok) throw new Error("Couldn't delete the expense.");
+    await loadExpenses();
+  }
+
   // Switch the whole dashboard to another connected store.
   async function switchStore(id: string) {
     const response = await fetch("/api/ebay/stores", {
@@ -1812,7 +1885,7 @@ export default function Home() {
     setSellerName("");
     setSyncMessage("");
     setSelectedOrderId(null);
-    await Promise.all([loadStores(), loadOrders(), loadListings()]);
+    await Promise.all([loadStores(), loadOrders(), loadListings(), loadExpenses()]);
   }
 
   // Remove a store and its ProfitSync data, then show whichever store is left.
@@ -1831,7 +1904,7 @@ export default function Home() {
       delete byStore[id];
       return { ...current, byStore };
     });
-    await Promise.all([loadStores(), loadOrders(), loadListings()]);
+    await Promise.all([loadStores(), loadOrders(), loadListings(), loadExpenses()]);
   }
 
   // Store name for the greeting, refreshed whenever the active store changes.
@@ -1913,6 +1986,7 @@ export default function Home() {
   useEffect(() => {
     async function initialLoad() {
       const storesLoaded = loadStores();
+      const expensesLoaded = loadExpenses();
       const listingsLoaded = loadListings();
       try {
         await loadOrders();
@@ -1927,10 +2001,11 @@ export default function Home() {
       }
       await listingsLoaded;
       await storesLoaded;
+      await expensesLoaded;
     }
 
     void initialLoad();
-  }, [loadOrders, loadListings, loadStores]);
+  }, [loadOrders, loadListings, loadStores, loadExpenses]);
 
   // ----------------------------------------------------------
   // EDIT PRODUCT COST
@@ -2213,6 +2288,16 @@ export default function Home() {
     );
   }, [orders, dateRange, now]);
 
+  // Expenses in the same date range (dates are calendar days, local time).
+  const periodExpenses = useMemo(() => {
+    if (!now) return [];
+    return expenses.filter((expense) => {
+      const [y, m, d] = expense.spentOn.split("-").map(Number);
+      const asOrder = { orderDate: new Date(y, m - 1, d, 12).toISOString() } as Order;
+      return isOrderInDateRange(asOrder, dateRange, now);
+    });
+  }, [expenses, dateRange, now]);
+
   // ----------------------------------------------------------
   // FINANCIAL TOTALS
   // ----------------------------------------------------------
@@ -2253,7 +2338,8 @@ export default function Home() {
       (sum, order) => sum + (getOrderProfit(order) ?? 0), 0
     );
     const refundLosses = periodOrders.reduce((sum, order) => sum + getRefundLoss(order), 0);
-    const netProfit = completedProfit - refundLosses;
+    const expensesTotal = periodExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
+    const netProfit = completedProfit - refundLosses - expensesTotal;
     const completedRevenue = completedOrders.reduce(
       (sum, order) => sum + Math.max(0, order.salePrice - order.refundAmount), 0
     );
@@ -2261,11 +2347,11 @@ export default function Home() {
       ? (netProfit / completedRevenue) * 100 : 0;
     const pendingOrders = activeOrders.length - completedOrders.length;
     return {
-      totalRevenue, totalFees, totalLabels, totalProductCosts, netProfit, refundLosses, profitMargin,
+      totalRevenue, totalFees, totalLabels, totalProductCosts, netProfit, expensesTotal, refundLosses, profitMargin,
       completedCount: completedOrders.length, pendingOrders,
       orderCount: activeOrders.length, refundedCount,
     };
-  }, [periodOrders]);
+  }, [periodOrders, periodExpenses]);
 
   // ----------------------------------------------------------
   // FILTERED ORDERS
@@ -2302,6 +2388,31 @@ export default function Home() {
 
   // Today / last 7 days activity for the line under the greeting (always
   // based on the clock, not the date picker, so it never repeats the cards).
+  // This calendar month so far: profit after refunds and expenses, for the goal.
+  const monthStats = useMemo(() => {
+    if (!currentTime) return null;
+    const start = new Date(currentTime.getFullYear(), currentTime.getMonth(), 1);
+    const inMonth = orders.filter((order) => {
+      if (!order.orderDate) return false;
+      const date = new Date(order.orderDate);
+      return date >= start && date <= currentTime;
+    });
+    const active = inMonth.filter((order) => !isFullyRefunded(order));
+    const orderProfit = active.reduce((sum, order) => sum + (getOrderProfit(order) ?? 0), 0);
+    const refundLoss = inMonth.reduce((sum, order) => sum + getRefundLoss(order), 0);
+    const monthPrefix = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-`;
+    const spent = expenses
+      .filter((expense) => expense.spentOn.startsWith(monthPrefix))
+      .reduce((sum, expense) => sum + Number(expense.amount), 0);
+    return {
+      profit: orderProfit - refundLoss - spent,
+      sales: active.reduce((sum, order) => sum + order.quantity, 0),
+      dayOfMonth: currentTime.getDate(),
+      daysInMonth: new Date(currentTime.getFullYear(), currentTime.getMonth() + 1, 0).getDate(),
+      monthName: currentTime.toLocaleDateString("en-US", { month: "long" }),
+    };
+  }, [orders, expenses, currentTime]);
+
   const activity = useMemo(() => {
     const summarize = (from: Date) => {
       const sales = orders.filter((order) => {
@@ -2654,6 +2765,16 @@ export default function Home() {
               Listings
             </button>
 
+            <button
+              type="button"
+              onClick={() => navigate("expenses")}
+              aria-current={view === "expenses" ? "page" : undefined}
+              className={navItemClass(view === "expenses")}
+            >
+              <Icon name="wallet" size={19} />
+              Expenses
+            </button>
+
           </nav>
 
           {/* eBay stores: switch between them or add another */}
@@ -2851,11 +2972,11 @@ export default function Home() {
           <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h3 className="text-lg font-semibold text-white">
-                {view === "orders" ? "Order history" : "Financial Overview"}
+                {view === "orders" ? "Order history" : view === "expenses" ? "Your expenses" : "Financial Overview"}
               </h3>
 
               <p className="mt-1 text-xs text-slate-500">
-                {view === "orders" ? "Choose which orders to show" : "Your store at a glance"}
+                {view === "orders" ? "Choose which orders to show" : view === "expenses" ? "Choose which expenses to show" : "Your store at a glance"}
               </p>
             </div>
 
@@ -2951,12 +3072,28 @@ export default function Home() {
             <MetricCard
               title="Net Profit"
               value={money(totals.netProfit)}
-              description={`Calculated from ${totals.completedCount} completed orders`}
+              description={
+                totals.expensesTotal > 0
+                  ? `After ${money(totals.expensesTotal)} in other expenses`
+                  : `Calculated from ${totals.completedCount} completed orders`
+              }
               icon="trending"
               accent="green"
               featured
             />
           </div>
+
+          {monthStats && (
+            <MonthlyGoal
+              goal={monthlyGoal}
+              profit={monthStats.profit}
+              sales={monthStats.sales}
+              dayOfMonth={monthStats.dayOfMonth}
+              daysInMonth={monthStats.daysInMonth}
+              monthName={monthStats.monthName}
+              onSave={saveMonthlyGoal}
+            />
+          )}
 
           {/* =================================================
               PROFIT PERFORMANCE
@@ -3718,6 +3855,18 @@ export default function Home() {
           {/* =================================================
               LISTINGS
           ================================================= */}
+
+          {view === "expenses" && (
+            <ExpensesSection
+              expenses={periodExpenses}
+              enabled={expensesEnabled}
+              loading={expensesLoading}
+              periodLabel={dateRangeLabel(dateRange)}
+              showWholeBusiness={stores.length > 1}
+              onAdd={addExpense}
+              onDelete={deleteExpense}
+            />
+          )}
 
           {view === "listings" && (
             <ListingsSection
