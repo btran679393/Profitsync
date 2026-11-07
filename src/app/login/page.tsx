@@ -1,18 +1,38 @@
-
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
+import Link from "next/link";
+import BrandPanel from "./BrandPanel";
 
 // Supabase calls Microsoft sign-in "azure". One Microsoft button covers personal
 // accounts (Outlook, Hotmail, Live) and work or school accounts.
 type SocialProvider = "google" | "azure" | "facebook";
+type Mode = "signin" | "signup" | "forgot";
 
 const SOCIAL_PROVIDERS: ReadonlyArray<readonly [SocialProvider, string]> = [
   ["google", "Google"],
   ["azure", "Microsoft"],
   ["facebook", "Facebook"],
 ];
+
+const COPY: Record<Mode, { title: string; subtitle: string; submit: string }> = {
+  signin: {
+    title: "Welcome back",
+    subtitle: "Sign in to see your sales, fees and profit.",
+    submit: "Sign in",
+  },
+  signup: {
+    title: "Create your account",
+    subtitle: "Start tracking your real eBay profit in minutes.",
+    submit: "Create account",
+  },
+  forgot: {
+    title: "Reset your password",
+    subtitle: "Enter your email and we'll send you a link to choose a new password.",
+    submit: "Send reset link",
+  },
+};
 
 function ProviderLogo({ provider }: { provider: SocialProvider }) {
   const common = { width: 20, height: 20, "aria-hidden": true } as const;
@@ -41,6 +61,80 @@ function ProviderLogo({ provider }: { provider: SocialProvider }) {
     </svg>
   );
 }
+
+function Icon({ name, className = "" }: { name: "mail" | "lock" | "eye" | "eyeOff" | "arrow" | "alert" | "check" | "shield"; className?: string }) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {name === "mail" && <><rect x="3" y="5" width="18" height="14" rx="2.5" /><path d="m4 7 8 6 8-6" /></>}
+      {name === "lock" && <><rect x="4" y="11" width="16" height="10" rx="2.5" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></>}
+      {name === "eye" && <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></>}
+      {name === "eyeOff" && <><path d="M10.6 5.1A9.9 9.9 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-2.6 3.5M6.6 6.6A17.4 17.4 0 0 0 2 12s3.5 7 10 7a9.6 9.6 0 0 0 5.4-1.6" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" /><path d="m3 3 18 18" /></>}
+      {name === "arrow" && <><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></>}
+      {name === "alert" && <><circle cx="12" cy="12" r="9" /><path d="M12 8v4" /><path d="M12 16h.01" /></>}
+      {name === "check" && <><circle cx="12" cy="12" r="9" /><path d="m8.5 12 2.5 2.5 4.5-5" /></>}
+      {name === "shield" && <><path d="M12 3 5 6v6c0 4.4 3 7.6 7 9 4-1.4 7-4.6 7-9V6l-7-3Z" /><path d="m9 12 2 2 4-4" /></>}
+    </svg>
+  );
+}
+
+function Spinner({ className = "" }: { className?: string }) {
+  return (
+    <svg className={`animate-spin ${className}`} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function Logo() {
+  return (
+    <div className="flex items-center gap-2.5">
+      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-blue-700 text-white shadow-md shadow-blue-600/25">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M3 17l6-6 4 4 8-9" />
+          <path d="M15 6h6v6" />
+        </svg>
+      </div>
+      <span className="text-lg font-bold tracking-tight text-slate-900">ProfitSync</span>
+    </div>
+  );
+}
+
+const INPUT =
+  "h-12 w-full rounded-xl border border-slate-200 bg-white pl-11 pr-4 text-[15px] text-slate-900 shadow-sm shadow-slate-900/[0.03] outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10";
+
+function Field({ label, icon, aside, children }: { label: string; icon: "mail" | "lock"; aside?: ReactNode; children: ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 flex items-center justify-between text-sm font-medium text-slate-700">
+        {label}
+        {aside}
+      </span>
+      <span className="relative block">
+        <Icon name={icon} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+        {children}
+      </span>
+    </label>
+  );
+}
+
+// 0 = too short … 4 = strong. Advice only; Supabase enforces the real minimum.
+function passwordStrength(pw: string) {
+  if (pw.length < 6) return 0;
+  let score = 1;
+  if (pw.length >= 10) score++;
+  if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) score++;
+  if (/\d/.test(pw) && /[^A-Za-z0-9]/.test(pw)) score++;
+  return Math.min(score, 4);
+}
+
+const STRENGTH = [
+  { label: "Too short", bar: "bg-rose-400", text: "text-rose-600" },
+  { label: "Weak", bar: "bg-orange-400", text: "text-orange-600" },
+  { label: "Fair", bar: "bg-amber-400", text: "text-amber-600" },
+  { label: "Good", bar: "bg-lime-500", text: "text-lime-700" },
+  { label: "Strong", bar: "bg-emerald-500", text: "text-emerald-700" },
+];
 
 // Turn Supabase / OAuth error codes and messages into something a seller can act on.
 function friendlyAuthError(raw: string): string {
@@ -79,10 +173,11 @@ export default function LoginPage() {
   const [loading, setLoading] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [mode, setMode] = useState<"signin" | "signup" | "forgot">("signin");
+  const [mode, setMode] = useState<Mode>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   // Which social providers are switched on in Supabase. null = still checking.
   const [enabledProviders, setEnabledProviders] = useState<SocialProvider[] | null>(null);
 
@@ -104,6 +199,13 @@ export default function LoginPage() {
       })
       .catch(() => setEnabledProviders(SOCIAL_PROVIDERS.map(([p]) => p)));
   }, []);
+
+  function switchMode(next: Mode) {
+    setMode(next);
+    setError("");
+    setNotice("");
+    setShowPassword(false);
+  }
 
   async function socialSignIn(provider: SocialProvider) {
     if (loading) return;
@@ -170,323 +272,257 @@ export default function LoginPage() {
     }
   }
 
+  const copy = COPY[mode];
+  const strength = passwordStrength(password);
+  const passwordsMatch = confirmPassword.length > 0 && confirmPassword === password;
+  const providers = enabledProviders ?? [];
+
   return (
-    <main className="min-h-screen bg-white text-slate-900">
-      <div className="flex min-h-screen flex-col lg:flex-row">
+    <main className="ps-motion min-h-screen bg-white font-sans text-slate-900 lg:flex">
+      <BrandPanel />
 
-        {/* LEFT BRANDING PANEL */}
-        <section className="relative flex min-h-[420px] flex-col justify-between overflow-hidden bg-[#081426] px-7 py-8 text-white sm:px-12 lg:min-h-screen lg:w-[55%] lg:px-16 lg:py-12">
+      {/* FORM PANEL */}
+      <section className="relative flex min-h-screen flex-1 flex-col overflow-hidden">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 top-0 h-80 bg-[radial-gradient(ellipse_at_top,rgba(59,130,246,0.08),transparent_70%)]"
+        />
 
-          {/* Background effects */}
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute -right-32 -top-32 h-[450px] w-[450px] rounded-full bg-blue-600/20 blur-3xl"
-          />
-
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute -bottom-48 -left-32 h-[500px] w-[500px] rounded-full bg-cyan-500/10 blur-3xl"
-          />
-
-          {/* Logo */}
-          <div className="relative z-10 flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-500 shadow-lg shadow-blue-500/20">
-              <svg
-                width="26"
-                height="26"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M3 17l6-6 4 4 8-9" />
-                <path d="M15 6h6v6" />
-              </svg>
-            </div>
-
-            <span className="text-2xl font-bold tracking-tight">
-              ProfitSync
-            </span>
+        {/* Top bar */}
+        <header className="relative z-10 flex items-center justify-between px-6 py-6 sm:px-10">
+          <div className="lg:invisible">
+            <Logo />
           </div>
-
-          {/* Main branding content */}
-          <div className="relative z-10 my-12 max-w-xl lg:my-0">
-
-            <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-blue-400/20 bg-blue-400/10 px-4 py-2 text-xs font-semibold tracking-wide text-blue-200">
-              <span className="h-2 w-2 rounded-full bg-emerald-400" />
-              BUILT FOR EBAY SELLERS
-            </div>
-
-            <h1 className="text-4xl font-bold leading-[1.12] tracking-tight sm:text-5xl xl:text-6xl">
-              Know your numbers.
-              <span className="mt-2 block text-blue-400">
-                Grow your profits.
-              </span>
-            </h1>
-
-            <p className="mt-6 max-w-md text-base leading-8 text-slate-300 sm:text-lg">
-              Your sales, fees, and product costs in one
-              place. Spend less time calculating and more
-              time growing your business.
-            </p>
-
-            {/* Dashboard preview */}
-            <div className="mt-10 max-w-lg rounded-2xl border border-white/10 bg-white/[0.07] p-4 shadow-2xl backdrop-blur-sm sm:p-5">
-
-              <div className="mb-5 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-white">
-                    Profit overview
-                  </p>
-                  <p className="mt-1 text-xs text-slate-400">
-                    Example dashboard
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs text-emerald-300">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                  Overview
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-xl border border-white/10 bg-white/[0.06] p-4">
-                  <p className="text-xs text-slate-400">
-                    Revenue
-                  </p>
-                  <p className="mt-2 text-2xl font-bold">
-                    $8,450
-                  </p>
-                  <p className="mt-2 text-xs text-slate-400">
-                    Total sales
-                  </p>
-                </div>
-
-                <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/[0.08] p-4">
-                  <p className="text-xs text-emerald-200">
-                    Net profit
-                  </p>
-                  <p className="mt-2 text-2xl font-bold text-emerald-400">
-                    $2,735
-                  </p>
-                  <p className="mt-2 text-xs text-emerald-200/70">
-                    After expenses
-                  </p>
-                </div>
-              </div>
-
-              {/* Decorative chart */}
-              <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.04] p-4">
-                <div className="mb-4 flex items-center justify-between">
-                  <span className="text-xs font-medium text-slate-300">
-                    Sales performance
-                  </span>
-                  <span className="text-xs text-slate-500">
-                    Illustrative
-                  </span>
-                </div>
-
-                <svg
-                  viewBox="0 0 420 110"
-                  className="h-24 w-full"
-                  role="img"
-                  aria-label="Illustrative upward-trending sales chart"
-                >
-                  <defs>
-                    <linearGradient
-                      id="profitArea"
-                      x1="0"
-                      y1="0"
-                      x2="0"
-                      y2="1"
-                    >
-                      <stop
-                        offset="0%"
-                        stopColor="#3b82f6"
-                        stopOpacity="0.35"
-                      />
-                      <stop
-                        offset="100%"
-                        stopColor="#3b82f6"
-                        stopOpacity="0"
-                      />
-                    </linearGradient>
-                  </defs>
-
-                  <path
-                    d="M0 95 L45 83 L90 87 L135 59 L180 69 L225 46 L270 55 L315 24 L360 37 L420 9 L420 110 L0 110 Z"
-                    fill="url(#profitArea)"
-                  />
-
-                  <path
-                    d="M0 95 L45 83 L90 87 L135 59 L180 69 L225 46 L270 55 L315 24 L360 37 L420 9"
-                    fill="none"
-                    stroke="#60a5fa"
-                    strokeWidth="3"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
-            </div>
-          </div>
-
-          <p className="relative z-10 hidden text-sm text-slate-500 lg:block">
-            ProfitSync · Smarter profit tracking for sellers
+          <p className="hidden text-sm text-slate-500 sm:block">
+            {mode === "signup" ? "Already have an account?" : "New to ProfitSync?"}{" "}
+            <button
+              type="button"
+              onClick={() => switchMode(mode === "signup" ? "signin" : "signup")}
+              className="font-semibold text-blue-600 transition hover:text-blue-700"
+            >
+              {mode === "signup" ? "Sign in" : "Create account"}
+            </button>
           </p>
-        </section>
+        </header>
 
-        {/* RIGHT LOGIN PANEL */}
-        <section className="flex flex-1 flex-col bg-white">
+        <div className="relative z-10 flex flex-1 items-center justify-center px-6 pb-10 sm:px-10">
+          <div className="w-full max-w-[400px]">
+            {/* Heading */}
+            <div key={mode} className="ps-fade-up">
+              <h2 className="text-[28px] font-bold leading-tight tracking-tight text-slate-900 sm:text-3xl">
+                {copy.title}
+              </h2>
+              <p className="mt-2 text-[15px] leading-6 text-slate-500">{copy.subtitle}</p>
+            </div>
 
-          <div className="flex justify-end px-7 py-7 sm:px-12">
-            <span className="rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-medium text-slate-500">
-              Seller Dashboard
+            {/* Sign in / Create account switch */}
+            {mode !== "forgot" && (
+              <div className="ps-fade-up relative mt-7 grid grid-cols-2 rounded-xl bg-slate-100 p-1 text-sm font-semibold" style={{ animationDelay: "60ms" }}>
+                <span
+                  aria-hidden="true"
+                  className={`absolute inset-y-1 left-1 w-[calc(50%-4px)] rounded-lg bg-white shadow-sm ring-1 ring-slate-900/5 transition-transform duration-300 ease-out ${mode === "signup" ? "translate-x-full" : ""}`}
+                />
+                {(["signin", "signup"] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => switchMode(tab)}
+                    aria-pressed={mode === tab}
+                    className={`relative z-10 rounded-lg py-2.5 transition-colors ${mode === tab ? "text-slate-900" : "text-slate-500 hover:text-slate-700"}`}
+                  >
+                    {tab === "signin" ? "Sign in" : "Create account"}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Social sign-in */}
+            {mode !== "forgot" && (enabledProviders === null || providers.length > 0) && (
+              <div className="ps-fade-up mt-6" style={{ animationDelay: "120ms" }}>
+                <div className="space-y-2.5">
+                  {enabledProviders === null
+                    ? [0, 1, 2].map((i) => <div key={i} className="h-12 animate-pulse rounded-xl bg-slate-100" />)
+                    : SOCIAL_PROVIDERS.filter(([p]) => providers.includes(p)).map(([provider, label]) => (
+                        <button
+                          key={provider}
+                          type="button"
+                          disabled={Boolean(loading)}
+                          onClick={() => socialSignIn(provider)}
+                          className="group relative flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white text-[15px] font-semibold text-slate-700 shadow-sm shadow-slate-900/[0.03] transition hover:-translate-y-px hover:border-slate-300 hover:bg-slate-50 hover:shadow-md active:translate-y-0 disabled:pointer-events-none disabled:opacity-60"
+                        >
+                          {loading === provider ? <Spinner className="text-slate-500" /> : <ProviderLogo provider={provider} />}
+                          {loading === provider ? "Connecting…" : `Continue with ${label}`}
+                        </button>
+                      ))}
+                </div>
+                {providers.includes("azure") && (
+                  <p className="mt-2.5 text-center text-xs text-slate-400">
+                    Microsoft works with Outlook, Hotmail and work or school accounts.
+                  </p>
+                )}
+                <div className="my-6 flex items-center gap-3 text-xs font-medium uppercase tracking-wider text-slate-400">
+                  <span className="h-px flex-1 bg-slate-200" />
+                  or with email
+                  <span className="h-px flex-1 bg-slate-200" />
+                </div>
+              </div>
+            )}
+
+            {/* Email form */}
+            <form
+              onSubmit={submitEmail}
+              className={`ps-fade-up space-y-4 ${mode === "forgot" ? "mt-7" : ""}`}
+              style={{ animationDelay: "180ms" }}
+            >
+              <Field label="Email address" icon="mail">
+                <input
+                  type="email"
+                  autoComplete="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  className={INPUT}
+                />
+              </Field>
+
+              {mode !== "forgot" && (
+                <div>
+                  <Field
+                    label="Password"
+                    icon="lock"
+                    aside={
+                      mode === "signin" && (
+                        <button type="button" onClick={() => switchMode("forgot")} className="text-sm font-semibold text-blue-600 transition hover:text-blue-700">
+                          Forgot password?
+                        </button>
+                      )
+                    }
+                  >
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      minLength={mode === "signup" ? 6 : undefined}
+                      autoComplete={mode === "signup" ? "new-password" : "current-password"}
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder={mode === "signup" ? "At least 6 characters" : "Enter your password"}
+                      className={`${INPUT} pr-12`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((s) => !s)}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                    >
+                      <Icon name={showPassword ? "eyeOff" : "eye"} />
+                    </button>
+                  </Field>
+
+                  {mode === "signup" && password.length > 0 && (
+                    <div className="ps-fade-in mt-2.5" aria-live="polite">
+                      <div className="flex gap-1.5">
+                        {[1, 2, 3, 4].map((n) => (
+                          <span
+                            key={n}
+                            className={`h-1.5 flex-1 rounded-full transition-colors duration-300 ${strength >= n ? STRENGTH[strength].bar : "bg-slate-200"}`}
+                          />
+                        ))}
+                      </div>
+                      <p className="mt-1.5 text-xs text-slate-500">
+                        Password strength: <span className={`font-semibold ${STRENGTH[strength].text}`}>{STRENGTH[strength].label}</span>
+                        {strength < 3 && " · try 10+ characters with numbers and symbols"}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {mode === "signup" && (
+                <Field
+                  label="Confirm password"
+                  icon="lock"
+                  aside={passwordsMatch && (
+                    <span className="flex items-center gap-1 text-xs font-semibold text-emerald-600">
+                      <Icon name="check" className="h-4 w-4" /> Matches
+                    </span>
+                  )}
+                >
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="new-password"
+                    required
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Re-enter your password"
+                    className={INPUT}
+                  />
+                </Field>
+              )}
+
+              <button
+                type="submit"
+                disabled={Boolean(loading)}
+                className="group relative mt-2 flex h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-[15px] font-semibold text-white shadow-lg shadow-blue-600/25 ring-1 ring-inset ring-white/15 transition hover:to-blue-700 hover:shadow-xl hover:shadow-blue-600/30 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-70"
+              >
+                <span aria-hidden="true" className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
+                {loading === "email" ? (
+                  <>
+                    <Spinner /> Please wait…
+                  </>
+                ) : (
+                  <>
+                    {copy.submit}
+                    <Icon name="arrow" className="transition-transform group-hover:translate-x-0.5" />
+                  </>
+                )}
+              </button>
+
+              {mode === "forgot" && (
+                <button type="button" onClick={() => switchMode("signin")} className="w-full text-sm font-semibold text-blue-600 transition hover:text-blue-700">
+                  ← Back to sign in
+                </button>
+              )}
+            </form>
+
+            {/* Messages */}
+            {error && (
+              <div role="alert" className="ps-fade-up mt-5 flex gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                <Icon name="alert" className="mt-0.5 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+            {notice && (
+              <div role="status" className="ps-fade-up mt-5 flex gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                <Icon name="check" className="mt-0.5 shrink-0" />
+                <span>{notice}</span>
+              </div>
+            )}
+
+            {mode === "signup" && (
+              <p className="mt-5 text-center text-xs leading-5 text-slate-500">
+                By creating an account you agree to how we handle your data in our{" "}
+                <Link href="/privacy" className="font-medium text-slate-700 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-500">
+                  Privacy Policy
+                </Link>
+                .
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <footer className="relative z-10 flex flex-col items-center justify-between gap-2 px-6 py-6 text-xs text-slate-400 sm:flex-row sm:px-10">
+          <p>© {new Date().getFullYear()} ProfitSync</p>
+          <div className="flex items-center gap-4">
+            <Link href="/privacy" className="transition hover:text-slate-600">Privacy</Link>
+            <span className="flex items-center gap-1.5">
+              <Icon name="shield" className="h-3.5 w-3.5" />
+              Secured by Supabase
             </span>
           </div>
-
-          <div className="flex flex-1 items-center justify-center px-7 py-12 sm:px-12">
-            <div className="w-full max-w-[420px]">
-
-              {/* Login icon */}
-              <div className="mb-8 flex h-14 w-14 items-center justify-center rounded-2xl border border-blue-100 bg-blue-50 text-blue-600">
-                <svg
-                  width="28"
-                  height="28"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <rect
-                    x="3"
-                    y="3"
-                    width="18"
-                    height="18"
-                    rx="4"
-                  />
-                  <path d="M7 15l4-4 3 3 4-5" />
-                </svg>
-              </div>
-
-              <h2 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-                Welcome to ProfitSync
-              </h2>
-
-              <p className="mt-4 leading-7 text-slate-500">
-                Sign in to access your dashboard and
-                manage your eBay sales, expenses, and profits.
-              </p>
-
-              <div className="mt-8">
-                <div className="mb-6 flex rounded-xl bg-slate-100 p-1 text-sm font-semibold">
-                  {(["signin", "signup"] as const).map((tab) => (
-                    <button key={tab} type="button" onClick={() => { setMode(tab); setError(""); setNotice(""); }}
-                      className={`flex-1 rounded-lg px-3 py-3 transition ${mode === tab ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>
-                      {tab === "signin" ? "Sign in" : "Create account"}
-                    </button>
-                  ))}
-                </div>
-                <h3 className="mb-5 text-xl font-bold text-slate-900">
-                  {mode === "forgot" ? "Reset your password" : mode === "signup" ? "Create your seller account" : "Welcome back"}
-                </h3>
-                <form onSubmit={submitEmail} className="space-y-4">
-                  <label className="block text-sm font-medium text-slate-700">
-                    Email address
-                    <input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)}
-                      placeholder="you@example.com" className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
-                  </label>
-                  {mode !== "forgot" && <label className="block text-sm font-medium text-slate-700">
-                    Password
-                    <input type="password" minLength={mode === "signup" ? 6 : undefined} autoComplete={mode === "signup" ? "new-password" : "current-password"} required value={password} onChange={(e) => setPassword(e.target.value)}
-                      placeholder="Enter your password" className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
-                  </label>}
-                  {mode === "signup" && <label className="block text-sm font-medium text-slate-700">
-                    Confirm password
-                    <input type="password" autoComplete="new-password" required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
-                      placeholder="Re-enter your password" className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
-                  </label>}
-                  {mode === "signin" && <button type="button" onClick={() => { setMode("forgot"); setError(""); setNotice(""); }} className="block ml-auto text-sm font-semibold text-blue-600 hover:underline">Forgot password?</button>}
-                  <button type="submit" disabled={Boolean(loading)} className="w-full rounded-xl bg-blue-600 px-5 py-3.5 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60">
-                    {loading === "email" ? "Please wait..." : mode === "forgot" ? "Send reset link" : mode === "signup" ? "Create account" : "Sign in"}
-                  </button>
-                  {mode === "forgot" && <button type="button" onClick={() => setMode("signin")} className="w-full text-sm font-medium text-blue-600 hover:underline">Back to sign in</button>}
-                </form>
-                {mode !== "forgot" && enabledProviders !== null && enabledProviders.length > 0 && <>
-                  <div className="my-6 flex items-center gap-3 text-xs text-slate-400"><span className="h-px flex-1 bg-slate-200" />or continue with<span className="h-px flex-1 bg-slate-200" /></div>
-                  <div className="space-y-3">
-                    {SOCIAL_PROVIDERS.filter(([provider]) => enabledProviders.includes(provider)).map(([provider, label]) => (
-                      <button key={provider} type="button" disabled={Boolean(loading)} onClick={() => socialSignIn(provider)}
-                        className="flex w-full items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:opacity-60">
-                        <ProviderLogo provider={provider} />
-                        {loading === provider ? "Connecting..." : `Continue with ${label}`}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="mt-4 text-center text-xs text-slate-500">
-                    {enabledProviders.includes("azure") && "Microsoft works with Outlook, Hotmail, Live and work or school accounts. "}
-                    Yahoo, iCloud and any other email address can sign up with email and password.
-                  </p>
-                </>}
-                {error && <div role="alert" className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-                {notice && <div role="status" className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</div>}
-                <p className="mt-6 text-center text-xs text-slate-500">Secure authentication powered by Supabase</p>
-              </div>
-
-              {/* Features */}
-              <div className="mt-12 border-t border-slate-100 pt-8">
-                <p className="mb-5 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                  Everything in one dashboard
-                </p>
-
-                <div className="grid gap-4">
-                  {[
-                    "Automatically import eBay orders",
-                    "Track seller fees and product costs",
-                    "Calculate your net profit",
-                  ].map((feature) => (
-                    <div
-                      key={feature}
-                      className="flex items-center gap-3 text-sm text-slate-600"
-                    >
-                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2.5"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden="true"
-                        >
-                          <path d="M5 12l4 4L19 6" />
-                        </svg>
-                      </span>
-                      {feature}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Footer */}
-          <footer className="px-7 py-7 text-center text-xs text-slate-400 sm:px-12">
-            <p>
-              © {new Date().getFullYear()} ProfitSync.
-              Built to make selling simpler.
-            </p>
-          </footer>
-        </section>
-      </div>
+        </footer>
+      </section>
     </main>
   );
 }
