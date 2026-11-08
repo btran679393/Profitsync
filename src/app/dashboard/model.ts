@@ -203,7 +203,7 @@ export function getOrderProfit(order: Order) {
 // so Back, refresh and shared links open the same view.
 // ============================================================
 
-export type View = "dashboard" | "orders" | "listings" | "expenses" | "taxes" | "billing" | "settings";
+export type View = "dashboard" | "orders" | "listings" | "expenses" | "taxes" | "billing" | "settings" | "help";
 
 export function subscribeToHash(onChange: () => void) {
   window.addEventListener("hashchange", onChange);
@@ -217,6 +217,7 @@ export function viewFromHash(hash: string): View {
   if (hash === "#taxes") return "taxes";
   if (hash === "#billing") return "billing";
   if (hash === "#settings") return "settings";
+  if (hash === "#help") return "help";
   return "dashboard";
 }
 
@@ -244,6 +245,10 @@ export const VIEW_COPY: Record<View, { title: string; subtitle: string }> = {
   billing: {
     title: "Plan & billing",
     subtitle: "Choose the plan that fits your business.",
+  },
+  help: {
+    title: "Help & guide",
+    subtitle: "How ProfitSync works, step by step and in plain language.",
   },
   settings: {
     title: "Settings",

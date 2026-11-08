@@ -10,11 +10,13 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Badge, Button, ConfirmProvider, Notice, PageHeader, SegmentedControl, ToastProvider, useToast } from "@/components/ui";
+import { Badge, Button, ConfirmProvider, Notice, PageHeader, SegmentedControl, ToastProvider, useConfirm, useToast } from "@/components/ui";
 import Sidebar from "./shell/Sidebar";
 import Topbar from "./shell/Topbar";
 import DashboardView, { type Attention, type CostSlice } from "./dashboard/DashboardView";
 import OrdersView from "./dashboard/OrdersView";
+import SetupChecklist, { type SetupStep } from "./dashboard/SetupChecklist";
+import HelpGuide from "./HelpGuide";
 import type { TrendPoint } from "./dashboard/TrendChart";
 import { SYNC_EVENT, useLastSynced } from "./shell/useShell";
 import ListingsSection, { LISTING_RANGES, type ListingRange } from "./ListingsSection";
@@ -77,6 +79,7 @@ function Dashboard() {
   const [syncing, setSyncing] = useState(false);
   // Success and error messages appear as toasts (bottom right).
   const toast = useToast();
+  const confirm = useConfirm();
   const [loadError, setLoadError] = useState("");
 
   const [loggingOut, setLoggingOut] = useState(false);
@@ -555,8 +558,40 @@ function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Product costs typed but not saved yet (e.g. in the order panel).
+  const hasUnsavedCosts = useMemo(
+    () =>
+      rawOrders.some(
+        (o) =>
+          o.productCost.trim() !== o.savedProductCost.trim() &&
+          !(isValidCost(o.productCost) && isValidCost(o.savedProductCost) && Number(o.productCost) === Number(o.savedProductCost))
+      ),
+    [rawOrders]
+  );
+
+  // Closing or reloading the tab with unsaved costs: the browser asks first.
+  useEffect(() => {
+    if (!hasUnsavedCosts) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [hasUnsavedCosts]);
+
   // Switch the whole dashboard to another connected store.
   async function switchStore(id: string) {
+    if (hasUnsavedCosts) {
+      const ok = await confirm({
+        title: "Discard unsaved product costs?",
+        description: "You typed product costs that haven't been saved. Switching stores will lose them.",
+        confirmLabel: "Discard and switch",
+        cancelLabel: "Keep editing",
+        danger: true,
+      });
+      if (!ok) return;
+    }
     const response = await fetch("/api/ebay/stores", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1157,6 +1192,68 @@ function Dashboard() {
   }, [periodOrders, search, filter]);
 
   // ----------------------------------------------------------
+  // GET STARTED checklist (new sellers): ticks off from real data
+  // ----------------------------------------------------------
+
+  const setupSteps = useMemo<SetupStep[]>(() => {
+    const hasCost = orders.some((order) => !isFullyRefunded(order) && hasRecordedCost(order));
+    const missingCosts = orders.filter((order) => !isFullyRefunded(order) && !hasRecordedCost(order)).length;
+    return [
+      {
+        id: "connect",
+        title: "Connect your eBay store",
+        description: "Sign in with eBay so ProfitSync can read your orders, fees and listings. It never changes anything on eBay.",
+        done: stores.length > 0,
+        action: { label: "Connect eBay", href: "/api/ebay/auth" },
+      },
+      {
+        id: "sync",
+        title: "Bring in your orders",
+        description: "The first sync brings in a year of orders with their eBay fees, shipping labels and refunds.",
+        done: orders.length > 0,
+        action: { label: "Sync orders", onClick: () => void syncEbayOrders() },
+      },
+      {
+        id: "shipping",
+        title: "Set your usual shipping cost",
+        description: "What you normally pay to ship an order. Used for any sale without its own shipping cost.",
+        done: (storeShipping ?? 0) > 0 || orders.some((order) => order.savedShippingCost !== ""),
+        action: { label: "Set shipping", onClick: () => goToOrders() },
+      },
+      {
+        id: "costs",
+        title: "Add what you paid for your items",
+        description:
+          missingCosts > 0
+            ? `${missingCosts} order${missingCosts === 1 ? " needs" : "s need"} a product cost. Add them on Orders, or once per listing on Listings.`
+            : "Add product costs on Orders, or once per listing on Listings.",
+        done: hasCost,
+        action: { label: "Add costs", onClick: () => goToOrders("pending") },
+      },
+      {
+        id: "goal",
+        title: "Set a monthly profit goal",
+        description: "See at a glance whether you're on track this month.",
+        done: monthlyGoal !== null,
+        action: {
+          label: "Set a goal",
+          onClick: () => document.getElementById("monthly-goal")?.scrollIntoView({ behavior: "smooth", block: "center" }),
+        },
+      },
+      {
+        id: "listings",
+        title: "Load your listings",
+        description: "See what each listing has sold and earned, and get alerts when stock runs low.",
+        done: listings.length > 0,
+        action: { label: "Open Listings", onClick: () => navigate("listings") },
+      },
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders, stores, storeShipping, monthlyGoal, listings]);
+
+  const showSetup = !preferences.setupGuideHidden && !storesLoading && !loading;
+
+  // ----------------------------------------------------------
   // DASHBOARD CHART: running revenue and net profit
   // ----------------------------------------------------------
 
@@ -1433,7 +1530,30 @@ function Dashboard() {
             </Notice>
           )}
 
-          {view === "dashboard" && (
+          {view === "dashboard" && showSetup && (
+            <SetupChecklist
+              steps={setupSteps}
+              onOpenGuide={() => navigate("help")}
+              onHide={() => {
+                void savePreferences({ setupGuideHidden: true }).catch(() => toast.error("Couldn't save that. Please try again."));
+                toast.info("Checklist hidden", "You can find the guide any time under Help & guide.");
+              }}
+            />
+          )}
+
+          {view === "help" && (
+            <HelpGuide
+              onGo={(target) => (target === "orders" ? goToOrders() : navigate(target))}
+              checklistHidden={preferences.setupGuideHidden}
+              onShowChecklist={() => {
+                void savePreferences({ setupGuideHidden: false })
+                  .then(() => navigate("dashboard"))
+                  .catch(() => toast.error("Couldn't save that. Please try again."));
+              }}
+            />
+          )}
+
+          {view === "dashboard" && !(showSetup && orders.length === 0) && (
             <DashboardView
               loading={loading}
               hasOrders={orders.length > 0}

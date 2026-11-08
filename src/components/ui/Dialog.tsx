@@ -17,6 +17,9 @@ function Portal({ children }: { children: ReactNode }) {
   return createPortal(<div className="ps-app">{children}</div>, document.body);
 }
 
+// Dialogs currently open, oldest first.
+const openDialogs: object[] = [];
+
 // Shared behaviour for modals and drawers: Escape closes, Tab stays inside,
 // the page behind can't scroll, and focus goes back where it was on close.
 function useDialogBehaviour(open: boolean, onClose: () => void) {
@@ -34,8 +37,13 @@ function useDialogBehaviour(open: boolean, onClose: () => void) {
     (first ?? panel)?.focus();
     const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    const token = {};
+    openDialogs.push(token);
 
     function onKey(event: KeyboardEvent) {
+      // With a dialog open on top of another (e.g. "Discard changes?" over
+      // the order panel), only the top one reacts to keys.
+      if (openDialogs[openDialogs.length - 1] !== token) return;
       if (event.key === "Escape") {
         event.stopPropagation();
         onCloseRef.current();
@@ -57,6 +65,7 @@ function useDialogBehaviour(open: boolean, onClose: () => void) {
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
+      openDialogs.splice(openDialogs.indexOf(token), 1);
       document.body.style.overflow = overflow;
       previous?.focus?.();
     };

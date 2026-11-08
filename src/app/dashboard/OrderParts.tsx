@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Badge, Button, Drawer, Field, MoneyInput, Select, cn } from "@/components/ui";
+import { Badge, Button, Drawer, Field, MoneyInput, Select, cn, useConfirm } from "@/components/ui";
 import { type Order, money, isValidCost, isFullyRefunded, getRefundLoss, getShippingCost, formatOrderDate } from "./model";
 import { Icon } from "./Icon";
 import { ListingImage } from "./ListingImage";
@@ -248,6 +248,7 @@ export function OrderDetailsPanel({
   const [feeLoss, setFeeLoss] = useState(String(order.refundFeeLoss));
   const [refundSaving, setRefundSaving] = useState(false);
   const [refundError, setRefundError] = useState("");
+  const confirm = useConfirm();
   const validMoney = (v: string) => isValidCost(v);
   const refundValid = validMoney(shippingLoss) && validMoney(feeLoss) && (refundOutcome !== "SHIPPED_LOST" || validMoney(lostProductCost));
   async function saveRefundDetails() {
@@ -283,26 +284,77 @@ export function OrderDetailsPanel({
   const disabled = saving || syncing || loggingOut || refunded;
   const refundLoss = getRefundLoss(order);
 
+  // Anything typed here that isn't saved yet.
+  const costDirty =
+    !refunded &&
+    order.productCost.trim() !== order.savedProductCost.trim() &&
+    !(isValidCost(order.productCost) && isValidCost(order.savedProductCost) && Number(order.productCost) === Number(order.savedProductCost));
+  const refundDirty =
+    refunded &&
+    (refundOutcome !== (order.refundOutcome ?? "NOT_SHIPPED") ||
+      shippingLoss !== String(order.refundShippingLoss) ||
+      feeLoss !== String(order.refundFeeLoss) ||
+      (refundOutcome === "SHIPPED_LOST" && lostProductCost !== (order.savedProductCost || "")));
+  const dirty = costDirty || refundDirty;
+
+  // Closing (X, Escape or clicking outside) never silently throws work away.
+  async function requestClose() {
+    if (!dirty) {
+      onClose();
+      return;
+    }
+    const ok = await confirm({
+      title: "Discard unsaved changes?",
+      description: costDirty
+        ? `The product cost you typed ($${order.productCost.trim() || "0"}) hasn't been saved.`
+        : "The refund details you changed haven't been saved.",
+      confirmLabel: "Discard changes",
+      cancelLabel: "Keep editing",
+      danger: true,
+    });
+    if (!ok) return;
+    if (costDirty) onChangeCost(order.id, order.savedProductCost);
+    onClose();
+  }
+
   return (
     <Drawer
       open
-      onClose={onClose}
+      onClose={() => void requestClose()}
       title="Order details"
       description={order.ebayOrderId ? `Order #${order.ebayOrderId}` : "Order ID unavailable"}
       footer={
-        !refunded ? (
-          <Button
-            variant="primary"
-            size="lg"
-            className="w-full"
-            disabled={!hasChanges || disabled}
-            loading={saving}
-            onClick={() => void onSaveCost(order.id, order.productCost)}
-            icon={<Icon name="save" size={16} />}
-          >
-            {hasChanges ? "Save product cost" : "No unsaved changes"}
-          </Button>
-        ) : undefined
+        <div className="flex w-full flex-wrap items-center gap-3">
+          <span aria-live="polite" className={cn("flex items-center gap-2 text-xs", dirty ? "font-semibold text-warn" : "text-subtle")}>
+            {dirty ? (
+              <>
+                <span className="h-2 w-2 rounded-full bg-warn" aria-hidden="true" /> Unsaved changes
+              </>
+            ) : (
+              <>
+                <Icon name="check" size={14} className="text-profit" /> All changes saved
+              </>
+            )}
+          </span>
+          <span className="ml-auto flex items-center gap-2">
+            {costDirty && (
+              <Button variant="ghost" onClick={() => onChangeCost(order.id, order.savedProductCost)}>
+                Undo
+              </Button>
+            )}
+            {!refunded && (
+              <Button
+                variant="primary"
+                disabled={!hasChanges || disabled}
+                loading={saving}
+                onClick={() => void onSaveCost(order.id, order.productCost)}
+                icon={<Icon name="save" size={16} />}
+              >
+                Save product cost
+              </Button>
+            )}
+          </span>
+        </div>
       }
     >
       <div className="flex items-start gap-4">
@@ -394,7 +446,7 @@ export function OrderDetailsPanel({
                       if (hasChanges) void onSaveCost(order.id, order.productCost);
                     }
                   }}
-                  className="h-10"
+                  className={cn("h-10", costDirty && "border-warn/60")}
                 />
               </Field>
             </div>

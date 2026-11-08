@@ -80,7 +80,7 @@ export default function MonthlyGoal({
 
   if (goal === null || goal <= 0) {
     return (
-      <section className="flex flex-col gap-4 rounded-xl border border-dashed border-line-strong bg-surface p-5">
+      <section id="monthly-goal" className="flex scroll-mt-24 flex-col gap-4 rounded-xl border border-dashed border-line-strong bg-surface p-5">
         <div>
           <h3 className="text-sm font-semibold text-ink">Set a monthly profit goal</h3>
           <p className="mt-1 text-xs text-muted">
@@ -105,7 +105,7 @@ export default function MonthlyGoal({
   const perDayNeeded = remainingDays > 0 ? Math.max(0, goal - profit) / remainingDays : 0;
 
   return (
-    <section className="rounded-xl border border-line bg-surface p-5">
+    <section id="monthly-goal" className="scroll-mt-24 rounded-xl border border-line bg-surface p-5">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-medium text-muted">{monthName} profit goal</p>

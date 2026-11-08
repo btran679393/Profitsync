@@ -28,6 +28,7 @@ export const NAV_GROUPS: NavGroup[] = [
 export const ACCOUNT_ITEMS: NavItem[] = [
   { id: "billing", label: "Plan & billing", icon: "sparkle" },
   { id: "settings", label: "Settings", icon: "gear" },
+  { id: "help", label: "Help & guide", icon: "info" },
 ];
 
 // Marketplaces ProfitSync can connect. Only eBay is live today; the others

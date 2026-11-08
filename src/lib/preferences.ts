@@ -14,6 +14,8 @@ export type Preferences = {
   lowStockAt: number;
   // A listing with no sale for this many days counts as "not selling".
   staleAfterDays: number;
+  // The Get started checklist was hidden by the seller.
+  setupGuideHidden: boolean;
 };
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -22,6 +24,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   defaultRange: "30d",
   lowStockAt: 2,
   staleAfterDays: 60,
+  setupGuideHidden: false,
 };
 
 export const THEME_STORAGE_KEY = "profitsync:theme";
@@ -45,6 +48,7 @@ export function readPreferences(meta: Record<string, unknown> | undefined): Pref
     defaultRange: pick(raw.defaultRange, ["7d", "30d", "90d", "all"] as const, d.defaultRange),
     lowStockAt: whole(raw.lowStockAt, 0, 50, d.lowStockAt),
     staleAfterDays: whole(raw.staleAfterDays, 7, 365, d.staleAfterDays),
+    setupGuideHidden: raw.setupGuideHidden === true,
   };
 }
 
