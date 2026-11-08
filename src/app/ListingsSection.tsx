@@ -250,15 +250,17 @@ function InlineAmount({
             onKeyDown={(event) => {
               if (event.key === "Escape") setEditing(false);
             }}
-            className={`w-20 rounded-lg border bg-[#0b1120] py-1 pl-5 pr-1.5 text-white outline-none focus:border-blue-500 ${valid ? "border-white/10" : "border-rose-500/60"}`}
+            className={`w-16 rounded-lg border bg-[#0b1120] py-1 pl-5 pr-1 text-white outline-none focus:border-blue-500 ${valid ? "border-white/10" : "border-rose-500/60"}`}
           />
         </div>
         <button
           type="submit"
           disabled={!valid || state === "saving"}
-          className="rounded-md bg-blue-600 px-2 py-1 font-semibold text-white transition hover:bg-blue-500 disabled:opacity-50"
+          aria-label="Save"
+          title="Save (Enter)"
+          className="rounded-md bg-blue-600 px-1.5 py-1 font-semibold text-white transition hover:bg-blue-500 disabled:opacity-50"
         >
-          {state === "saving" ? "…" : "Save"}
+          {state === "saving" ? "…" : "✓"}
         </button>
         <button type="button" onClick={() => setEditing(false)} className="text-slate-500 hover:text-slate-300" aria-label="Cancel">
           ✕
@@ -541,14 +543,14 @@ export default function ListingsSection({
     <section id="listings" className="overflow-hidden rounded-2xl border border-white/[0.07] bg-[#151d2d]">
       {/* Header */}
       <div className="border-b border-white/[0.07] px-6 py-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h3 className="text-lg font-semibold text-white">Your eBay listings</h3>
             <p className="mt-1 text-sm text-slate-500">
               Sales, revenue and profit from {RANGE_TEXT[range]}
             </p>
           </div>
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+          <div className="flex flex-wrap items-center gap-3">
           {shippingEnabled && canSetStoreShipping && <StoreShippingSetting value={storeShipping} onSave={onSaveStoreShipping} />}
           <Pills label="Time period" options={RANGES} value={range} onChange={onRangeChange} />
           <button
@@ -660,7 +662,7 @@ export default function ListingsSection({
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className="w-full min-w-[1240px]">
             <thead>
               <tr className="border-b border-white/[0.07] text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">

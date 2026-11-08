@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export type EbayStore = {
   id: string;
@@ -23,7 +23,15 @@ function StoreAvatar({ name, active }: { name: string; active: boolean }) {
         active ? "bg-blue-600 text-white" : "bg-white/[0.06] text-slate-300"
       }`}
     >
-      {name.slice(0, 2).toUpperCase()}
+      {name === "All" ? (
+        // Four squares = every store combined.
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <rect x="3" y="3" width="8" height="8" rx="1.5" /><rect x="13" y="3" width="8" height="8" rx="1.5" />
+          <rect x="3" y="13" width="8" height="8" rx="1.5" /><rect x="13" y="13" width="8" height="8" rx="1.5" />
+        </svg>
+      ) : (
+        name.slice(0, 2).toUpperCase()
+      )}
     </span>
   );
 }
@@ -44,6 +52,24 @@ export default function StoreSwitcher({
   const [open, setOpen] = useState(false);
   const [switchingId, setSwitchingId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  // Close the list when clicking anywhere else or pressing Escape.
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
 
   const active = stores.find((store) => store.active) ?? stores[0];
   const showingAll = allStores && stores.length > 1;
@@ -112,7 +138,7 @@ This deletes its orders, listings and costs from ProfitSync. Nothing changes on 
         Store
       </p>
 
-      <div className="relative">
+      <div className="relative" ref={boxRef}>
         <button
           type="button"
           onClick={() => setOpen((value) => !value)}

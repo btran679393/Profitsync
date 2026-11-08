@@ -1507,6 +1507,13 @@ export default function Home() {
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
   const [syncError, setSyncError] = useState(false);
+
+  // Success messages fade away after a few seconds; errors stay until dismissed.
+  useEffect(() => {
+    if (!syncMessage || syncError) return;
+    const id = window.setTimeout(() => setSyncMessage(""), 8000);
+    return () => window.clearTimeout(id);
+  }, [syncMessage, syncError]);
   const [loadError, setLoadError] = useState("");
 
   const [loggingOut, setLoggingOut] = useState(false);
@@ -2183,27 +2190,16 @@ export default function Home() {
 
       const found = data.found ?? 0;
       const imported = data.imported ?? 0;
-      const skipped = data.skipped ?? 0;
-
+      // Short, plain summary: only mention things that actually changed.
+      const changes = [
+        imported > 0 && `${imported} new order${imported === 1 ? "" : "s"}`,
+        (data.feesUpdated ?? 0) > 0 && `fees updated on ${data.feesUpdated}`,
+        (data.refundsUpdated ?? 0) + (data.refundedImported ?? 0) > 0 &&
+          `${(data.refundsUpdated ?? 0) + (data.refundedImported ?? 0)} refund${(data.refundsUpdated ?? 0) + (data.refundedImported ?? 0) === 1 ? "" : "s"} updated`,
+      ].filter(Boolean);
       setSyncMessage(
-        `Sync complete! Found ${found} eBay orders. ` +
-          `Imported ${imported} new orders. ` +
-          `Skipped ${skipped} existing or invalid orders.` +
-          (data.feesUpdated !== undefined
-            ? ` Updated fees on ${data.feesUpdated} orders.`
-            : "") +
-          (data.imagesImported !== undefined
-            ? ` Added ${data.imagesImported} listing images.`
-            : "") +
-          (data.imagesUpdated !== undefined
-            ? ` Updated ${data.imagesUpdated} listing images.`
-            : "") +
-          (data.refundedImported !== undefined
-            ? ` Imported ${data.refundedImported} refunded orders.`
-            : "") +
-          (data.refundsUpdated !== undefined
-            ? ` Updated refunds on ${data.refundsUpdated} existing orders.`
-            : "")
+        `Synced ${found} eBay order${found === 1 ? "" : "s"}` +
+          (changes.length ? ` · ${changes.join(" · ")}` : " · everything is up to date")
       );
     } catch (error) {
       console.error("Sync failed:", error);
@@ -2330,6 +2326,7 @@ export default function Home() {
     );
     const totalFees = activeOrders.reduce((sum, order) => sum + order.ebayFees + order.otherFees, 0);
     const totalLabels = activeOrders.reduce((sum, order) => sum + getShippingCost(order), 0);
+    const totalOtherFees = activeOrders.reduce((sum, order) => sum + order.otherFees, 0);
     const completedOrders = activeOrders.filter(hasRecordedCost);
     const totalProductCosts = completedOrders.reduce(
       (sum, order) => sum + Number(order.savedProductCost), 0
@@ -2347,7 +2344,7 @@ export default function Home() {
       ? (netProfit / completedRevenue) * 100 : 0;
     const pendingOrders = activeOrders.length - completedOrders.length;
     return {
-      totalRevenue, totalFees, totalLabels, totalProductCosts, netProfit, expensesTotal, refundLosses, profitMargin,
+      totalRevenue, totalFees, totalLabels, totalOtherFees, totalProductCosts, netProfit, expensesTotal, refundLosses, profitMargin,
       completedCount: completedOrders.length, pendingOrders,
       orderCount: activeOrders.length, refundedCount,
     };
@@ -2531,6 +2528,18 @@ export default function Home() {
       );
     }
 
+    // Match the Net Profit headline: refund losses and expenses count too,
+    // on the day they happened.
+    for (const order of periodOrders) {
+      const loss = getRefundLoss(order);
+      if (loss <= 0 || !order.orderDate) continue;
+      const key = localDateKey(new Date(order.refundedAt ?? order.orderDate));
+      profitByDay.set(key, (profitByDay.get(key) ?? 0) - loss);
+    }
+    for (const expense of periodExpenses) {
+      profitByDay.set(expense.spentOn, (profitByDay.get(expense.spentOn) ?? 0) - Number(expense.amount));
+    }
+
     const sortedDates = Array.from(
       profitByDay.keys()
     ).sort();
@@ -2618,7 +2627,7 @@ export default function Home() {
       points,
       hasData: true,
     };
-  }, [periodOrders, dateRange, now]);
+  }, [periodOrders, periodExpenses, dateRange, now]);
 
   // ----------------------------------------------------------
   // SELECTED ORDER
@@ -2950,7 +2959,17 @@ export default function Home() {
                   : "border-emerald-500/20 bg-emerald-500/10 text-emerald-400"
               }`}
             >
-              {syncMessage}
+              <div className="flex items-start justify-between gap-4">
+                <span>{syncMessage}</span>
+                <button
+                  type="button"
+                  onClick={() => setSyncMessage("")}
+                  aria-label="Dismiss"
+                  className="shrink-0 opacity-60 transition hover:opacity-100"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
           )}
 
@@ -2969,8 +2988,8 @@ export default function Home() {
               OVERVIEW HEADER + DATE FILTER
           ================================================= */}
 
-          <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
+          <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
+            <div className="min-w-[12rem]">
               <h3 className="text-lg font-semibold text-white">
                 {view === "orders" ? "Order history" : view === "expenses" ? "Your expenses" : "Financial Overview"}
               </h3>
@@ -2980,8 +2999,9 @@ export default function Home() {
               </p>
             </div>
 
+            <div className="flex flex-wrap items-center gap-2">
             {view === "orders" && (
-              <div className="flex flex-wrap items-center gap-2 sm:ml-auto sm:mr-3">
+              <div className="flex flex-wrap items-center gap-2">
                 {!allStores && <StoreShippingSetting value={storeShipping} onSave={saveStoreShipping} />}
                 <OrderTools
                   orders={toolOrders}
@@ -2992,7 +3012,7 @@ export default function Home() {
               </div>
             )}
 
-            <div className="relative flex items-center gap-2">
+            <div className="relative inline-flex w-fit items-center">
               <Icon
                 name="calendar"
                 size={16}
@@ -3032,6 +3052,7 @@ export default function Home() {
                 className="pointer-events-none absolute right-3 rotate-90 text-slate-500"
               />
             </div>
+            </div>
           </div>
 
           </>
@@ -3056,7 +3077,9 @@ export default function Home() {
               value={money(totals.totalFees + totals.totalLabels)}
               description={totals.totalLabels > 0
                 ? `${money(totals.totalFees)} fees · ${money(totals.totalLabels)} shipping`
-                : "Fees on non-fully-refunded orders"}
+                : totals.totalOtherFees > 0
+                  ? `Includes ${money(totals.totalOtherFees)} in ad & other eBay fees`
+                  : "Fees on non-fully-refunded orders"}
               icon="dollar"
               accent="amber"
             />
@@ -3441,7 +3464,7 @@ export default function Home() {
             {/* Table header */}
 
             <div className="border-b border-white/[0.07] px-6 py-6">
-              <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
                 <div>
                   <h3 className="text-lg font-semibold text-white">
                     Order Management
@@ -3486,7 +3509,7 @@ export default function Home() {
                         )
                       }
                       aria-label="Filter orders by status"
-                      className="w-full appearance-none rounded-xl border border-white/10 bg-[#0b1120] py-2.5 pl-4 pr-10 text-sm text-slate-300 outline-none focus:border-blue-500"
+                      className="w-full min-w-[10rem] appearance-none rounded-xl border border-white/10 bg-[#0b1120] py-2.5 pl-4 pr-10 text-sm text-slate-300 outline-none focus:border-blue-500"
                     >
                       <option value="all">
                         All Orders
@@ -3540,7 +3563,7 @@ export default function Home() {
                 Loading your eBay orders...
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="relative overflow-x-auto">
                 <table className="w-full min-w-[1200px] table-fixed">
                   <colgroup>
                     <col className="w-[36%]" />

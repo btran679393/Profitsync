@@ -117,7 +117,7 @@ export default function ExpensesSection({
         <p className="mt-1 text-xs text-slate-500">
           Costs that aren&apos;t tied to one sale. They&apos;re subtracted from your Net Profit.
         </p>
-        <form onSubmit={add} className="mt-5 grid gap-3 md:grid-cols-[150px_200px_130px_1fr_auto] md:items-end">
+        <form onSubmit={add} className="mt-5 grid gap-3 sm:grid-cols-2 sm:items-end xl:grid-cols-[150px_200px_130px_minmax(12rem,1fr)_auto]">
           <label className="text-xs text-slate-400">
             Date
             <input type="date" required value={spentOn} max={today()} onChange={(e) => setSpentOn(e.target.value)} className={`mt-1 w-full ${field}`} />
@@ -143,13 +143,13 @@ export default function ExpensesSection({
             </span>
           </label>
           <label className="text-xs text-slate-400">
-            Note (optional)
+            Note <span className="text-slate-600">(optional)</span>
             <input value={note} maxLength={200} placeholder="e.g. 100 poly mailers" onChange={(e) => setNote(e.target.value)} className={`mt-1 w-full ${field}`} />
           </label>
           <button
             type="submit"
             disabled={!amountValid || state === "saving"}
-            className="h-[42px] rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-50"
+            className="h-[42px] rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-50 sm:col-span-2 xl:col-span-1"
           >
             {state === "saving" ? "Adding…" : "Add"}
           </button>
