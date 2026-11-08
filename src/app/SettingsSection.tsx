@@ -5,16 +5,25 @@ import AccountBadge from "./AccountBadge";
 import { PLANS, type BillingStatus } from "@/lib/billing/plans";
 import type { DefaultRange, Preferences, StartPage, ThemeChoice } from "@/lib/preferences";
 
-const card = "rounded-2xl border border-white/[0.07] bg-[#151d2d] p-6";
+// Settings sections (the menu on the left on wide screens).
+const SECTIONS: ReadonlyArray<readonly [string, string]> = [
+  ["settings-appearance", "Appearance"],
+  ["settings-dashboard", "Dashboard"],
+  ["settings-alerts", "Listing alerts"],
+  ["settings-account", "Account"],
+  ["settings-danger", "Delete account"],
+];
+
+const card = "rounded-xl border border-line bg-surface p-6";
 const field =
-  "rounded-xl border border-white/10 bg-[#0b1120] px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500";
+  "rounded-xl border border-line-strong bg-surface-2 px-3 py-2.5 text-sm text-ink outline-none transition focus:border-accent";
 
 function Row({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
-        <p className="text-sm font-medium text-white">{title}</p>
-        {hint && <p className="mt-0.5 text-xs text-slate-500">{hint}</p>}
+        <p className="text-sm font-medium text-ink">{title}</p>
+        {hint && <p className="mt-0.5 text-xs text-subtle">{hint}</p>}
       </div>
       <div className="shrink-0">{children}</div>
     </div>
@@ -99,15 +108,31 @@ export default function SettingsSection({
   const planName = billing?.enabled ? PLANS[billing.plan].name : "Early access";
 
   return (
-    <div className="space-y-6">
+    <div className="lg:grid lg:grid-cols-[11rem_minmax(0,1fr)] lg:gap-8">
+      <nav aria-label="Settings sections" className="hidden lg:block">
+        <ul className="sticky top-20 space-y-0.5">
+          {SECTIONS.map(([id, label]) => (
+            <li key={id}>
+              <button
+                type="button"
+                onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                className="w-full rounded-lg px-3 py-2 text-left text-sm font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink"
+              >
+                {label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </nav>
+    <div className="min-w-0 space-y-6">
       {/* "Saved" / error pop-up in the corner */}
       <div aria-live="polite" className="pointer-events-none fixed bottom-6 right-6 z-50">
         {(saved || error) && (
           <div
             className={`ps-fade-up rounded-xl border px-4 py-3 text-sm font-medium shadow-2xl shadow-black/40 ${
               error
-                ? "border-rose-500/30 bg-[#151d2d] text-rose-400"
-                : "border-emerald-500/30 bg-[#151d2d] text-emerald-400"
+                ? "border-loss/30 bg-surface text-loss"
+                : "border-profit/30 bg-surface text-profit"
             }`}
           >
             {error || `✓ ${saved}`}
@@ -116,9 +141,9 @@ export default function SettingsSection({
       </div>
 
       {/* Appearance */}
-      <section className={card}>
-        <h3 className="text-base font-semibold text-white">Appearance</h3>
-        <p className="mt-1 text-xs text-slate-500">Choose how ProfitSync looks. Saved to your account for every device.</p>
+      <section id="settings-appearance" className={`${card} scroll-mt-24`}>
+        <h3 className="text-base font-semibold text-ink">Appearance</h3>
+        <p className="mt-1 text-xs text-subtle">Choose how ProfitSync looks. Saved to your account for every device.</p>
         <div role="radiogroup" aria-label="Theme" className="mt-5 grid gap-3 sm:grid-cols-3">
           {THEMES.map((theme) => {
             const active = preferences.theme === theme.id;
@@ -130,13 +155,13 @@ export default function SettingsSection({
                 aria-checked={active}
                 onClick={() => void save({ theme: theme.id }, "Theme saved")}
                 className={`flex items-center gap-3 rounded-xl border p-3 text-left transition ${
-                  active ? "border-blue-500 bg-blue-500/10" : "border-white/10 hover:border-white/20"
+                  active ? "border-accent bg-accent-soft" : "border-line-strong hover:border-line-strong"
                 }`}
               >
-                <span className="h-10 w-14 shrink-0 rounded-lg border border-white/15" style={{ background: theme.swatch }} aria-hidden="true" />
-                <span className="text-sm font-medium text-white">{theme.label}</span>
+                <span className="h-10 w-14 shrink-0 rounded-lg border border-line-strong" style={{ background: theme.swatch }} aria-hidden="true" />
+                <span className="text-sm font-medium text-ink">{theme.label}</span>
                 {active && (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="ml-auto" aria-hidden="true">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="ml-auto text-accent-ink" aria-hidden="true">
                     <path d="M5 12l4 4L19 6" />
                   </svg>
                 )}
@@ -147,10 +172,10 @@ export default function SettingsSection({
       </section>
 
       {/* Dashboard */}
-      <section className={card}>
-        <h3 className="text-base font-semibold text-white">Dashboard</h3>
-        <p className="mt-1 text-xs text-slate-500">What you see when you open ProfitSync.</p>
-        <div className="mt-5 divide-y divide-white/[0.05]">
+      <section id="settings-dashboard" className={`${card} scroll-mt-24`}>
+        <h3 className="text-base font-semibold text-ink">Dashboard</h3>
+        <p className="mt-1 text-xs text-subtle">What you see when you open ProfitSync.</p>
+        <div className="mt-5 divide-y divide-line">
           <Row title="Start page" hint="The page that opens first.">
             <select
               value={preferences.startPage}
@@ -181,12 +206,12 @@ export default function SettingsSection({
       </section>
 
       {/* Listing alerts */}
-      <section className={card}>
-        <h3 className="text-base font-semibold text-white">Listing alerts</h3>
-        <p className="mt-1 text-xs text-slate-500">When the Listings page flags a listing for you.</p>
-        <div className="mt-5 divide-y divide-white/[0.05]">
+      <section id="settings-alerts" className={`${card} scroll-mt-24`}>
+        <h3 className="text-base font-semibold text-ink">Listing alerts</h3>
+        <p className="mt-1 text-xs text-subtle">When the Listings page flags a listing for you.</p>
+        <div className="mt-5 divide-y divide-line">
           <Row title="Running low" hint="Flag a listing that has sold before when this many or fewer are left.">
-            <label className="flex items-center gap-2 text-sm text-slate-400">
+            <label className="flex items-center gap-2 text-sm text-muted">
               <input
                 inputMode="numeric"
                 value={lowStock}
@@ -200,7 +225,7 @@ export default function SettingsSection({
             </label>
           </Row>
           <Row title="Not selling" hint="Flag a listing with no sale for this many days.">
-            <label className="flex items-center gap-2 text-sm text-slate-400">
+            <label className="flex items-center gap-2 text-sm text-muted">
               <input
                 inputMode="numeric"
                 value={staleDays}
@@ -217,19 +242,19 @@ export default function SettingsSection({
       </section>
 
       {/* Account */}
-      <section className={card}>
-        <h3 className="text-base font-semibold text-white">Account</h3>
-        <div className="mt-5 max-w-md">
+      <section id="settings-account" className={`${card} scroll-mt-24`}>
+        <h3 className="text-base font-semibold text-ink">Account</h3>
+        <div className="mb-2 mt-5 max-w-md">
           <AccountBadge />
         </div>
-        <div className="divide-y divide-white/[0.05]">
+        <div className="divide-y divide-line">
           <Row title="Plan" hint={`${planName} · ${storeCount} eBay store${storeCount === 1 ? "" : "s"} connected`}>
-            <button type="button" onClick={onOpenPlans} className={`${field} font-semibold hover:border-blue-500/40`}>
+            <button type="button" onClick={onOpenPlans} className={`${field} font-semibold hover:border-accent/40`}>
               Plan &amp; billing
             </button>
           </Row>
           <Row title="Sign out" hint="Sign out of ProfitSync on this device.">
-            <button type="button" onClick={onSignOut} className={`${field} font-semibold hover:border-blue-500/40`}>
+            <button type="button" onClick={onSignOut} className={`${field} font-semibold hover:border-accent/40`}>
               Sign out
             </button>
           </Row>
@@ -237,9 +262,9 @@ export default function SettingsSection({
       </section>
 
       {/* Danger zone */}
-      <section className="rounded-2xl border border-rose-500/25 bg-rose-500/[0.04] p-6">
-        <h3 className="text-base font-semibold text-white">Delete account</h3>
-        <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-400">
+      <section id="settings-danger" className="scroll-mt-24 rounded-xl border border-loss/30 bg-loss-soft p-6">
+        <h3 className="text-base font-semibold text-ink">Delete account</h3>
+        <p className="mt-1 max-w-2xl text-xs leading-5 text-muted">
           Permanently deletes your ProfitSync account and everything in it: orders, listings, costs, expenses and eBay
           connections. A paid plan is cancelled. Nothing changes on eBay. This can&apos;t be undone.
         </p>
@@ -247,7 +272,7 @@ export default function SettingsSection({
           <button
             type="button"
             onClick={() => setDeleteOpen(true)}
-            className="mt-4 rounded-xl border border-rose-500/40 px-4 py-2 text-sm font-semibold text-rose-400 transition hover:bg-rose-500/10"
+            className="mt-4 rounded-xl border border-loss/40 px-4 py-2 text-sm font-semibold text-loss transition hover:bg-loss-soft"
           >
             Delete my account…
           </button>
@@ -265,7 +290,7 @@ export default function SettingsSection({
               type="button"
               disabled={deleteText.trim() !== "DELETE" || deleting}
               onClick={() => void deleteAccount()}
-              className="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-500 disabled:opacity-40"
+              className="rounded-xl bg-loss px-4 py-2.5 text-sm font-semibold text-on-accent transition hover:opacity-90 disabled:opacity-40"
             >
               {deleting ? "Deleting…" : "Permanently delete"}
             </button>
@@ -275,13 +300,14 @@ export default function SettingsSection({
                 setDeleteOpen(false);
                 setDeleteText("");
               }}
-              className="px-2 text-sm text-slate-400 hover:text-white"
+              className="px-2 text-sm text-muted hover:text-ink"
             >
               Cancel
             </button>
           </div>
         )}
       </section>
+    </div>
     </div>
   );
 }

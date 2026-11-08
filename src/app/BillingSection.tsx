@@ -34,7 +34,7 @@ async function postJson(url: string, body?: unknown) {
 
 function Check() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0 text-emerald-400" aria-hidden="true">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0 text-profit" aria-hidden="true">
       <path d="M5 12l4 4L19 6" />
     </svg>
   );
@@ -58,14 +58,14 @@ function UsageBar({
   return (
     <div>
       <div className="flex items-baseline justify-between text-xs">
-        <span className="text-slate-400">{label}</span>
-        <span className={full ? "font-semibold text-amber-300" : "text-slate-300"}>
+        <span className="text-muted">{label}</span>
+        <span className={full ? "font-semibold text-warn" : "text-ink-2"}>
           {used} {limit === null ? "· unlimited" : `of ${limit}${over}`}
         </span>
       </div>
       {limit !== null && (
-        <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-white/[0.06]">
-          <div className={`h-full rounded-full ${full ? "bg-amber-400" : "bg-blue-500"}`} style={{ width: `${share * 100}%` }} />
+        <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-surface-2">
+          <div className={`h-full rounded-full ${full ? "bg-warn" : "bg-accent"}`} style={{ width: `${share * 100}%` }} />
         </div>
       )}
     </div>
@@ -91,7 +91,7 @@ export default function BillingSection({
   const confirm = useConfirm();
 
   if (loading && !billing) {
-    return <div className="h-64 animate-pulse rounded-2xl bg-white/[0.04]" />;
+    return <div className="h-64 animate-pulse rounded-xl bg-surface-2" />;
   }
 
   const plan: PlanId = billing?.enabled ? billing.plan : "free";
@@ -156,47 +156,47 @@ export default function BillingSection({
   return (
     <div className="space-y-6">
       {(notice || message) && (
-        <div role="status" className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-5 py-4 text-sm text-emerald-300">
+        <div role="status" className="rounded-xl border border-profit/30 bg-profit-soft px-5 py-4 text-sm text-profit">
           {message || notice}
         </div>
       )}
       {error && (
-        <div role="alert" className="rounded-xl border border-red-500/20 bg-red-500/10 px-5 py-4 text-sm text-red-400">
+        <div role="alert" className="rounded-xl border border-loss/30 bg-loss-soft px-5 py-4 text-sm text-loss">
           {error}
         </div>
       )}
 
       {/* Current plan + usage */}
-      <section className="grid gap-6 rounded-2xl border border-white/[0.07] bg-[#151d2d] p-6 lg:grid-cols-[1fr_minmax(16rem,22rem)]">
+      <section className="grid gap-6 rounded-xl border border-line bg-surface p-6 lg:grid-cols-[1fr_minmax(16rem,22rem)]">
         <div>
-          <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">Your plan</p>
+          <p className="text-xs font-medium uppercase tracking-[0.16em] text-subtle">Your plan</p>
           <div className="mt-2 flex flex-wrap items-center gap-3">
-            <h3 className="text-2xl font-bold text-white">{enabled ? PLANS[plan].name : "Early access"}</h3>
+            <h3 className="text-2xl font-bold text-ink">{enabled ? PLANS[plan].name : "Early access"}</h3>
             {paying && billing?.interval && (
-              <span className="rounded-full bg-blue-500/15 px-3 py-1 text-xs font-semibold text-blue-300">
+              <span className="rounded-full bg-accent-soft px-3 py-1 text-xs font-semibold text-accent-ink">
                 {billing.interval === "year" ? "Yearly" : "Monthly"}
               </span>
             )}
             {billing?.status === "past_due" && (
-              <span className="rounded-full bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-300">Payment due</span>
+              <span className="rounded-full bg-warn-soft px-3 py-1 text-xs font-semibold text-warn">Payment due</span>
             )}
           </div>
-          <p className="mt-2 max-w-xl text-sm text-slate-400">{statusLine}</p>
+          <p className="mt-2 max-w-xl text-sm text-muted">{statusLine}</p>
           {paying && (
             <button
               type="button"
               onClick={() => void openPortal()}
               disabled={busy !== null}
-              className="mt-4 rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-blue-500/40 hover:text-white disabled:opacity-50"
+              className="mt-4 rounded-xl border border-line-strong px-4 py-2 text-sm font-semibold text-ink transition hover:border-accent/40 hover:text-ink disabled:opacity-50"
             >
               {busy === "portal" ? "Opening…" : "Manage billing, invoices or cancel"}
             </button>
           )}
         </div>
-        <div className="space-y-4 rounded-xl bg-white/[0.03] p-4">
+        <div className="space-y-4 rounded-xl bg-surface-2 p-4">
           <UsageBar label="eBay stores" used={billing?.usage.stores ?? 0} limit={enabled ? limits.maxStores : null} overLabel="locked" />
           <UsageBar label="Orders imported this month" used={billing?.usage.ordersThisMonth ?? 0} limit={enabled ? limits.monthlyOrders : null} />
-          <p className="text-[11px] text-slate-500">
+          <p className="text-[11px] text-subtle">
             Order history: last {enabled && limits.historyDays < 365 ? `${limits.historyDays} days` : "12 months"}
           </p>
         </div>
@@ -204,7 +204,7 @@ export default function BillingSection({
 
       {/* Monthly / yearly */}
       <div className="flex flex-col items-center gap-2">
-        <div role="radiogroup" aria-label="Billing period" className="inline-flex rounded-xl border border-white/10 bg-[#0b1120] p-1">
+        <div role="radiogroup" aria-label="Billing period" className="inline-flex rounded-xl border border-line-strong bg-surface-2 p-1">
           {(["month", "year"] as const).map((value) => (
             <button
               key={value}
@@ -213,14 +213,14 @@ export default function BillingSection({
               aria-checked={interval === value}
               onClick={() => setBillingInterval(value)}
               className={`rounded-lg px-5 py-2 text-sm font-semibold transition ${
-                interval === value ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"
+                interval === value ? "bg-accent text-on-accent" : "text-muted hover:text-ink"
               }`}
             >
               {value === "month" ? "Monthly" : "Yearly"}
             </button>
           ))}
         </div>
-        <p className="text-xs text-emerald-400">
+        <p className="text-xs text-profit">
           Yearly saves up to {dollars(yearlySavingsCents("ultimate"))} a year
         </p>
       </div>
@@ -238,22 +238,22 @@ export default function BillingSection({
 
           let action: React.ReactNode;
           if (!enabled) {
-            action = <span className="block py-2.5 text-center text-sm text-slate-500">Coming soon</span>;
+            action = <span className="block py-2.5 text-center text-sm text-subtle">Coming soon</span>;
           } else if (isCurrent) {
             action = (
-              <span className="block rounded-xl border border-white/10 py-2.5 text-center text-sm font-semibold text-slate-400">
+              <span className="block rounded-xl border border-line-strong py-2.5 text-center text-sm font-semibold text-muted">
                 Current plan
               </span>
             );
           } else if (comped) {
-            action = <span className="block py-2.5 text-center text-sm text-slate-500">Included on your account</span>;
+            action = <span className="block py-2.5 text-center text-sm text-subtle">Included on your account</span>;
           } else if (id === "free") {
             action = (
               <button
                 type="button"
                 onClick={() => void openPortal()}
                 disabled={busy !== null}
-                className="w-full rounded-xl border border-white/10 py-2.5 text-sm font-semibold text-slate-300 transition hover:text-white disabled:opacity-50"
+                className="w-full rounded-xl border border-line-strong py-2.5 text-sm font-semibold text-ink-2 transition hover:text-ink disabled:opacity-50"
               >
                 Cancel paid plan
               </button>
@@ -266,8 +266,8 @@ export default function BillingSection({
                 disabled={busy !== null}
                 className={`w-full rounded-xl py-2.5 text-sm font-semibold transition disabled:opacity-50 ${
                   featured || higher
-                    ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20 hover:bg-blue-500"
-                    : "border border-white/10 text-slate-200 hover:border-blue-500/40"
+                    ? "bg-accent text-on-accent shadow-lg shadow-accent/20 hover:bg-accent-hover"
+                    : "border border-line-strong text-ink hover:border-accent/40"
                 }`}
               >
                 {working
@@ -285,26 +285,26 @@ export default function BillingSection({
             <section
               key={id}
               className={`relative flex flex-col rounded-2xl border p-6 ${
-                featured ? "border-blue-500/40 bg-gradient-to-b from-blue-500/[0.08] to-[#151d2d]" : "border-white/[0.07] bg-[#151d2d]"
+                featured ? "border-accent/40 bg-gradient-to-b from-accent-soft to-surface" : "border-line bg-surface"
               }`}
             >
               {featured && (
-                <span className="absolute -top-3 left-6 rounded-full bg-blue-600 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-white">
+                <span className="absolute -top-3 left-6 rounded-full bg-accent px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-on-accent">
                   Most popular
                 </span>
               )}
-              <h4 className="text-lg font-semibold text-white">{info.name}</h4>
-              <p className="mt-1 text-xs text-slate-500">{info.tagline}</p>
+              <h4 className="text-lg font-semibold text-ink">{info.name}</h4>
+              <p className="mt-1 text-xs text-subtle">{info.tagline}</p>
               <p className="mt-5 flex items-baseline gap-1 whitespace-nowrap">
-                <span className="text-3xl font-bold tracking-tight text-white 2xl:text-4xl">{id === "free" ? "$0" : dollars(cents)}</span>
-                <span className="text-sm text-slate-500">{id === "free" ? "forever" : interval === "year" ? "/ year" : "/ month"}</span>
+                <span className="text-3xl font-bold tracking-tight text-ink 2xl:text-4xl">{id === "free" ? "$0" : dollars(cents)}</span>
+                <span className="text-sm text-subtle">{id === "free" ? "forever" : interval === "year" ? "/ year" : "/ month"}</span>
               </p>
-              <p className="mt-1 h-4 text-xs text-emerald-400">
+              <p className="mt-1 h-4 text-xs text-profit">
                 {id !== "free" && interval === "year"
                   ? `${dollars(Math.round(info.yearlyCents / 12))}/month · save ${dollars(yearlySavingsCents(id as PaidPlanId))}`
                   : ""}
               </p>
-              <ul className="mt-5 flex-1 space-y-2.5 text-sm text-slate-300">
+              <ul className="mt-5 flex-1 space-y-2.5 text-sm text-ink-2">
                 {info.features.map((feature) => (
                   <li key={feature} className="flex gap-2.5">
                     <Check />
@@ -318,7 +318,7 @@ export default function BillingSection({
         })}
       </div>
 
-      <p className="text-center text-xs text-slate-500">
+      <p className="text-center text-xs text-subtle">
         Prices in US dollars. Cancel any time and keep your plan until the end of the period you paid for. Payments
         are handled securely by Stripe; ProfitSync never sees your card number.
       </p>
