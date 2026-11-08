@@ -1,28 +1,150 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ============================================================
+   ProfitSync design tokens
+   One set of named colours, defined for dark and for light.
+   Components use the Tailwind names below (bg-surface, text-ink,
+   border-line, bg-accent, text-profit, …) and never raw hex, so
+   both themes come for free. data-theme is set on <html> before
+   the first paint (layout.tsx) and by Settings → Appearance.
+============================================================ */
+
+:root,
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --ps-bg: #0a0e17;          /* page */
+  --ps-surface: #111725;     /* cards, sidebar */
+  --ps-surface-2: #161e2f;   /* inputs, table headers, hover */
+  --ps-elevated: #1b2438;    /* menus, popovers, dialogs */
+  --ps-line: rgb(148 163 184 / 0.12);
+  --ps-line-strong: rgb(148 163 184 / 0.22);
+  --ps-ink: #f1f5f9;         /* headings, key numbers */
+  --ps-ink-2: #cbd5e1;       /* body text */
+  --ps-muted: #94a3b8;       /* secondary text */
+  --ps-subtle: #64748b;      /* hints, captions */
+  --ps-accent: #6d6af6;      /* ProfitSync indigo */
+  --ps-accent-hover: #8582f8;
+  --ps-accent-soft: rgb(109 106 246 / 0.15);
+  --ps-accent-ink: #b4b2fc;  /* accent-coloured text */
+  --ps-profit: #34d399;
+  --ps-profit-soft: rgb(52 211 153 / 0.12);
+  --ps-loss: #fb7185;
+  --ps-loss-soft: rgb(251 113 133 / 0.12);
+  --ps-warn: #fbbf24;
+  --ps-warn-soft: rgb(251 191 36 / 0.12);
+  --ps-overlay: rgb(2 6 15 / 0.66);
+  --ps-ring: rgb(129 126 249 / 0.6);
+  --ps-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.25);
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+  --ps-bg: #f6f6f3;
+  --ps-surface: #ffffff;
+  --ps-surface-2: #f3f3f0;
+  --ps-elevated: #ffffff;
+  --ps-line: rgb(24 24 27 / 0.09);
+  --ps-line-strong: rgb(24 24 27 / 0.17);
+  --ps-ink: #17171c;
+  --ps-ink-2: #3a3a44;
+  --ps-muted: #63636f;
+  --ps-subtle: #8e8e99;
+  --ps-accent: #5b57e8;
+  --ps-accent-hover: #4a46d6;
+  --ps-accent-soft: rgb(91 87 232 / 0.1);
+  --ps-accent-ink: #4741d1;
+  --ps-profit: #047857;
+  --ps-profit-soft: rgb(5 150 105 / 0.1);
+  --ps-loss: #be123c;
+  --ps-loss-soft: rgb(225 29 72 / 0.08);
+  --ps-warn: #b45309;
+  --ps-warn-soft: rgb(217 119 6 / 0.1);
+  --ps-overlay: rgb(24 24 27 / 0.35);
+  --ps-ring: rgb(91 87 232 / 0.45);
+  --ps-shadow: 0 1px 2px rgb(24 24 27 / 0.06), 0 8px 24px rgb(24 24 27 / 0.08);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-bg: var(--ps-bg);
+  --color-surface: var(--ps-surface);
+  --color-surface-2: var(--ps-surface-2);
+  --color-elevated: var(--ps-elevated);
+  --color-line: var(--ps-line);
+  --color-line-strong: var(--ps-line-strong);
+  --color-ink: var(--ps-ink);
+  --color-ink-2: var(--ps-ink-2);
+  --color-muted: var(--ps-muted);
+  --color-subtle: var(--ps-subtle);
+  --color-accent: var(--ps-accent);
+  --color-accent-hover: var(--ps-accent-hover);
+  --color-accent-soft: var(--ps-accent-soft);
+  --color-accent-ink: var(--ps-accent-ink);
+  --color-on-accent: #ffffff;
+  --color-profit: var(--ps-profit);
+  --color-profit-soft: var(--ps-profit-soft);
+  --color-loss: var(--ps-loss);
+  --color-loss-soft: var(--ps-loss-soft);
+  --color-warn: var(--ps-warn);
+  --color-warn-soft: var(--ps-warn-soft);
+  --color-overlay: var(--ps-overlay);
+
+  --shadow-pop: var(--ps-shadow);
+
+  --animate-ps-in: ps-in 160ms ease-out;
+  --animate-ps-drawer: ps-drawer 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--ps-bg);
+  color: var(--ps-ink-2);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "cv11", "ss01";
+}
+
+/* Keyboard focus: one clear ring everywhere (mouse clicks don't show it). */
+:focus-visible {
+  outline: 2px solid var(--ps-ring);
+  outline-offset: 2px;
+}
+
+@keyframes ps-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.99); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes ps-drawer {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes ps-shimmer {
+  from { background-position: -200% 0; }
+  to { background-position: 200% 0; }
+}
+
+.ps-skeleton {
+  background: linear-gradient(90deg, var(--ps-surface-2) 25%, var(--ps-line-strong) 50%, var(--ps-surface-2) 75%);
+  background-size: 200% 100%;
+  animation: ps-shimmer 1.6s linear infinite;
+}
+
+/* Money and counts line up in columns. */
+.ps-num {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* ------------------------------------------------------------
