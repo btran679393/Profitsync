@@ -21,10 +21,10 @@ html[data-theme="dark"] {
   --ps-ink: #f1f5f9;         /* headings, key numbers */
   --ps-ink-2: #cbd5e1;       /* body text */
   --ps-muted: #94a3b8;       /* secondary text */
-  --ps-subtle: #64748b;      /* hints, captions */
-  --ps-accent: #6d6af6;      /* ProfitSync indigo */
-  --ps-accent-hover: #8582f8;
-  --ps-accent-soft: rgb(109 106 246 / 0.15);
+  --ps-subtle: #7d8ba1;      /* hints, captions (4.5:1 on cards) */
+  --ps-accent: #5f5bf1;      /* ProfitSync indigo (white text 5:1) */
+  --ps-accent-hover: #716df4;
+  --ps-accent-soft: rgb(109 106 246 / 0.16);
   --ps-accent-ink: #b4b2fc;  /* accent-coloured text */
   --ps-profit: #34d399;
   --ps-profit-soft: rgb(52 211 153 / 0.12);
@@ -47,8 +47,8 @@ html[data-theme="light"] {
   --ps-line-strong: rgb(24 24 27 / 0.17);
   --ps-ink: #17171c;
   --ps-ink-2: #3a3a44;
-  --ps-muted: #63636f;
-  --ps-subtle: #8e8e99;
+  --ps-muted: #52525c;
+  --ps-subtle: #6b6b76;
   --ps-accent: #5b57e8;
   --ps-accent-hover: #4a46d6;
   --ps-accent-soft: rgb(91 87 232 / 0.1);
@@ -277,108 +277,6 @@ body {
   }
 }
 
-/* ------------------------------------------------------------
-   Light / dark theme for the dashboard (.ps-app).
-   The dashboard is designed dark; in light mode these rules swap its
-   colours for light ones. data-theme is set on <html> by layout.tsx
-   (before the first paint) and by Settings → Appearance.
-   [class~="…"] matches one exact utility class.
------------------------------------------------------------- */
-
-html[data-theme="dark"] .ps-app {
-  color-scheme: dark;
-}
-
-html[data-theme="light"] .ps-app {
-  color-scheme: light;
-  --ps-strong: #0f172a;
-  --ps-line: rgb(15 23 42 / 0.1);
-  --ps-line-soft: rgb(15 23 42 / 0.07);
-}
-
-/* Surfaces */
-html[data-theme="light"] .ps-app[class~="bg-[#0b1120]"],
-html[data-theme="light"] .ps-app [class~="bg-[#0b1120]"] { background-color: #f3f5f9; }
-html[data-theme="light"] .ps-app [class~="bg-[#151d2d]"] { background-color: #ffffff; }
-html[data-theme="light"] .ps-app [class~="bg-[#101827]"] { background-color: #ffffff; }
-html[data-theme="light"] .ps-app [class~="bg-[#101827]/50"] { background-color: rgb(255 255 255 / 0.6); }
-html[data-theme="light"] .ps-app [class~="bg-[#111827]"] { background-color: #f8fafc; }
-html[data-theme="light"] .ps-app [class~="bg-[#0f172a]/95"] { background-color: rgb(255 255 255 / 0.97); }
-html[data-theme="light"] .ps-app [class~="to-[#151d2d]"] { --tw-gradient-to: #ffffff; }
-html[data-theme="light"] .ps-app [class~="from-[#152b2b]"] { --tw-gradient-from: #ecfdf5; }
-html[data-theme="light"] .ps-app [class~="bg-slate-800"] { background-color: #e2e8f0; }
-
-/* Faint white overlays become faint dark ones */
-html[data-theme="light"] .ps-app [class~="bg-white/[0.02]"],
-html[data-theme="light"] .ps-app [class~="bg-white/[0.025]"],
-html[data-theme="light"] .ps-app [class~="bg-white/[0.03]"] { background-color: rgb(15 23 42 / 0.03); }
-html[data-theme="light"] .ps-app [class~="bg-white/[0.04]"],
-html[data-theme="light"] .ps-app [class~="bg-white/[0.05]"],
-html[data-theme="light"] .ps-app [class~="bg-white/5"] { background-color: rgb(15 23 42 / 0.045); }
-html[data-theme="light"] .ps-app [class~="bg-white/[0.06]"],
-html[data-theme="light"] .ps-app [class~="bg-white/[0.08]"] { background-color: rgb(15 23 42 / 0.07); }
-html[data-theme="light"] .ps-app [class~="bg-white/20"],
-html[data-theme="light"] .ps-app [class~="bg-white/40"] { background-color: rgb(15 23 42 / 0.3); }
-html[data-theme="light"] .ps-app [class~="hover:bg-white/5"]:hover,
-html[data-theme="light"] .ps-app [class~="hover:bg-white/[0.025]"]:hover,
-html[data-theme="light"] .ps-app [class~="hover:bg-white/[0.03]"]:hover,
-html[data-theme="light"] .ps-app [class~="hover:bg-white/[0.05]"]:hover,
-html[data-theme="light"] .ps-app [class~="hover:bg-white/[0.08]"]:hover { background-color: rgb(15 23 42 / 0.05); }
-
-/* Borders and dividers */
-html[data-theme="light"] .ps-app [class~="border-white/10"],
-html[data-theme="light"] .ps-app [class~="border-white/15"],
-html[data-theme="light"] .ps-app [class~="border-white/[0.08]"] { border-color: var(--ps-line); }
-html[data-theme="light"] .ps-app [class~="border-white/[0.07]"],
-html[data-theme="light"] .ps-app [class~="border-white/[0.06]"] { border-color: var(--ps-line-soft); }
-html[data-theme="light"] .ps-app [class~="hover:border-white/20"]:hover { border-color: rgb(15 23 42 / 0.2); }
-html[data-theme="light"] .ps-app [class~="divide-white/[0.05]"] > *,
-html[data-theme="light"] .ps-app [class~="divide-white/[0.06]"] > * { border-color: var(--ps-line-soft); }
-html[data-theme="light"] .ps-app [class~="ring-white/10"] { --tw-ring-color: var(--ps-line); }
-
-/* Text (white text on solid coloured buttons and badges stays white) */
-html[data-theme="light"] .ps-app [class~="text-white"]:not([class*="bg-blue-5"]):not([class*="bg-blue-6"]):not([class*="bg-emerald-5"]):not([class*="bg-emerald-6"]):not([class*="bg-rose-5"]):not([class*="bg-rose-6"]):not([class*="bg-red-5"]):not([class*="bg-red-6"]):not([class*="bg-amber-5"]):not([class*="bg-violet-6"]),
-html[data-theme="light"] .ps-app [class~="text-slate-100"] { color: var(--ps-strong); }
-html[data-theme="light"] .ps-app [class~="text-slate-200"] { color: #1e293b; }
-html[data-theme="light"] .ps-app [class~="text-slate-300"] { color: #334155; }
-html[data-theme="light"] .ps-app [class~="text-slate-400"] { color: #475569; }
-html[data-theme="light"] .ps-app [class~="text-slate-500"] { color: #64748b; }
-html[data-theme="light"] .ps-app [class~="text-slate-600"] { color: #94a3b8; }
-html[data-theme="light"] .ps-app [class~="hover:text-white"]:hover:not([class*="bg-blue-5"]):not([class*="bg-blue-6"]),
-html[data-theme="light"] .ps-app [class~="hover:text-slate-200"]:hover,
-html[data-theme="light"] .ps-app [class~="hover:text-slate-300"]:hover { color: var(--ps-strong); }
-html[data-theme="light"] .ps-app [class~="placeholder:text-slate-500"]::placeholder,
-html[data-theme="light"] .ps-app [class~="placeholder:text-slate-600"]::placeholder { color: #94a3b8; }
-
-/* Coloured text: deeper shades so it reads on white */
-html[data-theme="light"] .ps-app [class~="text-emerald-300"],
-html[data-theme="light"] .ps-app [class~="text-emerald-400"] { color: #047857; }
-html[data-theme="light"] .ps-app [class~="text-rose-300"],
-html[data-theme="light"] .ps-app [class~="text-rose-400"],
-html[data-theme="light"] .ps-app [class~="hover:text-rose-400"]:hover { color: #be123c; }
-html[data-theme="light"] .ps-app [class~="text-red-400"],
-html[data-theme="light"] .ps-app [class~="hover:text-red-400"]:hover { color: #dc2626; }
-html[data-theme="light"] .ps-app [class~="text-amber-100"],
-html[data-theme="light"] .ps-app [class~="text-amber-200"],
-html[data-theme="light"] .ps-app [class~="text-amber-300"],
-html[data-theme="light"] .ps-app [class~="text-amber-400"],
-html[data-theme="light"] .ps-app [class~="hover:text-amber-300"]:hover { color: #b45309; }
-html[data-theme="light"] .ps-app [class~="text-blue-200"],
-html[data-theme="light"] .ps-app [class~="text-blue-300"],
-html[data-theme="light"] .ps-app [class~="text-blue-400"],
-html[data-theme="light"] .ps-app [class~="hover:text-blue-300"]:hover,
-html[data-theme="light"] .ps-app [class~="hover:text-blue-400"]:hover { color: #1d4ed8; }
-html[data-theme="light"] .ps-app [class~="text-orange-400"] { color: #c2410c; }
-html[data-theme="light"] .ps-app [class~="text-violet-300"],
-html[data-theme="light"] .ps-app [class~="text-violet-400"] { color: #6d28d9; }
-
-/* Chart lines drawn for a dark background */
-html[data-theme="light"] .ps-app svg [stroke="#ffffff"] { stroke: #0f172a; }
-html[data-theme="light"] .ps-app svg [stroke="#151d2d"] { stroke: #ffffff; }
-
-/* Softer shadows in light mode */
-html[data-theme="light"] .ps-app [class~="shadow-black/40"],
-html[data-theme="light"] .ps-app [class~="shadow-black/50"] { --tw-shadow-color: rgb(15 23 42 / 0.15); }
 
 /* ------------------------------------------------------------
    App shell: sidebar width and collapse (desktop only; on phones the

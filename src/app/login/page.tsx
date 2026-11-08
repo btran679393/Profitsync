@@ -89,7 +89,7 @@ function Spinner({ className = "" }: { className?: string }) {
 function Logo() {
   return (
     <div className="flex items-center gap-2.5">
-      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-blue-700 text-white shadow-md shadow-blue-600/25">
+      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 text-white shadow-md shadow-indigo-600/25">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M3 17l6-6 4 4 8-9" />
           <path d="M15 6h6v6" />
@@ -101,7 +101,7 @@ function Logo() {
 }
 
 const INPUT =
-  "h-12 w-full rounded-xl border border-slate-200 bg-white pl-11 pr-4 text-[15px] text-slate-900 shadow-sm shadow-slate-900/[0.03] outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10";
+  "h-12 w-full rounded-xl border border-slate-200 bg-white pl-11 pr-4 text-[15px] text-slate-900 shadow-sm shadow-slate-900/[0.03] outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10";
 
 function Field({ label, icon, aside, children }: { label: string; icon: "mail" | "lock"; aside?: ReactNode; children: ReactNode }) {
   return (
@@ -305,7 +305,7 @@ export default function LoginPage() {
             <button
               type="button"
               onClick={() => switchMode(mode === "signup" ? "signin" : "signup")}
-              className="font-semibold text-blue-600 transition hover:text-blue-700"
+              className="font-semibold text-indigo-600 transition hover:text-indigo-700"
             >
               {mode === "signup" ? "Sign in" : "Create account"}
             </button>
@@ -400,7 +400,7 @@ export default function LoginPage() {
                     icon="lock"
                     aside={
                       mode === "signin" && (
-                        <button type="button" onClick={() => switchMode("forgot")} className="text-sm font-semibold text-blue-600 transition hover:text-blue-700">
+                        <button type="button" onClick={() => switchMode("forgot")} className="text-sm font-semibold text-indigo-600 transition hover:text-indigo-700">
                           Forgot password?
                         </button>
                       )
@@ -470,7 +470,7 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={Boolean(loading)}
-                className="group relative mt-2 flex h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-[15px] font-semibold text-white shadow-lg shadow-blue-600/25 ring-1 ring-inset ring-white/15 transition hover:to-blue-700 hover:shadow-xl hover:shadow-blue-600/30 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-70"
+                className="group relative mt-2 flex h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-gradient-to-b from-indigo-500 to-indigo-600 text-[15px] font-semibold text-white shadow-lg shadow-indigo-600/25 ring-1 ring-inset ring-white/15 transition hover:to-indigo-700 hover:shadow-xl hover:shadow-indigo-600/30 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-70"
               >
                 <span aria-hidden="true" className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
                 {loading === "email" ? (
@@ -486,7 +486,7 @@ export default function LoginPage() {
               </button>
 
               {mode === "forgot" && (
-                <button type="button" onClick={() => switchMode("signin")} className="w-full text-sm font-semibold text-blue-600 transition hover:text-blue-700">
+                <button type="button" onClick={() => switchMode("signin")} className="w-full text-sm font-semibold text-indigo-600 transition hover:text-indigo-700">
                   ← Back to sign in
                 </button>
               )}

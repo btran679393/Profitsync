@@ -28,7 +28,7 @@ export function ListingImage({
   if (!imageUrl || failed) {
     return (
       <div
-        className={`flex ${dimensions} shrink-0 items-center justify-center rounded-xl border border-white/10 bg-slate-800 text-slate-500`}
+        className={`flex ${dimensions} shrink-0 items-center justify-center rounded-lg border border-line bg-surface-2 text-subtle`}
         aria-label="No listing image available"
       >
         <Icon
@@ -41,7 +41,7 @@ export function ListingImage({
 
   return (
     <div
-      className={`flex ${dimensions} shrink-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-white`}
+      className={`flex ${dimensions} shrink-0 items-center justify-center overflow-hidden rounded-lg border border-line bg-white`}
     >
       {/* eslint-disable-next-line @next/next/no-img-element -- eBay listing photo, already sized by eBay */}
       <img

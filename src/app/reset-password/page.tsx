@@ -41,10 +41,10 @@ export default function ResetPasswordPage() {
       <form onSubmit={save} className="mt-6 space-y-4">
         <input type="password" required minLength={6} autoComplete="new-password" placeholder="New password" value={password} onChange={e=>setPassword(e.target.value)} className="w-full rounded-xl border p-3 text-slate-900" />
         <input type="password" required minLength={6} autoComplete="new-password" placeholder="Confirm new password" value={confirm} onChange={e=>setConfirm(e.target.value)} className="w-full rounded-xl border p-3 text-slate-900" />
-        <button disabled={busy} className="w-full rounded-xl bg-blue-600 p-3 font-semibold text-white disabled:opacity-60">{busy ? "Saving..." : "Update password"}</button>
+        <button disabled={busy} className="w-full rounded-xl bg-indigo-600 p-3 font-semibold text-white disabled:opacity-60">{busy ? "Saving..." : "Update password"}</button>
       </form>
     </>}
     {message && <p role="status" className="mt-4 text-sm text-slate-700">{message}</p>}
-    <a href="/login" className="mt-5 block text-center text-sm text-blue-600">Back to sign in</a>
+    <a href="/login" className="mt-5 block text-center text-sm text-indigo-600">Back to sign in</a>
   </div></main>;
 }

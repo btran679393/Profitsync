@@ -10,7 +10,7 @@ const FOCUSABLE =
 
 const subscribeNothing = () => () => {};
 
-// Render into <body> (inside a .ps-app wrapper so older styles still theme it).
+// Render into <body>, outside the page layout.
 function Portal({ children }: { children: ReactNode }) {
   const mounted = useSyncExternalStore(subscribeNothing, () => true, () => false);
   if (!mounted) return null;

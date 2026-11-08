@@ -17,7 +17,7 @@ export default function PricingCards() {
   return (
     <>
       <div className="mt-10 flex flex-col items-center gap-2">
-        <div role="radiogroup" aria-label="Billing period" className="inline-flex rounded-xl border border-white/10 bg-[#0b1120] p-1">
+        <div role="radiogroup" aria-label="Billing period" className="inline-flex rounded-xl border border-line-strong bg-surface-2 p-1">
           {(["month", "year"] as const).map((value) => (
             <button
               key={value}
@@ -26,14 +26,14 @@ export default function PricingCards() {
               aria-checked={interval === value}
               onClick={() => setBillingInterval(value)}
               className={`rounded-lg px-5 py-2 text-sm font-semibold transition ${
-                interval === value ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"
+                interval === value ? "bg-accent text-on-accent" : "text-muted hover:text-ink"
               }`}
             >
               {value === "month" ? "Monthly" : "Yearly"}
             </button>
           ))}
         </div>
-        <p className="text-xs text-emerald-400">Yearly saves up to {dollars(yearlySavingsCents("ultimate"))} a year</p>
+        <p className="text-xs text-profit">Yearly saves up to {dollars(yearlySavingsCents("ultimate"))} a year</p>
       </div>
 
       <div className="mt-10 grid gap-5 lg:grid-cols-3">
@@ -45,29 +45,29 @@ export default function PricingCards() {
             <section
               key={id}
               className={`relative flex flex-col rounded-2xl border p-7 text-left ${
-                featured ? "border-blue-500/40 bg-gradient-to-b from-blue-500/[0.08] to-[#151d2d]" : "border-white/[0.07] bg-[#151d2d]"
+                featured ? "border-accent/40 bg-gradient-to-b from-accent-soft to-surface" : "border-line bg-surface"
               }`}
             >
               {featured && (
-                <span className="absolute -top-3 left-7 rounded-full bg-blue-600 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-white">
+                <span className="absolute -top-3 left-7 rounded-full bg-accent px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-on-accent">
                   Most popular
                 </span>
               )}
-              <h2 className="text-lg font-semibold text-white">{plan.name}</h2>
-              <p className="mt-1 text-xs text-slate-500">{plan.tagline}</p>
+              <h2 className="text-lg font-semibold text-ink">{plan.name}</h2>
+              <p className="mt-1 text-xs text-subtle">{plan.tagline}</p>
               <p className="mt-5 flex items-baseline gap-1">
-                <span className="text-4xl font-bold tracking-tight text-white">{id === "free" ? "$0" : dollars(cents)}</span>
-                <span className="text-sm text-slate-500">{id === "free" ? "forever" : interval === "year" ? "/ year" : "/ month"}</span>
+                <span className="text-4xl font-bold tracking-tight text-ink">{id === "free" ? "$0" : dollars(cents)}</span>
+                <span className="text-sm text-subtle">{id === "free" ? "forever" : interval === "year" ? "/ year" : "/ month"}</span>
               </p>
-              <p className="mt-1 h-4 text-xs text-emerald-400">
+              <p className="mt-1 h-4 text-xs text-profit">
                 {id !== "free" && interval === "year"
                   ? `${dollars(Math.round(plan.yearlyCents / 12))}/month · save ${dollars(yearlySavingsCents(id as PaidPlanId))}`
                   : ""}
               </p>
-              <ul className="mt-6 flex-1 space-y-2.5 text-sm text-slate-300">
+              <ul className="mt-6 flex-1 space-y-2.5 text-sm text-ink-2">
                 {plan.features.map((feature) => (
                   <li key={feature} className="flex gap-2.5">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0 text-emerald-400" aria-hidden="true">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0 text-profit" aria-hidden="true">
                       <path d="M5 12l4 4L19 6" />
                     </svg>
                     {feature}
@@ -78,8 +78,8 @@ export default function PricingCards() {
                 href="/login"
                 className={`mt-7 block rounded-xl py-2.5 text-center text-sm font-semibold transition ${
                   featured
-                    ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20 hover:bg-blue-500"
-                    : "border border-white/10 text-slate-200 hover:border-blue-500/40 hover:text-white"
+                    ? "bg-accent text-on-accent shadow-lg shadow-accent/20 hover:bg-accent-hover"
+                    : "border border-line-strong text-ink hover:border-accent/40 hover:text-ink"
                 }`}
               >
                 {id === "free" ? "Start free" : `Start with ${plan.name}`}

@@ -11,7 +11,7 @@ const PROFIT = 2735;
 const BREAKDOWN = [
   { label: "Product costs", value: 3870, color: "bg-slate-400/70" },
   { label: "eBay fees", value: 1162, color: "bg-amber-400/80" },
-  { label: "Shipping", value: 683, color: "bg-sky-400/70" },
+  { label: "Shipping", value: 683, color: "bg-violet-400/70" },
   { label: "Profit", value: 2735, color: "bg-emerald-400" },
 ];
 
@@ -165,11 +165,11 @@ function PreviewCard() {
           <svg viewBox={`0 0 ${W} ${H}`} className="h-32 w-full overflow-visible" role="img" aria-label="Illustrative chart of profit rising over 30 days">
             <defs>
               <linearGradient id="ps-area" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.45" />
-                <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
+                <stop offset="0%" stopColor="#6366f1" stopOpacity="0.45" />
+                <stop offset="100%" stopColor="#6366f1" stopOpacity="0" />
               </linearGradient>
               <linearGradient id="ps-line" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0%" stopColor="#60a5fa" />
+                <stop offset="0%" stopColor="#818cf8" />
                 <stop offset="100%" stopColor="#34d399" />
               </linearGradient>
               <filter id="ps-glow" x="-20%" y="-20%" width="140%" height="140%">
@@ -244,12 +244,12 @@ export default function BrandPanel() {
           WebkitMaskImage: "radial-gradient(ellipse at 40% 45%, black 20%, transparent 75%)",
         }}
       />
-      <div aria-hidden="true" className="ps-drift pointer-events-none absolute -right-40 -top-40 h-[520px] w-[520px] rounded-full bg-blue-600/25 blur-3xl" />
+      <div aria-hidden="true" className="ps-drift pointer-events-none absolute -right-40 -top-40 h-[520px] w-[520px] rounded-full bg-indigo-600/25 blur-3xl" />
       <div aria-hidden="true" className="ps-drift pointer-events-none absolute -bottom-56 -left-40 h-[560px] w-[560px] rounded-full bg-emerald-500/10 blur-3xl" style={{ animationDelay: "-9s" }} />
 
       {/* Logo */}
       <div className="ps-fade-up relative z-10 flex items-center gap-3">
-        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-blue-700 shadow-lg shadow-blue-600/30 ring-1 ring-white/10">
+        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 shadow-lg shadow-indigo-600/30 ring-1 ring-white/10">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M3 17l6-6 4 4 8-9" />
             <path d="M15 6h6v6" />
@@ -260,14 +260,14 @@ export default function BrandPanel() {
 
       {/* Headline + preview */}
       <div className="relative z-10 py-8">
-        <div className="ps-fade-up inline-flex items-center gap-2 rounded-full border border-blue-400/20 bg-blue-400/10 px-4 py-1.5 text-[11px] font-semibold tracking-[0.14em] text-blue-200" style={delay(100)}>
+        <div className="ps-fade-up inline-flex items-center gap-2 rounded-full border border-indigo-400/20 bg-indigo-400/10 px-4 py-1.5 text-[11px] font-semibold tracking-[0.14em] text-indigo-200" style={delay(100)}>
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
           BUILT FOR EBAY SELLERS
         </div>
 
         <h1 className="ps-fade-up mt-6 text-4xl font-bold leading-[1.08] tracking-tight xl:text-[3.4rem]" style={delay(180)}>
           Know your numbers.
-          <span className="mt-1 block bg-gradient-to-r from-blue-400 via-sky-300 to-emerald-300 bg-clip-text text-transparent">
+          <span className="mt-1 block bg-gradient-to-r from-indigo-400 via-violet-300 to-emerald-300 bg-clip-text text-transparent">
             Grow your profits.
           </span>
         </h1>
