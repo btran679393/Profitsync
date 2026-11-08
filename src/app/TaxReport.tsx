@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { Expense } from "./ExpensesSection";
+import type { ExpenseEntry } from "./ExpensesSection";
 
 // What the report needs from each order (worked out by the dashboard with
 // the same rules as everywhere else in ProfitSync).
@@ -41,7 +41,7 @@ export default function TaxReport({
   onUpgrade,
 }: {
   orders: TaxOrder[];
-  expenses: Expense[];
+  expenses: ExpenseEntry[];
   storeLabel: string;
   // False on the Free plan: the report is shown blurred with an upgrade box.
   allowed: boolean;
@@ -54,7 +54,7 @@ export default function TaxReport({
       if (year) found.add(year);
     }
     for (const expense of expenses) {
-      const year = yearOf(expense.spentOn);
+      const year = yearOf(expense.date);
       if (year) found.add(year);
     }
     return [...found].sort((a, b) => b - a);
@@ -79,7 +79,7 @@ export default function TaxReport({
 
     const byCategory = new Map<string, number>();
     for (const expense of expenses) {
-      if (yearOf(expense.spentOn) !== year) continue;
+      if (yearOf(expense.date) !== year) continue;
       byCategory.set(expense.category, (byCategory.get(expense.category) ?? 0) + Number(expense.amount));
     }
     const expenseTotal = [...byCategory.values()].reduce((a, b) => a + b, 0);

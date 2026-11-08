@@ -434,6 +434,7 @@ export default function ListingsSection({
   storeShipping,
   onSaveStoreShipping,
   canSetStoreShipping = true,
+  staleAfterDays = 60,
 }: {
   rows: ListingRow[];
   loading: boolean;
@@ -450,6 +451,8 @@ export default function ListingsSection({
   storeShipping: number | null;
   onSaveStoreShipping: (value: string) => Promise<void>;
   canSetStoreShipping?: boolean;
+  // Settings → Listing alerts: days without a sale before "Not selling".
+  staleAfterDays?: number;
 }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -735,8 +738,8 @@ export default function ListingsSection({
                               </span>
                             )}
                             {row.alert === "stale" && (
-                              <span className="rounded-md bg-slate-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-slate-300 ring-1 ring-inset ring-slate-500/20" title="No sale in 60+ days. A lower price or better photos might help.">
-                                Not selling · 60+ days
+                              <span className="rounded-md bg-slate-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-slate-300 ring-1 ring-inset ring-slate-500/20" title={`No sale in ${staleAfterDays}+ days. A lower price or better photos might help.`}>
+                                Not selling · {staleAfterDays}+ days
                               </span>
                             )}
                           </div>

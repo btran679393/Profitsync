@@ -15,7 +15,22 @@ import ListingsSection, { type ListingRange, type ListingRow } from "./ListingsS
 import StoreShippingSetting from "./StoreShippingSetting";
 import StoreSwitcher, { type EbayStore } from "./StoreSwitcher";
 import OrderTools, { type ToolOrder } from "./OrderTools";
-import ExpensesSection, { type Expense, type NewExpense } from "./ExpensesSection";
+import ExpensesSection, {
+  todayKey,
+  type Expense,
+  type ExpenseChanges,
+  type ExpenseEntry,
+  type NewExpense,
+} from "./ExpensesSection";
+import { repeatDates } from "@/lib/expenses";
+import SettingsSection from "./SettingsSection";
+import {
+  DEFAULT_PREFERENCES,
+  THEME_STORAGE_KEY,
+  applyTheme,
+  readPreferences,
+  type Preferences,
+} from "@/lib/preferences";
 import MonthlyGoal from "./MonthlyGoal";
 import BillingSection from "./BillingSection";
 import TaxReport, { type TaxOrder } from "./TaxReport";
@@ -143,7 +158,8 @@ type IconName =
   | "trending"
   | "external"
   | "receipt"
-  | "sparkle";
+  | "sparkle"
+  | "gear";
 
 // ============================================================
 // UTILITIES
@@ -253,7 +269,7 @@ function getOrderProfit(order: Order) {
 // so Back, refresh and shared links open the same view.
 // ============================================================
 
-type View = "dashboard" | "orders" | "listings" | "expenses" | "taxes" | "billing";
+type View = "dashboard" | "orders" | "listings" | "expenses" | "taxes" | "billing" | "settings";
 
 function subscribeToHash(onChange: () => void) {
   window.addEventListener("hashchange", onChange);
@@ -266,6 +282,7 @@ function viewFromHash(hash: string): View {
   if (hash === "#expenses") return "expenses";
   if (hash === "#taxes") return "taxes";
   if (hash === "#billing") return "billing";
+  if (hash === "#settings") return "settings";
   return "dashboard";
 }
 
@@ -294,6 +311,10 @@ const VIEW_COPY: Record<View, { title: string; subtitle: string }> = {
     title: "Plan & billing",
     subtitle: "Choose the plan that fits your business.",
   },
+  settings: {
+    title: "Settings",
+    subtitle: "Make ProfitSync work the way you like.",
+  },
 };
 
 function isOrderInListingRange(order: Order, range: ListingRange, now: Date) {
@@ -314,14 +335,15 @@ function normalizeTitle(title: string) {
 
 // Stock alerts: "low" = sells (2+ units ever) but only 1–2 left; "stale" =
 // active with no sale in 60+ days (or never, once known to ProfitSync for 60+ days).
-const LOW_STOCK_AT = 2;
-const STALE_AFTER_DAYS = 60;
+// Defaults; sellers can change both in Settings → Listing alerts.
+
 
 function buildListingRows(
   orders: Order[],
   listings: ApiListing[],
   allOrders: Order[] = orders,
-  now: Date = new Date()
+  now: Date = new Date(),
+  alerts: { lowStockAt: number; staleAfterDays: number } = { lowStockAt: 2, staleAfterDays: 60 }
 ): ListingRow[] {
   const rows = new Map<string, ListingRow & { completedRevenue: number; completedProfit: number }>();
   const listingIdByTitle = new Map<string, string>();
@@ -395,7 +417,7 @@ function buildListingRows(
     if (order.orderDate && (!entry.lastSold || order.orderDate > entry.lastSold)) entry.lastSold = order.orderDate;
     lifetime.set(itemId, entry);
   }
-  const staleBefore = now.getTime() - STALE_AFTER_DAYS * 86400000;
+  const staleBefore = now.getTime() - alerts.staleAfterDays * 86400000;
   const firstSeen = new Map(listings.map((listing) => [listing.ebayItemId, listing.createdAt ?? null]));
 
   return [...rows.values()].map(({ completedRevenue, completedProfit, ...row }) => {
@@ -404,7 +426,7 @@ function buildListingRows(
     if (row.status === "ACTIVE" && row.ebayItemId) {
       const ever = lifetime.get(row.ebayItemId);
       const seen = firstSeen.get(row.ebayItemId);
-      if (ever && ever.units >= 2 && (row.available ?? 0) <= LOW_STOCK_AT) {
+      if (ever && ever.units >= 2 && (row.available ?? 0) <= alerts.lowStockAt) {
         alert = "low";
       } else if (
         ever?.lastSold
@@ -545,6 +567,13 @@ function Icon({
       <>
         <path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2z" />
         <path d="M9 8h6M9 12h6M9 16h3" />
+      </>
+    ),
+
+    gear: (
+      <>
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
       </>
     ),
 
@@ -1581,6 +1610,26 @@ export default function Home() {
 
   const [firstName, setFirstName] = useState("");
   const [sellerName, setSellerName] = useState("");
+  const [preferences, setPreferences] = useState<Preferences>(DEFAULT_PREFERENCES);
+
+  // Save settings to the account (and apply a new theme straight away).
+  async function savePreferences(changes: Partial<Preferences>) {
+    const next = { ...preferences, ...changes };
+    setPreferences(next);
+    if (changes.theme) applyTheme(changes.theme);
+    if (changes.defaultRange) setDateRange(changes.defaultRange);
+    const { error } = await createClient().auth.updateUser({ data: { preferences: next } });
+    if (error) throw new Error("Couldn't save your settings. Please try again.");
+  }
+
+  // "Match my device": follow the device when it switches light/dark.
+  useEffect(() => {
+    if (preferences.theme !== "system") return;
+    const media = window.matchMedia("(prefers-color-scheme: light)");
+    const onChange = () => applyTheme("system");
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, [preferences.theme]);
 
   // Name for the greeting: the eBay store name, else the eBay username,
   // else the person's first name (from their sign-in profile or email).
@@ -1596,6 +1645,22 @@ export default function Home() {
         const fromEmail = (user.email ?? "").split("@")[0].split(/[._\-+\d]/)[0];
         const name = full ? full.split(/\s+/)[0] : fromEmail;
         setFirstName(name ? name.charAt(0).toUpperCase() + name.slice(1) : "");
+
+        // Settings saved on the account: theme, start page, date range.
+        const prefs = readPreferences(meta);
+        setPreferences(prefs);
+        let localTheme: string | null = null;
+        try {
+          localTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+        } catch {
+          localTheme = null;
+        }
+        if (localTheme !== prefs.theme) applyTheme(prefs.theme);
+        setDateRange(prefs.defaultRange);
+        if (!window.location.hash && prefs.startPage !== "dashboard") {
+          window.location.hash = `#${prefs.startPage}`;
+        }
+
         const legacy = Number(meta.defaultShippingCost);
         const byStore: Record<string, number> = {};
         const raw = meta.defaultShippingByStore;
@@ -1880,13 +1945,32 @@ export default function Home() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [expensesEnabled, setExpensesEnabled] = useState(true);
   const [expensesLoading, setExpensesLoading] = useState(true);
+  const [expensesCanRepeat, setExpensesCanRepeat] = useState(false);
+
+  // One entry per expense, or per month for a repeating one, up to today.
+  const expenseEntries = useMemo<ExpenseEntry[]>(() => {
+    const today = todayKey();
+    return expenses.flatMap((expense) =>
+      expense.repeatMonthly
+        ? repeatDates(expense.spentOn, expense.endedOn ?? null, today).map((date) => ({
+            ...expense,
+            key: `${expense.id}-${date}`,
+            date,
+          }))
+        : [{ ...expense, key: String(expense.id), date: expense.spentOn }]
+    ).sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
+  }, [expenses]);
+
+  // Every category used, for the category list on the Expenses page.
+  const expenseCategories = useMemo(() => [...new Set(expenses.map((e) => e.category))], [expenses]);
 
   const loadExpenses = useCallback(async () => {
     try {
       const response = await fetch("/api/expenses", { cache: "no-store" });
       if (!response.ok) throw new Error("Failed to load expenses.");
-      const data: { enabled?: boolean; expenses?: Expense[] } = await response.json();
+      const data: { enabled?: boolean; canRepeat?: boolean; expenses?: Expense[] } = await response.json();
       setExpensesEnabled(data.enabled !== false);
+      setExpensesCanRepeat(Boolean(data.canRepeat));
       setExpenses(data.expenses ?? []);
     } catch (error) {
       console.error("Loading expenses failed:", error);
@@ -1894,6 +1978,17 @@ export default function Home() {
       setExpensesLoading(false);
     }
   }, []);
+
+  async function updateExpense(id: number, changes: ExpenseChanges) {
+    const response = await fetch("/api/expenses", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, ...changes }),
+    });
+    const data: { success?: boolean; error?: string } = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || "Couldn't save the expense.");
+    await loadExpenses();
+  }
 
   async function addExpense(expense: NewExpense) {
     const response = await fetch("/api/expenses", {
@@ -2378,12 +2473,13 @@ export default function Home() {
   // Expenses in the same date range (dates are calendar days, local time).
   const periodExpenses = useMemo(() => {
     if (!now) return [];
-    return expenses.filter((expense) => {
-      const [y, m, d] = expense.spentOn.split("-").map(Number);
-      const asOrder = { orderDate: new Date(y, m - 1, d, 12).toISOString() } as Order;
+    return expenseEntries.filter((expense) => {
+      const [y, m, d] = expense.date.split("-").map(Number);
+      // Start of that day, so an expense dated today shows straight away.
+      const asOrder = { orderDate: new Date(y, m - 1, d).toISOString() } as Order;
       return isOrderInDateRange(asOrder, dateRange, now);
     });
-  }, [expenses, dateRange, now]);
+  }, [expenseEntries, dateRange, now]);
 
   // ----------------------------------------------------------
   // FINANCIAL TOTALS
@@ -2505,8 +2601,8 @@ export default function Home() {
     const orderProfit = active.reduce((sum, order) => sum + (getOrderProfit(order) ?? 0), 0);
     const refundLoss = inMonth.reduce((sum, order) => sum + getRefundLoss(order), 0);
     const monthPrefix = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-`;
-    const spent = expenses
-      .filter((expense) => expense.spentOn.startsWith(monthPrefix))
+    const spent = expenseEntries
+      .filter((expense) => expense.date.startsWith(monthPrefix))
       .reduce((sum, expense) => sum + Number(expense.amount), 0);
     return {
       profit: orderProfit - refundLoss - spent,
@@ -2515,7 +2611,7 @@ export default function Home() {
       daysInMonth: new Date(currentTime.getFullYear(), currentTime.getMonth() + 1, 0).getDate(),
       monthName: currentTime.toLocaleDateString("en-US", { month: "long" }),
     };
-  }, [orders, expenses, currentTime]);
+  }, [orders, expenseEntries, currentTime]);
 
   const activity = useMemo(() => {
     const summarize = (from: Date) => {
@@ -2552,8 +2648,8 @@ export default function Home() {
   const listingRows = useMemo(() => {
     if (!now) return [];
     const inRange = orders.filter((order) => isOrderInListingRange(order, listingRange, now));
-    return buildListingRows(inRange, listings, orders, now);
-  }, [orders, listings, listingRange, now]);
+    return buildListingRows(inRange, listings, orders, now, preferences);
+  }, [orders, listings, listingRange, now, preferences]);
 
   const filteredOrders = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -2771,7 +2867,7 @@ export default function Home() {
   // ==========================================================
 
   return (
-    <div className="min-h-screen bg-[#0b1120] text-slate-100">
+    <div className="ps-app min-h-screen bg-[#0b1120] text-slate-100">
       {/* =====================================================
           MOBILE HEADER
       ===================================================== */}
@@ -2941,30 +3037,42 @@ export default function Home() {
           />
         </div>
 
-        {/* Logout */}
+        {/* Account, settings and log out */}
 
         <div className="border-t border-white/[0.07] p-4">
           <AccountBadge />
 
-          <button
-            type="button"
-            onClick={logout}
-            disabled={
-              loggingOut ||
-              syncing ||
-              savingId !== null
-            }
-            className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-slate-400 transition hover:bg-red-500/10 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Icon name="logout" size={18} />
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => navigate("settings")}
+              aria-current={view === "settings" ? "page" : undefined}
+              className={`flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
+                view === "settings"
+                  ? "bg-blue-600/15 text-blue-400"
+                  : "text-slate-400 hover:bg-white/5 hover:text-white"
+              }`}
+            >
+              <Icon name="gear" size={17} />
+              Settings
+            </button>
 
-            {loggingOut
-              ? "Logging out..."
-              : "Log out"}
-          </button>
+            <button
+              type="button"
+              onClick={logout}
+              disabled={
+                loggingOut ||
+                syncing ||
+                savingId !== null
+              }
+              className="flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-400 transition hover:bg-red-500/10 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Icon name="logout" size={17} />
 
-          <div className="mt-3 px-4 text-[11px] text-slate-600">
-            ProfitSync Dashboard
+              {loggingOut
+                ? "Logging out..."
+                : "Log out"}
+            </button>
           </div>
         </div>
       </aside>
@@ -3071,7 +3179,7 @@ export default function Home() {
                 loggingOut ||
                 savingId !== null
               }
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/15 transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/15 transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Icon
                 name="refresh"
@@ -4051,10 +4159,21 @@ export default function Home() {
           {view === "taxes" && (
             <TaxReport
               orders={taxOrders}
-              expenses={expenses}
+              expenses={expenseEntries}
               storeLabel={allStores ? "All stores" : activeStore?.name ?? "Your store"}
               allowed={limits.exports}
               onUpgrade={goToPlans}
+            />
+          )}
+
+          {view === "settings" && (
+            <SettingsSection
+              preferences={preferences}
+              onChange={savePreferences}
+              billing={billing}
+              storeCount={stores.length}
+              onOpenPlans={goToPlans}
+              onSignOut={() => void logout()}
             />
           )}
 
@@ -4078,7 +4197,10 @@ export default function Home() {
               loading={expensesLoading}
               periodLabel={dateRangeLabel(dateRange)}
               showWholeBusiness={stores.length > 1}
+              categories={expenseCategories}
+              canRepeat={expensesCanRepeat}
               onAdd={addExpense}
+              onUpdate={updateExpense}
               onDelete={deleteExpense}
             />
           )}
@@ -4100,6 +4222,7 @@ export default function Home() {
               storeShipping={storeShipping}
               onSaveStoreShipping={saveStoreShipping}
               canSetStoreShipping={!allStores}
+              staleAfterDays={preferences.staleAfterDays}
             />
           )}
 
