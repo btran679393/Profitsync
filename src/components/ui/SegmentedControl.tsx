@@ -11,6 +11,7 @@ export function SegmentedControl<T extends string>({
   onChange,
   label,
   size = "md",
+  wrap = false,
   className,
 }: {
   value: T;
@@ -18,6 +19,8 @@ export function SegmentedControl<T extends string>({
   onChange: (value: T) => void;
   label: string;
   size?: "sm" | "md";
+  // Many options: wrap onto more lines instead of scrolling sideways.
+  wrap?: boolean;
   className?: string;
 }) {
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -35,7 +38,11 @@ export function SegmentedControl<T extends string>({
     <div
       role="radiogroup"
       aria-label={label}
-      className={cn("inline-flex max-w-full items-center gap-0.5 overflow-x-auto rounded-lg border border-line bg-surface-2 p-0.5", className)}
+      className={cn(
+        "inline-flex max-w-full items-center gap-0.5 rounded-lg border border-line bg-surface-2 p-0.5",
+        wrap ? "flex-wrap" : "overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+        className
+      )}
     >
       {options.map((option, index) => {
         const active = option.value === value;

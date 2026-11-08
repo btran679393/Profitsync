@@ -133,6 +133,7 @@ export default function OrdersView({
     <div className="flex flex-col gap-3 border-b border-line p-4 xl:flex-row xl:items-center xl:justify-between">
       <SegmentedControl
         label="Order status"
+        wrap
         value={filter}
         onChange={onFilter}
         options={[

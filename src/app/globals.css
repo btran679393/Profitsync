@@ -431,3 +431,20 @@ html[data-theme="light"] .ps-app [class~="shadow-black/50"] { --tw-shadow-color:
     overflow: visible;
   }
 }
+
+/* Width of the sidebar, for things fixed to the bottom of the main area. */
+@media (min-width: 1024px) {
+  html {
+    --ps-sidebar-w: 15rem;
+  }
+  html[data-sidebar="collapsed"] {
+    --ps-sidebar-w: 4.25rem;
+  }
+}
+.ps-dock {
+  position: fixed;
+  bottom: 1rem;
+  left: calc(var(--ps-sidebar-w, 0px) + 1rem);
+  right: 1rem;
+  z-index: 40;
+}

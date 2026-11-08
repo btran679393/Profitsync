@@ -17,7 +17,7 @@ import DashboardView, { type Attention, type CostSlice } from "./dashboard/Dashb
 import OrdersView from "./dashboard/OrdersView";
 import type { TrendPoint } from "./dashboard/TrendChart";
 import { SYNC_EVENT, useLastSynced } from "./shell/useShell";
-import ListingsSection, { type ListingRange } from "./ListingsSection";
+import ListingsSection, { LISTING_RANGES, type ListingRange } from "./ListingsSection";
 import StoreShippingSetting from "./StoreShippingSetting";
 import StoreSwitcher, { type EbayStore } from "./StoreSwitcher";
 import OrderTools, { type ToolOrder } from "./OrderTools";
@@ -44,6 +44,7 @@ import { PLANS, type BillingStatus } from "@/lib/billing/plans";
 
 import { type ApiListing, type Order, type ApiOrder, type SyncResponse, type OrderFilter, type DateRange, money, isValidCost, formatOrders, isFullyRefunded, getRefundLoss, isPartiallyRefunded, hasRecordedCost, getShippingCost, getOrderProfit, type View, subscribeToHash, viewFromHash, VIEW_COPY, isOrderInListingRange, normalizeTitle, buildListingRows, getDateRangeStart, isOrderInDateRange, dateRangeLabel, localDateKey, startOfLocalDay, computeTotals, previousRange } from "./dashboard/model";
 import { OrderDetailsPanel } from "./dashboard/OrderParts";
+import { Icon } from "./dashboard/Icon";
 
 // ============================================================
 // MAIN DASHBOARD
@@ -97,8 +98,6 @@ function Dashboard() {
   const [listings, setListings] = useState<ApiListing[]>([]);
   const [listingsLoading, setListingsLoading] = useState(true);
   const [listingsSyncing, setListingsSyncing] = useState(false);
-  const [listingsMessage, setListingsMessage] = useState("");
-  const [listingsError, setListingsError] = useState(false);
   const [listingRange, setListingRange] = useState<ListingRange>("all");
   const [recentlySavedId, setRecentlySavedId] = useState<number | null>(null);
   const [shippingEnabled, setShippingEnabled] = useState(false);
@@ -636,10 +635,6 @@ function Dashboard() {
   async function syncListings(quiet = false) {
     if (listingsSyncing) return;
     setListingsSyncing(true);
-    if (!quiet) {
-      setListingsMessage("");
-      setListingsError(false);
-    }
     try {
       // In the "All stores" view, refresh each store's listings in turn.
       let data: { success?: boolean; message?: string; error?: string } = {};
@@ -656,10 +651,9 @@ function Dashboard() {
       }
       if (allStores) data.message = `Refreshed listings for ${stores.length} stores.`;
       await loadListings();
-      if (!quiet) setListingsMessage(data.message ?? "Listings updated.");
+      if (!quiet) toast.success("Listings refreshed", data.message ?? undefined);
     } catch (error) {
-      setListingsError(true);
-      setListingsMessage(error instanceof Error ? error.message : "Couldn't load your eBay listings.");
+      toast.error("Listings didn't refresh", error instanceof Error ? error.message : "Couldn't load your eBay listings.");
     } finally {
       setListingsSyncing(false);
     }
@@ -1398,6 +1392,15 @@ function Dashboard() {
             actions={
               showsDateRange ? (
                 <SegmentedControl label="Date range" value={dateRange} options={dateRangeOptions} onChange={setDateRange} />
+              ) : view === "listings" ? (
+                <>
+                  <SegmentedControl label="Sales period" value={listingRange} options={LISTING_RANGES} onChange={setListingRange} />
+                  {listings.length > 0 && (
+                    <Button variant="secondary" onClick={() => void syncListings()} loading={listingsSyncing} icon={<Icon name="refresh" size={15} />}>
+                      Refresh listings
+                    </Button>
+                  )}
+                </>
               ) : undefined
             }
           />
@@ -1553,10 +1556,7 @@ function Dashboard() {
               rows={listingRows}
               loading={loading || listingsLoading}
               syncing={listingsSyncing}
-              message={listingsMessage}
-              messageIsError={listingsError}
               range={listingRange}
-              onRangeChange={setListingRange}
               hasSyncedListings={listings.length > 0}
               onRefresh={() => void syncListings()}
               onSaveCost={saveListingCost}

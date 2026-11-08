@@ -2,6 +2,21 @@
 
 import { useMemo, useState } from "react";
 import StoreShippingSetting from "./StoreShippingSetting";
+import {
+  Badge,
+  Button,
+  Card,
+  Checkbox,
+  EmptyState,
+  Input,
+  LoadingRegion,
+  MoneyInput,
+  SegmentedControl,
+  Select,
+  Skeleton,
+  StatCard,
+  cn,
+} from "@/components/ui";
 
 // One row per eBay listing (or per item title for sales that couldn't be
 // matched to a saved listing). Figures are for the dashboard's date range.
@@ -37,12 +52,13 @@ type StatusFilter = "all" | "ACTIVE" | "selling" | "unsold" | "ENDED" | "low" | 
 
 export type ListingRange = "all" | "year" | "90d" | "30d" | "7d";
 
-const RANGES: ReadonlyArray<readonly [ListingRange, string]> = [
-  ["all", "All time"],
-  ["year", "This year"],
-  ["90d", "90 days"],
-  ["30d", "30 days"],
-  ["7d", "7 days"],
+// The Listings page's own time period (shown in the page header).
+export const LISTING_RANGES: ReadonlyArray<{ value: ListingRange; label: string }> = [
+  { value: "all", label: "All time" },
+  { value: "year", label: "This year" },
+  { value: "90d", label: "90 days" },
+  { value: "30d", label: "30 days" },
+  { value: "7d", label: "7 days" },
 ];
 
 const RANGE_TEXT: Record<ListingRange, string> = {
@@ -58,50 +74,12 @@ const FILTERS: ReadonlyArray<readonly [StatusFilter, string]> = [
   ["selling", "Sold"],
   ["ACTIVE", "Active"],
   ["unsold", "Active, not sold"],
-  ["ENDED", "Ended / past"],
+  ["ENDED", "Ended"],
   ["low", "Running low"],
   ["stale", "Not selling"],
 ];
 
-function Pills<T extends string>({
-  options,
-  value,
-  onChange,
-  label,
-  counts,
-}: {
-  options: ReadonlyArray<readonly [T, string]>;
-  value: T;
-  onChange: (value: T) => void;
-  label: string;
-  counts?: Partial<Record<T, number>>;
-}) {
-  return (
-    <div role="group" aria-label={label} className="flex flex-wrap gap-1.5 rounded-xl bg-[#0b1120] p-1 ring-1 ring-white/10">
-      {options.map(([key, text]) => {
-        const active = key === value;
-        return (
-          <button
-            key={key}
-            type="button"
-            onClick={() => onChange(key)}
-            aria-pressed={active}
-            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-              active ? "bg-blue-600 text-white shadow-sm shadow-blue-600/30" : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
-            }`}
-          >
-            {text}
-            {counts?.[key] !== undefined && (
-              <span className={`rounded-md px-1.5 text-[10px] ${active ? "bg-white/20" : "bg-white/[0.06] text-slate-500"}`}>
-                {counts[key]}
-              </span>
-            )}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
+const PAGE_SIZES = [25, 50, 100] as const;
 
 const money = (value: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
@@ -121,15 +99,17 @@ function Thumb({ src, alt }: { src: string | null; alt: string }) {
   const [failed, setFailed] = useState(false);
   if (!src || failed) {
     return (
-      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-500">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M21 8 12 3 3 8v8l9 5 9-5Z" /><path d="m3 8 9 5 9-5" /><path d="M12 13v8" />
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-line bg-surface-2 text-subtle">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M21 8 12 3 3 8v8l9 5 9-5Z" />
+          <path d="m3 8 9 5 9-5" />
+          <path d="M12 13v8" />
         </svg>
       </div>
     );
   }
   return (
-    <div className="h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-white">
+    <div className="h-11 w-11 shrink-0 overflow-hidden rounded-lg border border-line bg-white">
       {/* eslint-disable-next-line @next/next/no-img-element -- eBay listing photo */}
       <img src={src} alt={alt} loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} className="h-full w-full object-contain" />
     </div>
@@ -138,19 +118,9 @@ function Thumb({ src, alt }: { src: string | null; alt: string }) {
 
 export type ListingCostField = "unitCost" | "shippingCost";
 
-export type SaveListingCost = (
-  itemId: string,
-  field: ListingCostField,
-  value: string,
-  applyToPast: boolean
-) => Promise<number>;
+export type SaveListingCost = (itemId: string, field: ListingCostField, value: string, applyToPast: boolean) => Promise<number>;
 
-export type BulkSaveListingCost = (
-  itemIds: string[],
-  field: ListingCostField,
-  value: string,
-  applyToPast: boolean
-) => Promise<number>;
+export type BulkSaveListingCost = (itemIds: string[], field: ListingCostField, value: string, applyToPast: boolean) => Promise<number>;
 
 const MONEY_PATTERN = /^\d+(\.\d{1,2})?$/;
 
@@ -164,7 +134,7 @@ function InlineAmount({
   missing,
   disabled = false,
   disabledHint,
-  emptyTone = "text-slate-500",
+  emptyTone = "text-subtle",
   onSave,
 }: {
   label: string;
@@ -201,7 +171,7 @@ function InlineAmount({
   if (!editing) {
     return (
       <div className="flex items-baseline gap-2 text-xs">
-        <span className="w-8 shrink-0 text-slate-500">{label}</span>
+        <span className="w-8 shrink-0 text-subtle">{label}</span>
         <button
           type="button"
           disabled={disabled}
@@ -212,18 +182,15 @@ function InlineAmount({
             setNote("");
             setEditing(true);
           }}
-          className="group inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-left transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+          className="group inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {value !== null ? (
-            <span className="font-semibold text-slate-100">${value.toFixed(2)}</span>
-          ) : (
-            <span className={emptyTone}>{fallback}</span>
-          )}
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-600 opacity-0 transition group-hover:opacity-100" aria-hidden="true">
-            <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+          {value !== null ? <span className="ps-num font-semibold text-ink">${value.toFixed(2)}</span> : <span className={emptyTone}>{fallback}</span>}
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-subtle opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" aria-hidden="true">
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
           </svg>
         </button>
-        {note && <span className="text-[11px] text-emerald-400">{note}</span>}
+        {note && <span className="text-[11px] text-profit">{note}</span>}
       </div>
     );
   }
@@ -237,42 +204,40 @@ function InlineAmount({
       className="space-y-1.5 text-xs"
     >
       <div className="flex items-center gap-1.5">
-        <span className="w-8 shrink-0 text-slate-500">{label}</span>
+        <span className="w-8 shrink-0 text-subtle">{label}</span>
         <div className="relative">
-          <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-500">$</span>
+          <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-subtle">$</span>
           <input
             autoFocus
             inputMode="decimal"
             value={draft}
             placeholder="0.00"
             aria-label={`${label} for this listing`}
+            aria-invalid={!valid}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Escape") setEditing(false);
             }}
-            className={`w-16 rounded-lg border bg-[#0b1120] py-1 pl-5 pr-1 text-white outline-none focus:border-blue-500 ${valid ? "border-white/10" : "border-rose-500/60"}`}
+            className={cn(
+              "ps-num h-7 w-[4.5rem] rounded-md border bg-surface-2 pl-5 pr-1 text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent/20",
+              valid ? "border-line-strong" : "border-loss/60"
+            )}
           />
         </div>
-        <button
-          type="submit"
-          disabled={!valid || state === "saving"}
-          aria-label="Save"
-          title="Save (Enter)"
-          className="rounded-md bg-blue-600 px-1.5 py-1 font-semibold text-white transition hover:bg-blue-500 disabled:opacity-50"
-        >
-          {state === "saving" ? "…" : "✓"}
-        </button>
-        <button type="button" onClick={() => setEditing(false)} className="text-slate-500 hover:text-slate-300" aria-label="Cancel">
+        <Button type="submit" size="sm" variant="primary" className="h-7 w-7 px-0" disabled={!valid} loading={state === "saving"} aria-label="Save" title="Save (Enter)">
+          {state === "saving" ? null : "✓"}
+        </Button>
+        <button type="button" onClick={() => setEditing(false)} className="rounded-md px-1 text-subtle hover:text-ink" aria-label="Cancel">
           ✕
         </button>
       </div>
       {missing > 0 && draft.trim() !== "" && (
-        <label className="ml-9 flex items-center gap-1.5 text-[11px] text-slate-400">
-          <input type="checkbox" checked={fillPast} onChange={(event) => setFillPast(event.target.checked)} className="accent-blue-500" />
+        <label className="ml-9 flex items-center gap-1.5 text-[11px] text-muted">
+          <input type="checkbox" checked={fillPast} onChange={(event) => setFillPast(event.target.checked)} className="accent-[var(--ps-accent)]" />
           Also fill {missing} past sale{missing === 1 ? "" : "s"} without one
         </label>
       )}
-      {state === "error" && <p className="ml-9 text-[11px] text-rose-400">{note}</p>}
+      {state === "error" && <p className="ml-9 text-[11px] text-loss">{note}</p>}
     </form>
   );
 }
@@ -290,7 +255,11 @@ function CostsCell({
   storeShipping: number | null;
 }) {
   if (!row.ebayItemId || row.status === "UNLINKED") {
-    return <span className="text-xs text-slate-600" title="Set costs on the order itself for past sales">Set on each order</span>;
+    return (
+      <span className="text-xs text-subtle" title="Set costs on the order itself for past sales">
+        Set on each order
+      </span>
+    );
   }
   const itemId = row.ebayItemId;
   return (
@@ -299,7 +268,7 @@ function CostsCell({
         label="Item"
         value={row.unitCost}
         fallback="+ Add cost"
-        emptyTone={row.costMissing > 0 ? "font-semibold text-amber-400" : "text-blue-400"}
+        emptyTone={row.costMissing > 0 ? "font-semibold text-warn" : "text-accent-ink"}
         missing={row.costMissing}
         onSave={(value, applyToPast) => onSave(itemId, "unitCost", value, applyToPast)}
       />
@@ -317,6 +286,7 @@ function CostsCell({
 }
 
 // Shown when listings are ticked: set cost and/or shipping for all of them.
+// Sticks to the bottom of the screen so it's always in reach.
 function BulkBar({
   count,
   shippingEnabled,
@@ -354,66 +324,96 @@ function BulkBar({
     }
   }
 
-  const input = "w-24 rounded-lg border bg-[#0b1120] py-1.5 pl-5 pr-2 text-sm text-white outline-none focus:border-blue-500";
-
   return (
-    <div className="ps-fade-up mt-4 flex flex-col gap-3 rounded-xl border border-blue-500/30 bg-blue-600/10 px-4 py-3 text-sm lg:flex-row lg:items-center">
-      <span className="font-semibold text-blue-200">
-        {count} listing{count === 1 ? "" : "s"} selected
-      </span>
+    <div className="ps-dock" role="region" aria-label="Edit selected listings">
+    <div className="animate-ps-in mx-auto max-w-4xl rounded-xl border border-accent/40 bg-elevated p-3 shadow-pop">
       <form
         onSubmit={(event) => {
           event.preventDefault();
           void apply();
         }}
-        className="flex flex-1 flex-wrap items-center gap-3"
+        className="flex flex-col gap-3 lg:flex-row lg:items-end"
       >
-        <label className="flex items-center gap-2 text-slate-300">
-          Cost / item
-          <span className="relative">
-            <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-500">$</span>
-            <input inputMode="decimal" value={unitCost} onChange={(e) => setUnitCost(e.target.value)} placeholder="23.50" className={`${input} ${costValid ? "border-white/10" : "border-rose-500/60"}`} />
-          </span>
-        </label>
-        <label className={`flex items-center gap-2 text-slate-300 ${shippingEnabled ? "" : "opacity-40"}`}>
-          Ship / order
-          <span className="relative">
-            <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-500">$</span>
-            <input inputMode="decimal" value={shippingCost} disabled={!shippingEnabled} onChange={(e) => setShippingCost(e.target.value)} placeholder="4.50" className={`${input} ${shipValid ? "border-white/10" : "border-rose-500/60"}`} />
-          </span>
-        </label>
-        <label className="flex items-center gap-1.5 text-xs text-slate-400">
-          <input type="checkbox" checked={fillPast} onChange={(e) => setFillPast(e.target.checked)} className="accent-blue-500" />
-          Also fill past sales without one
-        </label>
-        <button
-          type="submit"
-          disabled={!ready || state === "saving"}
-          className="rounded-lg bg-blue-600 px-3.5 py-1.5 font-semibold text-white transition hover:bg-blue-500 disabled:opacity-50"
-        >
-          {state === "saving" ? "Applying…" : "Apply"}
-        </button>
-        {note && <span className={`text-xs ${state === "error" ? "text-rose-400" : "text-emerald-400"}`}>{note}</span>}
+        <div className="flex items-center justify-between gap-3 lg:block">
+          <p className="text-sm font-semibold text-ink">
+            {count} listing{count === 1 ? "" : "s"} selected
+          </p>
+          <button type="button" onClick={onClear} className="text-xs font-medium text-muted hover:text-ink lg:mt-0.5">
+            Clear selection
+          </button>
+        </div>
+        <div className="grid flex-1 grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-end">
+          <label className="text-xs text-muted sm:w-28">
+            <span className="mb-1 block">Cost / item</span>
+            <MoneyInput value={unitCost} onChange={(e) => setUnitCost(e.target.value)} placeholder="23.50" aria-invalid={!costValid} />
+          </label>
+          <label className={cn("text-xs text-muted sm:w-28", !shippingEnabled && "opacity-40")}>
+            <span className="mb-1 block">Ship / order</span>
+            <MoneyInput value={shippingCost} disabled={!shippingEnabled} onChange={(e) => setShippingCost(e.target.value)} placeholder="4.50" aria-invalid={!shipValid} />
+          </label>
+          <Checkbox className="col-span-2 text-xs sm:mb-2" checked={fillPast} onChange={(e) => setFillPast(e.target.checked)} label="Also fill past sales without one" />
+        </div>
+        <Button type="submit" variant="primary" disabled={!ready} loading={state === "saving"}>
+          Apply
+        </Button>
       </form>
-      <button type="button" onClick={onClear} className="text-xs font-semibold text-slate-400 hover:text-white">
-        Clear selection
-      </button>
+      {note && <p className={cn("mt-2 text-xs", state === "error" ? "text-loss" : "text-profit")}>{note}</p>}
+    </div>
     </div>
   );
 }
 
-const STATUS_BADGE: Record<ListingRow["status"], { label: string; className: string }> = {
-  ACTIVE: { label: "Active", className: "bg-emerald-500/10 text-emerald-400 ring-emerald-500/20" },
-  ENDED: { label: "Ended", className: "bg-slate-500/10 text-slate-400 ring-slate-500/20" },
-  UNLINKED: { label: "Past sale", className: "bg-violet-500/10 text-violet-300 ring-violet-500/20" },
+const STATUS_BADGE: Record<ListingRow["status"], { label: string; tone: "profit" | "neutral" | "accent" }> = {
+  ACTIVE: { label: "Active", tone: "profit" },
+  ENDED: { label: "Ended", tone: "neutral" },
+  UNLINKED: { label: "Past sale", tone: "accent" },
 };
 
-function SummaryTile({ label, value, hint, tone = "text-white" }: { label: string; value: string; hint: string; tone?: string }) {
+function ListingMeta({ row, staleAfterDays }: { row: ListingRow; staleAfterDays: number }) {
+  const badge = STATUS_BADGE[row.status];
   return (
-    <div className="rounded-2xl border border-white/[0.07] bg-white/[0.03] p-4">
-      <p className="text-xs font-medium text-slate-500">{label}</p>
-      <p className={`mt-2 truncate text-xl font-bold ${tone}`} title={value}>{value}</p>
-      <p className="mt-1 truncate text-xs text-slate-500" title={hint}>{hint}</p>
+    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-subtle">
+      <Badge tone={badge.tone}>{badge.label}</Badge>
+      {row.ebayItemId && (
+        <a
+          href={`https://www.ebay.com/itm/${row.ebayItemId}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="ps-num inline-flex items-center gap-0.5 hover:text-accent-ink"
+          aria-label={`Open item ${row.ebayItemId} on eBay (new tab)`}
+        >
+          #{row.ebayItemId}
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M7 17 17 7" />
+            <path d="M8 7h9v9" />
+          </svg>
+        </a>
+      )}
+      {row.refundedCount > 0 && <span className="text-loss">{row.refundedCount} refunded</span>}
+      {row.alert === "low" && (
+        <Badge tone="warn">
+          <span title="Sells well but almost out of stock">Running low · {row.available} left</span>
+        </Badge>
+      )}
+      {row.alert === "stale" && (
+        <Badge tone="neutral">
+          <span title={`No sale in ${staleAfterDays}+ days. A lower price or better photos might help.`}>Not selling · {staleAfterDays}+ days</span>
+        </Badge>
+      )}
+    </div>
+  );
+}
+
+function MarginBar({ margin }: { margin: number | null }) {
+  if (margin === null) return <span className="text-xs text-subtle">—</span>;
+  const width = Math.max(0, Math.min(100, margin));
+  return (
+    <div className="w-24">
+      <span className={cn("ps-num text-xs font-semibold", margin < 0 ? "text-loss" : "text-ink")}>{margin.toFixed(1)}%</span>
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-2">
+        <div className={cn("h-full rounded-full", margin < 15 ? "bg-warn" : "bg-profit")} style={{ width: `${margin <= 0 ? 0 : Math.max(4, width)}%` }} />
+      </div>
     </div>
   );
 }
@@ -422,10 +422,7 @@ export default function ListingsSection({
   rows,
   loading,
   syncing,
-  message,
-  messageIsError,
   range,
-  onRangeChange,
   hasSyncedListings,
   onRefresh,
   onSaveCost,
@@ -439,10 +436,7 @@ export default function ListingsSection({
   rows: ListingRow[];
   loading: boolean;
   syncing: boolean;
-  message: string;
-  messageIsError: boolean;
   range: ListingRange;
-  onRangeChange: (range: ListingRange) => void;
   hasSyncedListings: boolean;
   onRefresh: () => void;
   onSaveCost: SaveListingCost;
@@ -458,6 +452,7 @@ export default function ListingsSection({
   const [status, setStatus] = useState<StatusFilter>("all");
   const [sort, setSort] = useState<SortKey>("profit");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(25);
 
   const summary = useMemo(() => {
     const active = rows.filter((r) => r.status === "ACTIVE");
@@ -476,15 +471,18 @@ export default function ListingsSection({
     };
   }, [rows]);
 
-  const filterCounts = useMemo<Record<StatusFilter, number>>(() => ({
-    all: rows.length,
-    selling: rows.filter((r) => r.unitsSold > 0).length,
-    ACTIVE: rows.filter((r) => r.status === "ACTIVE").length,
-    unsold: rows.filter((r) => r.status === "ACTIVE" && r.unitsSold === 0).length,
-    ENDED: rows.filter((r) => r.status !== "ACTIVE").length,
-    low: rows.filter((r) => r.alert === "low").length,
-    stale: rows.filter((r) => r.alert === "stale").length,
-  }), [rows]);
+  const filterCounts = useMemo<Record<StatusFilter, number>>(
+    () => ({
+      all: rows.length,
+      selling: rows.filter((r) => r.unitsSold > 0).length,
+      ACTIVE: rows.filter((r) => r.status === "ACTIVE").length,
+      unsold: rows.filter((r) => r.status === "ACTIVE" && r.unitsSold === 0).length,
+      ENDED: rows.filter((r) => r.status !== "ACTIVE").length,
+      low: rows.filter((r) => r.alert === "low").length,
+      stale: rows.filter((r) => r.alert === "stale").length,
+    }),
+    [rows]
+  );
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -509,7 +507,18 @@ export default function ListingsSection({
     return filtered.sort((a, b) => by[sort](b) - by[sort](a) || a.title.localeCompare(b.title));
   }, [rows, query, status, sort]);
 
+  // Paging: back to page 1 whenever what's shown changes.
+  const signature = `${query}|${status}|${sort}|${pageSize}|${range}|${rows.length}`;
+  const [paging, setPaging] = useState({ signature, page: 1 });
+  const pageCount = Math.max(1, Math.ceil(visible.length / pageSize));
+  const currentPage = Math.min(paging.signature === signature ? paging.page : 1, pageCount);
+  const setPage = (page: number) => setPaging({ signature, page });
+  const pageRows = visible.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const from = visible.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const to = Math.min(visible.length, currentPage * pageSize);
+
   // Only real eBay listings can be bulk-edited (not unmatched past sales).
+  // "Select all" covers every listing that matches the filter, not just this page.
   const selectable = visible.filter((r) => r.ebayItemId && r.status !== "UNLINKED");
   const allVisibleSelected = selectable.length > 0 && selectable.every((r) => selected.has(r.ebayItemId!));
 
@@ -538,276 +547,299 @@ export default function ListingsSection({
     let filled = 0;
     if (unitCost) filled += await onBulkSaveCost(ids, "unitCost", unitCost, applyToPast);
     if (shippingCost) filled += await onBulkSaveCost(ids, "shippingCost", shippingCost, applyToPast);
-    return `Updated ${ids.length} listing${ids.length === 1 ? "" : "s"}` +
-      (filled > 0 ? ` · filled ${filled} past sale${filled === 1 ? "" : "s"}` : "");
+    return `Updated ${ids.length} listing${ids.length === 1 ? "" : "s"}` + (filled > 0 ? ` · filled ${filled} past sale${filled === 1 ? "" : "s"}` : "");
   }
 
+  const statusOptions = FILTERS.map(([value, label]) => ({ value, label, count: filterCounts[value] }));
+
   return (
-    <section id="listings" className="overflow-hidden rounded-2xl border border-white/[0.07] bg-[#151d2d]">
-      {/* Header */}
-      <div className="border-b border-white/[0.07] px-6 py-6">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h3 className="text-lg font-semibold text-white">Your eBay listings</h3>
-            <p className="mt-1 text-sm text-slate-500">
-              Sales, revenue and profit from {RANGE_TEXT[range]}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-          {shippingEnabled && canSetStoreShipping && <StoreShippingSetting value={storeShipping} onSave={onSaveStoreShipping} />}
-          <Pills label="Time period" options={RANGES} value={range} onChange={onRangeChange} />
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={syncing}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-blue-500/30 bg-blue-600/15 px-4 py-2.5 text-sm font-semibold text-blue-300 transition hover:bg-blue-600/25 disabled:opacity-60"
-          >
-            <svg className={syncing ? "animate-spin" : ""} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M21 12a9 9 0 1 1-3-6.7L21 8" /><path d="M21 3v5h-5" />
-            </svg>
-            {syncing ? "Loading listings…" : hasSyncedListings ? "Refresh listings" : "Load my eBay listings"}
-          </button>
-          </div>
-        </div>
-
-        {message && (
-          <p className={`mt-4 rounded-xl px-4 py-2.5 text-sm ${messageIsError ? "bg-rose-500/10 text-rose-300" : "bg-emerald-500/10 text-emerald-300"}`} role="status">
-            {message}
-          </p>
-        )}
-
-        {/* Summary */}
-        <div className="mt-5 grid grid-cols-2 gap-3 xl:grid-cols-4">
-          <SummaryTile
-            label="Active listings"
-            value={hasSyncedListings ? String(summary.activeCount) : "—"}
-            hint={hasSyncedListings ? `${summary.unsoldActive} with no sales in this period` : "Load your listings to see them"}
-          />
-          <SummaryTile
-            label="Stock on hand"
-            value={hasSyncedListings ? money(summary.stockValue) : "—"}
-            hint={hasSyncedListings ? `${summary.stockUnits} units at listed price` : "From your active listings"}
-          />
-          <SummaryTile
-            label="Best seller"
-            value={summary.bestSeller ? `${summary.bestSeller.unitsSold} sold` : "—"}
-            hint={summary.bestSeller?.title ?? "No sales in this period"}
-          />
-          <SummaryTile
-            label="Top earner"
-            value={summary.topEarner ? money(summary.topEarner.netProfit) : "—"}
-            hint={summary.topEarner?.title ?? "No sales in this period"}
-            tone={summary.topEarner && summary.topEarner.netProfit < 0 ? "text-rose-400" : "text-emerald-400"}
-          />
-        </div>
-
-        {/* Filters */}
-        <div className="mt-5">
-          <Pills label="Show listings" options={FILTERS} value={status} onChange={setStatus} counts={filterCounts} />
-        </div>
-
-        {/* Search + sort */}
-        <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-center">
-          <div className="relative flex-1">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-              <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
-            </svg>
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by title or item number…"
-              aria-label="Search listings"
-              className="w-full rounded-xl border border-white/10 bg-[#0b1120] py-2.5 pl-10 pr-4 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-blue-500"
-            />
-          </div>
-          <div className="flex gap-3">
-            <select
-              value={sort}
-              onChange={(e) => setSort(e.target.value as SortKey)}
-              aria-label="Sort listings"
-              className="rounded-xl border border-white/10 bg-[#0b1120] px-3 py-2.5 text-sm text-slate-300 outline-none focus:border-blue-500"
-            >
-              <option value="profit">Most profit</option>
-              <option value="units">Most sold</option>
-              <option value="revenue">Most revenue</option>
-              <option value="margin">Best margin</option>
-              <option value="recent">Recently sold</option>
-              <option value="stock">Most stock left</option>
-            </select>
-          </div>
-        </div>
+    <div className="space-y-5">
+      {/* Summary */}
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+        <StatCard
+          label="Active listings"
+          loading={loading}
+          value={hasSyncedListings ? String(summary.activeCount) : "—"}
+          note={hasSyncedListings ? `${summary.unsoldActive} with no sales in this period` : "Load your listings to see them"}
+        />
+        <StatCard
+          label="Stock on hand"
+          loading={loading}
+          value={hasSyncedListings ? money(summary.stockValue) : "—"}
+          note={hasSyncedListings ? `${summary.stockUnits} units at listed price` : "From your active listings"}
+        />
+        <StatCard
+          label="Best seller"
+          loading={loading}
+          value={summary.bestSeller ? `${summary.bestSeller.unitsSold} sold` : "—"}
+          note={<span className="line-clamp-1" title={summary.bestSeller?.title}>{summary.bestSeller?.title ?? "No sales in this period"}</span>}
+        />
+        <StatCard
+          label="Top earner"
+          loading={loading}
+          tone={summary.topEarner ? (summary.topEarner.netProfit < 0 ? "loss" : "profit") : "neutral"}
+          value={summary.topEarner ? money(summary.topEarner.netProfit) : "—"}
+          note={<span className="line-clamp-1" title={summary.topEarner?.title}>{summary.topEarner?.title ?? "No sales in this period"}</span>}
+        />
       </div>
 
-      {selected.size > 0 && (
-        <div className="border-b border-white/[0.07] px-6 pb-4">
-          <BulkBar
-            count={selected.size}
-            shippingEnabled={shippingEnabled}
-            onApply={applyBulk}
-            onClear={() => setSelected(new Set())}
-          />
+      <Card className="overflow-hidden">
+        {/* Toolbar */}
+        <div className="space-y-3 border-b border-line p-4">
+          <SegmentedControl label="Show listings" value={status} onChange={setStatus} options={statusOptions} wrap />
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+            <div className="relative sm:min-w-56 sm:flex-1">
+              <svg className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-subtle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m20 20-3.5-3.5" />
+              </svg>
+              <Input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search title or item number" aria-label="Search listings" className="pl-9" />
+            </div>
+            <span className="sm:w-44">
+              <Select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="Sort listings">
+                <option value="profit">Most profit</option>
+                <option value="units">Most sold</option>
+                <option value="revenue">Most revenue</option>
+                <option value="margin">Best margin</option>
+                <option value="recent">Recently sold</option>
+                <option value="stock">Most stock left</option>
+              </Select>
+            </span>
+            {shippingEnabled && canSetStoreShipping && <StoreShippingSetting value={storeShipping} onSave={onSaveStoreShipping} />}
+          </div>
         </div>
-      )}
 
-      {/* Table */}
-      {loading ? (
-        <div className="py-20 text-center text-sm text-slate-400">Loading your listings…</div>
-      ) : visible.length === 0 ? (
-        <div className="px-6 py-16 text-center">
-          <p className="text-sm font-medium text-slate-300">
-            {rows.length === 0 ? "No listings yet" : "No listings match your search"}
-          </p>
-          <p className="mt-1 text-sm text-slate-500">
-            {rows.length === 0
-              ? "Click “Load my eBay listings” to bring in everything you have listed."
-              : "Try a different search or filter."}
-          </p>
-        </div>
-      ) : (
-        <div className="relative overflow-x-auto">
-          <table className="w-full min-w-[1240px]">
-            <thead>
-              <tr className="border-b border-white/[0.07] text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                <th className="w-10 py-3 pl-6">
-                  <input
-                    type="checkbox"
-                    checked={allVisibleSelected}
-                    disabled={selectable.length === 0}
-                    onChange={toggleAllVisible}
-                    aria-label="Select all listings shown"
-                    title="Select all listings shown (tip: search first, e.g. “1998”)"
-                    className="h-4 w-4 accent-blue-500"
-                  />
-                </th>
-                <th className="px-3 py-3">Listing</th>
-                <th className="px-3 py-3 text-right">Price · Stock</th>
-                <th className="px-3 py-3">Costs</th>
-                <th className="px-3 py-3 text-right">Sold</th>
-                <th className="px-3 py-3 text-right">Revenue</th>
-                <th className="px-3 py-3 text-right">Fees, shipping + costs</th>
-                <th className="px-3 py-3 text-right">Net profit</th>
-                <th className="px-3 py-3">Margin</th>
-                <th className="px-6 py-3 text-right">Last sale</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/[0.05]">
-              {visible.map((row) => {
-                const badge = STATUS_BADGE[row.status];
-                const marginWidth = row.margin === null ? 0 : Math.max(0, Math.min(100, row.margin));
+        {loading ? (
+          <LoadingRegion label="Loading listings">
+            <div className="space-y-3 p-4">
+              {Array.from({ length: 6 }, (_, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <Skeleton className="h-11 w-11 rounded-lg" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-3.5 w-2/3" />
+                    <Skeleton className="h-3 w-1/3" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </LoadingRegion>
+        ) : visible.length === 0 ? (
+          rows.length === 0 ? (
+            <EmptyState
+              title="No listings yet"
+              description="Bring in everything you have listed on eBay, with what each one has sold and earned."
+              action={
+                <Button variant="primary" onClick={onRefresh} loading={syncing}>
+                  Load my eBay listings
+                </Button>
+              }
+            />
+          ) : (
+            <EmptyState
+              title="No listings match"
+              description="Try another search or filter."
+              action={
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setQuery("");
+                    setStatus("all");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              }
+            />
+          )
+        ) : (
+          <>
+            {/* Tablet and desktop: table */}
+            <div className="hidden max-h-[calc(100vh-15rem)] min-h-64 overflow-auto md:block">
+              <table className="w-full min-w-[640px] table-fixed border-separate border-spacing-0 text-sm">
+                <caption className="sr-only">
+                  Listings, {from} to {to} of {visible.length}, sales from {RANGE_TEXT[range]}
+                </caption>
+                <colgroup>
+                  <col className="w-11" />
+                  <col />
+                  <col className="w-24" />
+                  <col className="w-36" />
+                  <col className="w-20" />
+                  <col className="hidden w-28 xl:table-column" />
+                  <col className="w-28" />
+                  <col className="hidden w-32 xl:table-column" />
+                  <col className="hidden w-28 xl:table-column" />
+                </colgroup>
+                <thead className="sticky top-0 z-10 bg-surface-2 text-left text-xs text-muted">
+                  <tr className="[&>th]:border-b [&>th]:border-line [&>th]:px-3 [&>th]:py-2.5 [&>th]:font-medium">
+                    <th scope="col" className="pl-4">
+                      <input
+                        type="checkbox"
+                        checked={allVisibleSelected}
+                        disabled={selectable.length === 0}
+                        onChange={toggleAllVisible}
+                        aria-label="Select every listing that matches the filter"
+                        title="Select every listing that matches (tip: search first, e.g. “1998”)"
+                        className="h-4 w-4 accent-[var(--ps-accent)]"
+                      />
+                    </th>
+                    <th scope="col">Listing</th>
+                    <th scope="col" className="text-right">Price · stock</th>
+                    <th scope="col">Costs</th>
+                    <th scope="col" className="text-right">Sold</th>
+                    <th scope="col" className="hidden text-right xl:table-cell">Revenue</th>
+                    <th scope="col" className="text-right">Net profit</th>
+                    <th scope="col" className="hidden xl:table-cell">Margin</th>
+                    <th scope="col" className="hidden pr-4 text-right xl:table-cell">Last sale</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageRows.map((row) => {
+                    const isSelected = Boolean(row.ebayItemId && selected.has(row.ebayItemId));
+                    return (
+                      <tr key={row.key} className={cn("align-middle transition-colors hover:bg-surface-2/60 [&>td]:border-b [&>td]:border-line [&>td]:px-3 [&>td]:py-3", isSelected && "bg-accent-soft")}>
+                        <td className="pl-4">
+                          {row.ebayItemId && row.status !== "UNLINKED" && (
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleRow(row.ebayItemId!)}
+                              aria-label={`Select ${row.title}`}
+                              className="h-4 w-4 accent-[var(--ps-accent)]"
+                            />
+                          )}
+                        </td>
+                        <td>
+                          <div className="flex items-center gap-3">
+                            <Thumb src={row.imageUrl} alt={row.title} />
+                            <div className="min-w-0">
+                              <p className="line-clamp-2 font-medium leading-5 text-ink" title={row.title}>
+                                {row.title}
+                              </p>
+                              <ListingMeta row={row} staleAfterDays={staleAfterDays} />
+                            </div>
+                          </div>
+                        </td>
+                        <td className="text-right">
+                          <p className="ps-num font-medium text-ink">{row.price !== null ? money(row.price) : "—"}</p>
+                          <p className="mt-0.5 text-xs text-subtle">{row.available === null ? "" : row.available === 0 ? "Out of stock" : `${row.available} left`}</p>
+                        </td>
+                        <td>
+                          <CostsCell row={row} onSave={onSaveCost} shippingEnabled={shippingEnabled} storeShipping={storeShipping} />
+                        </td>
+                        <td className="text-right">
+                          <p className="ps-num font-semibold text-ink">{row.unitsSold}</p>
+                          <p className="mt-0.5 text-xs text-subtle">
+                            {row.orderCount} order{row.orderCount === 1 ? "" : "s"}
+                          </p>
+                        </td>
+                        <td className="ps-num hidden text-right font-medium text-ink-2 xl:table-cell">{money(row.revenue)}</td>
+                        <td className="text-right">
+                          <p className={cn("ps-num font-semibold", row.netProfit < 0 ? "text-loss" : row.netProfit > 0 ? "text-profit" : "text-subtle")}>{money(row.netProfit)}</p>
+                          {row.costMissing > 0 ? (
+                            <p className="mt-0.5 text-xs text-warn">{row.costMissing} need cost</p>
+                          ) : row.unitsSold > 0 ? (
+                            <p className="ps-num mt-0.5 text-xs text-subtle">{money(row.netProfit / row.unitsSold)} / unit</p>
+                          ) : null}
+                        </td>
+                        <td className="hidden xl:table-cell">
+                          <MarginBar margin={row.margin} />
+                        </td>
+                        <td className="hidden pr-4 text-right text-xs text-muted xl:table-cell">{relativeDate(row.lastSold)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Phones: cards */}
+            <ul className="divide-y divide-line md:hidden">
+              {pageRows.map((row) => {
+                const isSelected = Boolean(row.ebayItemId && selected.has(row.ebayItemId));
                 return (
-                  <tr
-                    key={row.key}
-                    className={`align-middle transition hover:bg-white/[0.025] ${
-                      row.ebayItemId && selected.has(row.ebayItemId) ? "bg-blue-500/[0.06]" : ""
-                    }`}
-                  >
-                    <td className="w-10 py-4 pl-6">
-                      {row.ebayItemId && row.status !== "UNLINKED" && (
+                  <li key={row.key} className={cn("p-4", isSelected && "bg-accent-soft")}>
+                    <div className="flex items-start gap-3">
+                      {row.ebayItemId && row.status !== "UNLINKED" ? (
                         <input
                           type="checkbox"
-                          checked={selected.has(row.ebayItemId)}
+                          checked={isSelected}
                           onChange={() => toggleRow(row.ebayItemId!)}
                           aria-label={`Select ${row.title}`}
-                          className="h-4 w-4 accent-blue-500"
+                          className="mt-3.5 h-4 w-4 shrink-0 accent-[var(--ps-accent)]"
                         />
-                      )}
-                    </td>
-                    <td className="px-3 py-4">
-                      <div className="flex items-center gap-3">
-                        <Thumb src={row.imageUrl} alt={row.title} />
-                        <div className="min-w-0 max-w-[360px]">
-                          <p className="truncate text-sm font-medium text-white" title={row.title}>{row.title}</p>
-                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                            <span className={`rounded-md px-1.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${badge.className}`}>{badge.label}</span>
-                            {row.ebayItemId && (
-                              <a
-                                href={`https://www.ebay.com/itm/${row.ebayItemId}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 transition hover:text-blue-400"
-                              >
-                                #{row.ebayItemId}
-                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7 17 17 7" /><path d="M8 7h9v9" /></svg>
-                              </a>
-                            )}
-                            {row.refundedCount > 0 && <span className="text-rose-400">{row.refundedCount} refunded</span>}
-                            {row.alert === "low" && (
-                              <span className="rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-amber-300 ring-1 ring-inset ring-amber-500/20" title="Sells well but almost out of stock">
-                                Running low · {row.available} left
-                              </span>
-                            )}
-                            {row.alert === "stale" && (
-                              <span className="rounded-md bg-slate-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-slate-300 ring-1 ring-inset ring-slate-500/20" title={`No sale in ${staleAfterDays}+ days. A lower price or better photos might help.`}>
-                                Not selling · {staleAfterDays}+ days
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-3 py-4 text-right text-sm">
-                      <p className="font-medium text-slate-200">{row.price !== null ? money(row.price) : "—"}</p>
-                      <p className="mt-0.5 text-xs text-slate-500">
-                        {row.available === null ? "" : row.available === 0 ? "Out of stock" : `${row.available} left`}
-                      </p>
-                    </td>
-                    <td className="px-3 py-4">
-                      <CostsCell row={row} onSave={onSaveCost} shippingEnabled={shippingEnabled} storeShipping={storeShipping} />
-                    </td>
-                    <td className="px-3 py-4 text-right text-sm">
-                      <p className="font-semibold text-white">{row.unitsSold}</p>
-                      <p className="mt-0.5 text-xs text-slate-500">{row.orderCount} order{row.orderCount === 1 ? "" : "s"}</p>
-                    </td>
-                    <td className="px-3 py-4 text-right text-sm font-medium text-slate-200">{money(row.revenue)}</td>
-                    <td className="px-3 py-4 text-right text-sm">
-                      <p className="text-slate-300">{money(row.fees + row.shipping + row.costs)}</p>
-                      <p className="mt-0.5 text-xs text-slate-500">
-                        {money(row.fees)} fees{row.shipping > 0 ? ` · ${money(row.shipping)} ship` : ""}
-                      </p>
-                    </td>
-                    <td className="px-3 py-4 text-right text-sm">
-                      <p className={`font-semibold ${row.netProfit < 0 ? "text-rose-400" : row.netProfit > 0 ? "text-emerald-400" : "text-slate-400"}`}>
-                        {money(row.netProfit)}
-                      </p>
-                      {row.costMissing > 0 ? (
-                        <p className="mt-0.5 text-xs text-amber-400">{row.costMissing} need cost</p>
-                      ) : row.unitsSold > 0 ? (
-                        <p className="mt-0.5 text-xs text-slate-500">{money(row.netProfit / row.unitsSold)} / unit</p>
-                      ) : null}
-                    </td>
-                    <td className="px-3 py-4">
-                      {row.margin === null ? (
-                        <span className="text-xs text-slate-600">—</span>
                       ) : (
-                        <div className="w-28">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className={row.margin < 0 ? "font-semibold text-rose-400" : "font-semibold text-slate-200"}>{row.margin.toFixed(1)}%</span>
-                          </div>
-                          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
-                            <div
-                              className={`h-full rounded-full ${row.margin < 15 ? "bg-amber-400" : "bg-emerald-400"}`}
-                              style={{ width: `${row.margin <= 0 ? 0 : Math.max(4, marginWidth)}%` }}
-                            />
-                          </div>
-                        </div>
+                        <span className="w-4 shrink-0" />
                       )}
-                    </td>
-                    <td className="px-6 py-4 text-right text-xs text-slate-400">{relativeDate(row.lastSold)}</td>
-                  </tr>
+                      <Thumb src={row.imageUrl} alt={row.title} />
+                      <div className="min-w-0 flex-1">
+                        <p className="line-clamp-2 text-sm font-medium leading-5 text-ink">{row.title}</p>
+                        <ListingMeta row={row} staleAfterDays={staleAfterDays} />
+                      </div>
+                    </div>
+                    <dl className="mt-3 grid grid-cols-3 gap-2 pl-7 text-xs">
+                      <div>
+                        <dt className="text-subtle">Sold</dt>
+                        <dd className="ps-num font-semibold text-ink">{row.unitsSold}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-subtle">Net profit</dt>
+                        <dd className={cn("ps-num font-semibold", row.netProfit < 0 ? "text-loss" : row.netProfit > 0 ? "text-profit" : "text-subtle")}>{money(row.netProfit)}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-subtle">Price · stock</dt>
+                        <dd className="ps-num text-ink-2">
+                          {row.price !== null ? money(row.price) : "—"}
+                          {row.available !== null && ` · ${row.available}`}
+                        </dd>
+                      </div>
+                    </dl>
+                    <div className="mt-3 pl-7">
+                      <CostsCell row={row} onSave={onSaveCost} shippingEnabled={shippingEnabled} storeShipping={storeShipping} />
+                    </div>
+                  </li>
                 );
               })}
-            </tbody>
-          </table>
-        </div>
-      )}
+            </ul>
 
-      <div className="flex flex-col gap-1 border-t border-white/[0.07] px-6 py-4 text-xs text-slate-500 sm:flex-row sm:justify-between">
-        <span>
-          {visible.length} of {rows.length} listings shown. Profit uses the same rules as your dashboard totals.
-        </span>
-        <span>“Past sale” = sold items not matched to a current listing yet.</span>
-      </div>
-    </section>
+            {selected.size > 0 && (
+              <>
+                <BulkBar count={selected.size} shippingEnabled={shippingEnabled} onApply={applyBulk} onClear={() => setSelected(new Set())} />
+                {/* Room so the floating bar never covers the last rows. */}
+                <div className="h-36 lg:h-24" aria-hidden="true" />
+              </>
+            )}
+
+            {/* Paging */}
+            <div className="flex flex-col gap-3 border-t border-line px-4 py-3 text-xs text-muted sm:flex-row sm:items-center sm:justify-between">
+              <span>
+                <span className="ps-num">
+                  {from}–{to} of {visible.length}
+                </span>{" "}
+                listings · sales from {RANGE_TEXT[range]}. “Past sale” = sold items not matched to a current listing.
+              </span>
+              <div className="flex items-center gap-2">
+                <span className="w-20">
+                  <Select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value) as (typeof PAGE_SIZES)[number])} aria-label="Listings per page" className="h-8 text-xs">
+                    {PAGE_SIZES.map((size) => (
+                      <option key={size} value={size}>{size}</option>
+                    ))}
+                  </Select>
+                </span>
+                <Button size="sm" variant="secondary" onClick={() => setPage(currentPage - 1)} disabled={currentPage <= 1} aria-label="Previous page">
+                  ←
+                </Button>
+                <span className="ps-num min-w-16 text-center">
+                  {currentPage} / {pageCount}
+                </span>
+                <Button size="sm" variant="secondary" onClick={() => setPage(currentPage + 1)} disabled={currentPage >= pageCount} aria-label="Next page">
+                  →
+                </Button>
+              </div>
+            </div>
+          </>
+        )}
+      </Card>
+    </div>
   );
 }
