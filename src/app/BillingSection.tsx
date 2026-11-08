@@ -39,15 +39,27 @@ function Check() {
   );
 }
 
-function UsageBar({ label, used, limit }: { label: string; used: number; limit: number | null }) {
+function UsageBar({
+  label,
+  used,
+  limit,
+  overLabel,
+}: {
+  label: string;
+  used: number;
+  limit: number | null;
+  // e.g. "locked": what the ones over the limit are called.
+  overLabel?: string;
+}) {
   const share = limit ? Math.min(1, used / limit) : 0;
   const full = limit !== null && used >= limit;
+  const over = limit !== null && overLabel && used > limit ? ` · ${used - limit} ${overLabel}` : "";
   return (
     <div>
       <div className="flex items-baseline justify-between text-xs">
         <span className="text-slate-400">{label}</span>
         <span className={full ? "font-semibold text-amber-300" : "text-slate-300"}>
-          {used} {limit === null ? "· unlimited" : `of ${limit}`}
+          {used} {limit === null ? "· unlimited" : `of ${limit}${over}`}
         </span>
       </div>
       {limit !== null && (
@@ -179,7 +191,7 @@ export default function BillingSection({
           )}
         </div>
         <div className="space-y-4 rounded-xl bg-white/[0.03] p-4">
-          <UsageBar label="eBay stores" used={billing?.usage.stores ?? 0} limit={enabled ? limits.maxStores : null} />
+          <UsageBar label="eBay stores" used={billing?.usage.stores ?? 0} limit={enabled ? limits.maxStores : null} overLabel="locked" />
           <UsageBar label="Orders imported this month" used={billing?.usage.ordersThisMonth ?? 0} limit={enabled ? limits.monthlyOrders : null} />
           <p className="text-[11px] text-slate-500">
             Order history: last {enabled && limits.historyDays < 365 ? `${limits.historyDays} days` : "12 months"}
@@ -280,8 +292,8 @@ export default function BillingSection({
               )}
               <h4 className="text-lg font-semibold text-white">{info.name}</h4>
               <p className="mt-1 text-xs text-slate-500">{info.tagline}</p>
-              <p className="mt-5 flex items-baseline gap-1">
-                <span className="text-4xl font-bold tracking-tight text-white">{id === "free" ? "$0" : dollars(cents)}</span>
+              <p className="mt-5 flex items-baseline gap-1 whitespace-nowrap">
+                <span className="text-3xl font-bold tracking-tight text-white 2xl:text-4xl">{id === "free" ? "$0" : dollars(cents)}</span>
                 <span className="text-sm text-slate-500">{id === "free" ? "forever" : interval === "year" ? "/ year" : "/ month"}</span>
               </p>
               <p className="mt-1 h-4 text-xs text-emerald-400">

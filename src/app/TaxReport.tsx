@@ -141,7 +141,7 @@ export default function TaxReport({
         {line.hint && <span className="block text-[11px] text-slate-500 print:text-gray-500">{line.hint}</span>}
       </span>
       <span className={`shrink-0 text-sm tabular-nums print:text-black ${line.strong ? "font-semibold text-white" : "text-slate-200"}`}>
-        {sign === "-" || line.negative ? "−" : ""}
+        {(sign === "-" || line.negative) && line.amount > 0 ? "−" : ""}
         {money(line.amount)}
       </span>
     </div>
@@ -230,7 +230,7 @@ export default function TaxReport({
         </section>
 
         {!allowed && (
-          <div className="absolute inset-0 flex items-center justify-center p-6">
+          <div className="absolute inset-0 flex items-start justify-center p-6 pt-20">
             <div className="max-w-sm rounded-2xl border border-blue-500/30 bg-[#0f172a]/95 p-6 text-center shadow-2xl shadow-black/50">
               <p className="text-base font-semibold text-white">Your tax summary is ready</p>
               <p className="mt-2 text-sm text-slate-400">
