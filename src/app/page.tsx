@@ -1390,7 +1390,7 @@ function Dashboard() {
         loggingOut={loggingOut}
       />
 
-      <div className="ps-main">
+      <div className="ps-main overflow-x-clip">
         <Topbar
           onOpenMenu={() => setSidebarOpen(true)}
           hasStore={stores.length > 0}

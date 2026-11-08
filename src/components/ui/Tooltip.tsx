@@ -22,8 +22,9 @@ export function Tooltip({
         id={id}
         role="tooltip"
         className={cn(
-          "pointer-events-none absolute left-1/2 z-50 w-max max-w-64 -translate-x-1/2 rounded-lg bg-ink px-2.5 py-1.5 text-xs font-medium leading-5 text-bg opacity-0 shadow-pop transition-opacity duration-150",
-          "group-hover/tip:opacity-100 group-focus-within/tip:opacity-100",
+          // Not displayed at all until needed, so it can't widen the page.
+          "pointer-events-none absolute left-1/2 z-50 hidden w-max max-w-64 -translate-x-1/2 rounded-lg bg-ink px-2.5 py-1.5 text-xs font-medium leading-5 text-bg shadow-pop",
+          "animate-ps-in group-hover/tip:block group-focus-within/tip:block",
           side === "top" ? "bottom-full mb-2" : "top-full mt-2"
         )}
       >

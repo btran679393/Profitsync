@@ -56,16 +56,17 @@ export default function Topbar({
                   <Icon name="refresh" size={16} className={syncing ? "animate-spin" : ""} />
                 </Button>
               </Tooltip>
-              <Button
-                variant="primary"
-                size="md"
-                onClick={onSync}
-                disabled={syncDisabled}
-                className="hidden sm:inline-flex"
-                icon={<Icon name="refresh" size={16} className={syncing ? "animate-spin" : ""} />}
-              >
-                {syncing ? "Syncing…" : "Sync"}
-              </Button>
+              <span className="hidden sm:inline-flex">
+                <Button
+                  variant="primary"
+                  size="md"
+                  onClick={onSync}
+                  disabled={syncDisabled}
+                  icon={<Icon name="refresh" size={16} className={syncing ? "animate-spin" : ""} />}
+                >
+                  {syncing ? "Syncing…" : "Sync"}
+                </Button>
+              </span>
             </>
           )}
         </div>

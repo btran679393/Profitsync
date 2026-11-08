@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { cn } from "@/components/ui";
 import { Icon } from "../dashboard/Icon";
 import type { View } from "../dashboard/model";
@@ -74,6 +74,16 @@ export default function Sidebar({
   loggingOut: boolean;
 }) {
   const collapsed = useSidebarCollapsed();
+
+  // Phones: Escape closes the slide-out menu.
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onCloseMobile();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [mobileOpen, onCloseMobile]);
 
   return (
     <>
