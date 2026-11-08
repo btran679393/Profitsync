@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { resolveActiveEbayUserId } from "@/lib/ebay/activeStore";
 import { existingColumns } from "@/lib/db/optionalColumns";
 import { cleanCategory } from "@/lib/expenses";
+import { setupNeeded } from "@/lib/setupNeeded";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -107,7 +108,7 @@ export async function POST(request: Request) {
     const repeat = body.repeatMonthly === true;
     if (repeat && !(await canRepeat(pool))) {
       return NextResponse.json(
-        { error: "Repeating expenses need a one-time database update first (docs/sql/2026-11-08_expense_repeat.sql)." },
+        { error: setupNeeded("Repeating expenses", "docs/sql/2026-11-08_expense_repeat.sql") },
         { status: 409 }
       );
     }
@@ -123,7 +124,7 @@ export async function POST(request: Request) {
   } catch (e) {
     if (isMissingTable(e)) {
       return NextResponse.json(
-        { error: "Expenses need a one-time database update first (docs/sql/2026-11-07_expenses.sql)." },
+        { error: setupNeeded("Expenses", "docs/sql/2026-11-07_expenses.sql") },
         { status: 409 }
       );
     }
@@ -186,7 +187,7 @@ export async function PATCH(request: Request) {
   try {
     if (repeatFields && !(await canRepeat(pool))) {
       return NextResponse.json(
-        { error: "Repeating expenses need a one-time database update first (docs/sql/2026-11-08_expense_repeat.sql)." },
+        { error: setupNeeded("Repeating expenses", "docs/sql/2026-11-08_expense_repeat.sql") },
         { status: 409 }
       );
     }

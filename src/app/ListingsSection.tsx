@@ -278,7 +278,7 @@ function CostsCell({
         fallback={storeShipping !== null ? `$${storeShipping.toFixed(2)} default` : "+ Add"}
         missing={row.shippingMissing}
         disabled={!shippingEnabled}
-        disabledHint="Run docs/sql/2026-11-07_shipping_cost.sql in Supabase to turn on shipping costs."
+        disabledHint="Shipping costs aren't available yet."
         onSave={(value, applyToPast) => onSave(itemId, "shippingCost", value, applyToPast)}
       />
     </div>

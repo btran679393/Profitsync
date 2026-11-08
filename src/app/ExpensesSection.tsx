@@ -270,8 +270,8 @@ export default function ExpensesSection({
 
   if (!enabled && !loading) {
     return (
-      <Notice tone="warn" title="Expenses need a one-time database update">
-        Run <code className="font-mono text-xs">docs/sql/2026-11-07_expenses.sql</code> in Supabase → SQL Editor, then refresh this page.
+      <Notice tone="warn" title="Expenses aren't available right now">
+        Please try again a little later.
       </Notice>
     );
   }
@@ -346,18 +346,17 @@ export default function ExpensesSection({
         <Field label="Note" optional>
           <Input value={note} maxLength={200} placeholder="e.g. 100 poly mailers" onChange={(e) => setNote(e.target.value)} />
         </Field>
+        {/* Repeating expenses only show once that feature is switched on. */}
+        {(canRepeat || (showWholeBusiness && !editing)) && (
         <div className="space-y-2.5 rounded-lg border border-line bg-surface-2 p-3">
-          {canRepeat ? (
+          {canRepeat && (
             <Checkbox checked={repeatMonthly} onChange={(e) => setRepeatMonthly(e.target.checked)} label="Repeats every month (like a subscription)" />
-          ) : (
-            <p className="text-xs text-subtle">
-              Monthly repeating expenses need a one-time update: run <code className="font-mono">docs/sql/2026-11-08_expense_repeat.sql</code>.
-            </p>
           )}
           {showWholeBusiness && !editing && (
             <Checkbox checked={wholeBusiness} onChange={(e) => setWholeBusiness(e.target.checked)} label="Applies to all my stores (not just this one)" />
           )}
         </div>
+        )}
         {error && <p role="alert" className="text-sm text-loss">{error}</p>}
       </form>
     </Drawer>

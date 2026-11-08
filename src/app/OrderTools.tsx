@@ -208,7 +208,7 @@ function ShippingImport({
       }
     >
       {!enabled ? (
-        <Notice tone="warn">Shipping costs need a one-time database update first (docs/sql/2026-11-07_shipping_cost.sql).</Notice>
+        <Notice tone="warn">Importing shipping costs isn&apos;t available yet. Please try again later.</Notice>
       ) : (
         <>
           <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-line-strong bg-surface-2 px-4 py-7 text-center text-sm text-muted transition-colors hover:border-accent/50 focus-within:border-accent">

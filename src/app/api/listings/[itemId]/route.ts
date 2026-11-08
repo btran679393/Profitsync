@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { Pool } from "pg";
 import { createClient } from "@/lib/supabase/server";
+import { setupNeeded } from "@/lib/setupNeeded";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -111,7 +112,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ it
     await client.query("ROLLBACK").catch(() => undefined);
     if ((e as { code?: string }).code === "42703") {
       return NextResponse.json(
-        { error: "Shipping defaults need a one-time database update first (docs/sql/2026-11-07_shipping_cost.sql)." },
+        { error: setupNeeded("Shipping defaults", "docs/sql/2026-11-07_shipping_cost.sql") },
         { status: 409 }
       );
     }

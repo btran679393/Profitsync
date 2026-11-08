@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { Pool } from "pg";
 import { createClient } from "@/lib/supabase/server";
 import { isBillingInterval, isPaidPlan } from "@/lib/billing/plans";
+import { setupNeeded } from "@/lib/setupNeeded";
 import {
   ensureCustomer,
   ensurePrice,
@@ -47,7 +48,7 @@ export async function POST(request: Request) {
     const current = await getUserPlan(pool, user.id);
     if (!current.enabled) {
       return NextResponse.json(
-        { error: "Billing needs a one-time database update first (docs/sql/2026-11-08_billing.sql)." },
+        { error: setupNeeded("Paid plans", "docs/sql/2026-11-08_billing.sql") },
         { status: 409 }
       );
     }

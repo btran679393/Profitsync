@@ -98,7 +98,7 @@ export function ShippingInput({
           title={
             enabled
               ? "What shipping cost you for this order (outside eBay). Leave blank to use any eBay label."
-              : "Run docs/sql/2026-11-07_shipping_cost.sql in Supabase to turn on shipping costs."
+              : "Shipping costs aren't available yet."
           }
           aria-label={`Shipping cost for ${order.item}`}
           aria-invalid={!valid}

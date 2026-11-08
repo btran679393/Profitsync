@@ -3,6 +3,7 @@ import { Pool } from "pg";
 import { createClient } from "@/lib/supabase/server";
 import { isMissingColumn } from "@/lib/db/optionalColumns";
 import { getUserPlan } from "@/lib/billing/server";
+import { setupNeeded } from "@/lib/setupNeeded";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -65,7 +66,7 @@ export async function POST(request: Request) {
   } catch (e) {
     if (isMissingColumn(e)) {
       return NextResponse.json(
-        { error: "Shipping costs need a one-time database update first (docs/sql/2026-11-07_shipping_cost.sql)." },
+        { error: setupNeeded("Shipping costs", "docs/sql/2026-11-07_shipping_cost.sql") },
         { status: 409 }
       );
     }

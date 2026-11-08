@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { Pool } from "pg";
 import { createClient } from "@/lib/supabase/server";
 import { isMissingColumn } from "@/lib/db/optionalColumns";
+import { setupNeeded } from "@/lib/setupNeeded";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -108,7 +109,7 @@ export async function POST(request: Request) {
     await client.query("ROLLBACK").catch(() => undefined);
     if (isMissingColumn(e)) {
       return NextResponse.json(
-        { error: "Shipping defaults need a one-time database update first (docs/sql/2026-11-07_shipping_cost.sql)." },
+        { error: setupNeeded("Shipping defaults", "docs/sql/2026-11-07_shipping_cost.sql") },
         { status: 409 }
       );
     }
