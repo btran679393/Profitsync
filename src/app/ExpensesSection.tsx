@@ -2,7 +2,25 @@
 
 import { useMemo, useState } from "react";
 import { EXPENSE_CATEGORIES, MAX_CATEGORY_LENGTH } from "@/lib/expenses";
-import { useConfirm } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  Checkbox,
+  Drawer,
+  EmptyState,
+  Field,
+  IconButton,
+  Input,
+  LoadingRegion,
+  MoneyInput,
+  Notice,
+  Select,
+  Skeleton,
+  cn,
+  useConfirm,
+  useToast,
+} from "@/components/ui";
 
 // An expense as saved.
 export type Expense = {
@@ -40,8 +58,7 @@ export type ExpenseChanges = Partial<{
   endedOn: string | null;
 }>;
 
-const money = (value: number) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
+const money = (value: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
 
 export function todayKey() {
   const now = new Date();
@@ -55,8 +72,18 @@ function prettyDate(value: string) {
 }
 
 const CUSTOM = "__custom__";
-const field =
-  "rounded-xl border border-white/10 bg-[#0b1120] px-3 py-2.5 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-blue-500";
+
+// Same colour for a category everywhere on the page.
+const CATEGORY_COLORS = ["var(--ps-accent)", "#38bdf8", "#f59e0b", "#a78bfa", "#f472b6", "#34d399", "#94a3b8", "#fb923c"];
+
+const RepeatIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M17 2l4 4-4 4" />
+    <path d="M3 11V9a3 3 0 0 1 3-3h15" />
+    <path d="M7 22l-4-4 4-4" />
+    <path d="M21 13v2a3 3 0 0 1-3 3H3" />
+  </svg>
+);
 
 export default function ExpensesSection({
   expenses,
@@ -81,6 +108,7 @@ export default function ExpensesSection({
   onUpdate: (id: number, changes: ExpenseChanges) => Promise<void>;
   onDelete: (id: number) => Promise<void>;
 }) {
+  const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Expense | null>(null);
   const [spentOn, setSpentOn] = useState(todayKey);
   const [category, setCategory] = useState<string>(EXPENSE_CATEGORIES[0]);
@@ -90,17 +118,23 @@ export default function ExpensesSection({
   const [wholeBusiness, setWholeBusiness] = useState(false);
   const [repeatMonthly, setRepeatMonthly] = useState(false);
   const [state, setState] = useState<"idle" | "saving" | "error">("idle");
-  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const confirm = useConfirm();
+  const toast = useToast();
 
   // Suggested categories first, then the seller's own.
   const options = useMemo(() => {
     const own = categories.filter((c) => !(EXPENSE_CATEGORIES as readonly string[]).includes(c)).sort((a, b) => a.localeCompare(b));
     return [...EXPENSE_CATEGORIES, ...own];
   }, [categories]);
+
+  const colorOf = (name: string) => {
+    const index = options.indexOf(name);
+    return CATEGORY_COLORS[(index < 0 ? name.length : index) % CATEGORY_COLORS.length];
+  };
 
   const chosenCategory = category === CUSTOM ? customCategory.trim() : category;
   const amountValid = /^\d+(\.\d{1,2})?$/.test(amount.trim());
@@ -111,13 +145,7 @@ export default function ExpensesSection({
     return expenses.filter((expense) => {
       if (categoryFilter && expense.category !== categoryFilter) return false;
       if (words.length === 0) return true;
-      const haystack = [
-        expense.category,
-        expense.note ?? "",
-        Number(expense.amount).toFixed(2),
-        prettyDate(expense.date),
-        expense.repeatMonthly ? "monthly repeating" : "",
-      ]
+      const haystack = [expense.category, expense.note ?? "", Number(expense.amount).toFixed(2), prettyDate(expense.date), expense.repeatMonthly ? "monthly repeating" : ""]
         .join(" ")
         .toLowerCase();
       return words.every((word) => haystack.includes(word));
@@ -126,9 +154,7 @@ export default function ExpensesSection({
 
   const byCategory = useMemo(() => {
     const totals = new Map<string, number>();
-    for (const expense of expenses) {
-      totals.set(expense.category, (totals.get(expense.category) ?? 0) + Number(expense.amount));
-    }
+    for (const expense of expenses) totals.set(expense.category, (totals.get(expense.category) ?? 0) + Number(expense.amount));
     return [...totals].sort((a, b) => b[1] - a[1]);
   }, [expenses]);
   const periodTotal = byCategory.reduce((sum, [, value]) => sum + value, 0);
@@ -143,9 +169,17 @@ export default function ExpensesSection({
     setAmount("");
     setNote("");
     setRepeatMonthly(false);
+    setError("");
+    setState("idle");
+  }
+
+  function openNew() {
+    resetForm();
+    setFormOpen(true);
   }
 
   function startEdit(expense: Expense) {
+    resetForm();
     setEditing(expense);
     setSpentOn(expense.spentOn);
     if (options.includes(expense.category)) {
@@ -158,16 +192,14 @@ export default function ExpensesSection({
     setAmount(Number(expense.amount).toFixed(2));
     setNote(expense.note ?? "");
     setRepeatMonthly(Boolean(expense.repeatMonthly));
-    setMessage("");
-    setState("idle");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    setFormOpen(true);
   }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!amountValid || !categoryValid) return;
     setState("saving");
-    setMessage("");
+    setError("");
     try {
       if (editing) {
         await onUpdate(editing.id, {
@@ -177,16 +209,16 @@ export default function ExpensesSection({
           note,
           ...(canRepeat ? { repeatMonthly } : {}),
         });
-        setMessage("Changes saved.");
+        toast.success("Expense updated");
       } else {
         await onAdd({ spentOn, category: chosenCategory, amount: amount.trim(), note, wholeBusiness, repeatMonthly });
-        setMessage(repeatMonthly ? "Monthly expense added." : "Expense added.");
+        toast.success(repeatMonthly ? "Monthly expense added" : "Expense added", `${chosenCategory} · ${money(Number(amount))}`);
       }
       resetForm();
-      setState("idle");
-    } catch (error) {
+      setFormOpen(false);
+    } catch (e) {
       setState("error");
-      setMessage(error instanceof Error ? error.message : "Couldn't save the expense.");
+      setError(e instanceof Error ? e.message : "Couldn't save the expense.");
     }
   }
 
@@ -210,7 +242,9 @@ export default function ExpensesSection({
     setBusyId(expense.id);
     try {
       await onDelete(expense.id);
-      if (editing?.id === expense.id) resetForm();
+      toast.success("Expense deleted");
+    } catch (e) {
+      toast.error("Couldn't delete the expense", e instanceof Error ? e.message : undefined);
     } finally {
       setBusyId(null);
     }
@@ -226,6 +260,9 @@ export default function ExpensesSection({
     setBusyId(expense.id);
     try {
       await onUpdate(expense.id, { endedOn: todayKey() });
+      toast.success("Stopped repeating");
+    } catch (e) {
+      toast.error("Couldn't stop it", e instanceof Error ? e.message : undefined);
     } finally {
       setBusyId(null);
     }
@@ -233,125 +270,122 @@ export default function ExpensesSection({
 
   if (!enabled && !loading) {
     return (
-      <section className="rounded-2xl border border-amber-500/20 bg-amber-500/[0.06] p-6 text-sm text-amber-200">
-        Expenses need a one-time database update first. Run <code className="text-amber-100">docs/sql/2026-11-07_expenses.sql</code> in
-        Supabase → SQL Editor, then refresh this page.
-      </section>
+      <Notice tone="warn" title="Expenses need a one-time database update">
+        Run <code className="font-mono text-xs">docs/sql/2026-11-07_expenses.sql</code> in Supabase → SQL Editor, then refresh this page.
+      </Notice>
     );
   }
 
-  return (
-    <div className="space-y-6">
-      {/* Add or edit an expense */}
-      <section className={`rounded-2xl border bg-[#151d2d] p-6 ${editing ? "border-blue-500/40" : "border-white/[0.07]"}`}>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold text-white">{editing ? "Edit expense" : "Add an expense"}</h3>
-            <p className="mt-1 text-xs text-slate-500">
-              {editing
-                ? editing.repeatMonthly
-                  ? "Changes apply to every month of this repeating expense."
-                  : "Change any detail, then save."
-                : "Costs that aren't tied to one sale. They're subtracted from your Net Profit."}
-            </p>
-          </div>
-          {editing && (
-            <button type="button" onClick={resetForm} className="text-xs font-semibold text-slate-400 hover:text-white">
-              Cancel editing
-            </button>
-          )}
+  const form = (
+    <Drawer
+      open={formOpen}
+      onClose={() => setFormOpen(false)}
+      size="sm"
+      title={editing ? "Edit expense" : "Add an expense"}
+      description={
+        editing
+          ? editing.repeatMonthly
+            ? "Changes apply to every month of this repeating expense."
+            : "Change any detail, then save."
+          : "Costs that aren't tied to one sale. They come off your net profit."
+      }
+      footer={
+        <>
+          <Button variant="secondary" onClick={() => setFormOpen(false)}>
+            Cancel
+          </Button>
+          <Button type="submit" form="expense-form" variant="primary" disabled={!amountValid || !categoryValid} loading={state === "saving"}>
+            {editing ? "Save changes" : "Add expense"}
+          </Button>
+        </>
+      }
+    >
+      <form id="expense-form" onSubmit={submit} className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Amount">
+            <MoneyInput data-autofocus required value={amount} placeholder="12.50" onChange={(e) => setAmount(e.target.value)} aria-invalid={Boolean(amount) && !amountValid} />
+          </Field>
+          <Field label={repeatMonthly ? "First date" : "Date"}>
+            <Input type="date" required value={spentOn} max={todayKey()} onChange={(e) => setSpentOn(e.target.value)} />
+          </Field>
         </div>
-        <form onSubmit={submit} className="mt-5 grid gap-3 sm:grid-cols-2 sm:items-end xl:grid-cols-[150px_210px_130px_minmax(12rem,1fr)_auto]">
-          <label className="text-xs text-slate-400">
-            {repeatMonthly ? "First date" : "Date"}
-            <input type="date" required value={spentOn} max={todayKey()} onChange={(e) => setSpentOn(e.target.value)} className={`mt-1 w-full ${field}`} />
-          </label>
-          <label className="text-xs text-slate-400">
-            Category
-            {category === CUSTOM ? (
-              <span className="relative mt-1 block">
-                <input
-                  autoFocus
-                  value={customCategory}
-                  maxLength={MAX_CATEGORY_LENGTH}
-                  placeholder="e.g. Storage unit"
-                  onChange={(e) => setCustomCategory(e.target.value)}
-                  className={`w-full pr-8 ${field}`}
-                  aria-label="Your own category"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCategory(EXPENSE_CATEGORIES[0]);
-                    setCustomCategory("");
-                  }}
-                  aria-label="Choose from the list instead"
-                  title="Choose from the list instead"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-1.5 text-slate-500 hover:text-white"
-                >
-                  ✕
-                </button>
-              </span>
-            ) : (
-              <select value={category} onChange={(e) => setCategory(e.target.value)} className={`mt-1 w-full ${field}`}>
-                {options.map((c) => <option key={c} value={c}>{c}</option>)}
-                <option value={CUSTOM}>+ Your own category…</option>
-              </select>
-            )}
-          </label>
-          <label className="text-xs text-slate-400">
-            Amount
-            <span className="relative mt-1 block">
-              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
-              <input
-                inputMode="decimal"
-                required
-                value={amount}
-                placeholder="12.50"
-                onChange={(e) => setAmount(e.target.value)}
-                className={`w-full pl-6 ${field} ${amount && !amountValid ? "border-rose-500/60" : ""}`}
+        <Field label="Category" hint={category === CUSTOM ? `Up to ${MAX_CATEGORY_LENGTH} characters. It'll be in the list next time.` : undefined}>
+          {category === CUSTOM ? (
+            <span className="relative block">
+              <Input
+                autoFocus
+                value={customCategory}
+                maxLength={MAX_CATEGORY_LENGTH}
+                placeholder="e.g. Storage unit"
+                onChange={(e) => setCustomCategory(e.target.value)}
+                className="pr-9"
+                aria-label="Your own category"
               />
+              <button
+                type="button"
+                onClick={() => {
+                  setCategory(EXPENSE_CATEGORIES[0]);
+                  setCustomCategory("");
+                }}
+                aria-label="Choose from the list instead"
+                title="Choose from the list instead"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md px-1.5 text-subtle hover:text-ink"
+              >
+                ✕
+              </button>
             </span>
-          </label>
-          <label className="text-xs text-slate-400">
-            Note <span className="text-slate-600">(optional)</span>
-            <input value={note} maxLength={200} placeholder="e.g. 100 poly mailers" onChange={(e) => setNote(e.target.value)} className={`mt-1 w-full ${field}`} />
-          </label>
-          <button
-            type="submit"
-            disabled={!amountValid || !categoryValid || state === "saving"}
-            className="h-[42px] rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-50 sm:col-span-2 xl:col-span-1"
-          >
-            {state === "saving" ? "Saving…" : editing ? "Save changes" : "Add"}
-          </button>
-        </form>
-        <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
-          {canRepeat && (
-            <label className="flex items-center gap-2 text-slate-400">
-              <input type="checkbox" checked={repeatMonthly} onChange={(e) => setRepeatMonthly(e.target.checked)} className="accent-blue-500" />
-              Repeats every month (like a subscription)
-            </label>
+          ) : (
+            <Select value={category} onChange={(e) => setCategory(e.target.value)}>
+              {options.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+              <option value={CUSTOM}>+ Your own category…</option>
+            </Select>
+          )}
+        </Field>
+        <Field label="Note" optional>
+          <Input value={note} maxLength={200} placeholder="e.g. 100 poly mailers" onChange={(e) => setNote(e.target.value)} />
+        </Field>
+        <div className="space-y-2.5 rounded-lg border border-line bg-surface-2 p-3">
+          {canRepeat ? (
+            <Checkbox checked={repeatMonthly} onChange={(e) => setRepeatMonthly(e.target.checked)} label="Repeats every month (like a subscription)" />
+          ) : (
+            <p className="text-xs text-subtle">
+              Monthly repeating expenses need a one-time update: run <code className="font-mono">docs/sql/2026-11-08_expense_repeat.sql</code>.
+            </p>
           )}
           {showWholeBusiness && !editing && (
-            <label className="flex items-center gap-2 text-slate-400">
-              <input type="checkbox" checked={wholeBusiness} onChange={(e) => setWholeBusiness(e.target.checked)} className="accent-blue-500" />
-              Applies to all my stores (not just this one)
-            </label>
+            <Checkbox checked={wholeBusiness} onChange={(e) => setWholeBusiness(e.target.checked)} label="Applies to all my stores (not just this one)" />
           )}
-          {message && <span className={state === "error" ? "text-rose-400" : "text-emerald-400"}>{message}</span>}
         </div>
-      </section>
+        {error && <p role="alert" className="text-sm text-loss">{error}</p>}
+      </form>
+    </Drawer>
+  );
 
-      {/* Totals, search + list */}
-      <section className="overflow-hidden rounded-2xl border border-white/[0.07] bg-[#151d2d]">
-        <div className="flex flex-col gap-4 border-b border-white/[0.07] px-6 py-5 md:flex-row md:items-start md:justify-between">
+  return (
+    <div className="space-y-5">
+      {form}
+
+      <Card>
+        <div className="flex flex-wrap items-start justify-between gap-4 p-5">
           <div>
-            <h3 className="text-base font-semibold text-white">Expenses · {periodLabel}</h3>
-            <p className="mt-1 text-2xl font-bold text-white">{money(filtering ? shownTotal : periodTotal)}</p>
-            {filtering && <p className="text-xs text-slate-500">of {money(periodTotal)} in this period</p>}
+            <p className="text-xs font-medium text-muted">Expenses · {periodLabel}</p>
+            <p className="ps-num mt-1 text-2xl font-semibold tracking-tight text-ink">{money(filtering ? shownTotal : periodTotal)}</p>
+            {filtering && <p className="ps-num text-xs text-subtle">of {money(periodTotal)} in this period</p>}
           </div>
-          {byCategory.length > 0 && (
-            <div className="flex flex-wrap gap-2 md:max-w-[60%] md:justify-end">
+          <Button variant="primary" onClick={openNew} icon={<span className="text-base leading-none">+</span>}>
+            Add expense
+          </Button>
+        </div>
+        {byCategory.length > 0 && (
+          <div className="px-5 pb-5">
+            <div className="flex h-2.5 overflow-hidden rounded-full bg-surface-2" aria-hidden="true">
+              {byCategory.map(([name, value]) => (
+                <span key={name} className="h-full" style={{ width: `${(value / periodTotal) * 100}%`, background: colorOf(name) }} />
+              ))}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="Filter by category">
               {byCategory.map(([name, value]) => {
                 const active = categoryFilter === name;
                 return (
@@ -360,120 +394,121 @@ export default function ExpensesSection({
                     key={name}
                     onClick={() => setCategoryFilter(active ? null : name)}
                     aria-pressed={active}
-                    className={`rounded-lg px-3 py-1.5 text-xs transition ${
-                      active ? "bg-blue-600 text-white" : "bg-white/[0.05] text-slate-300 hover:bg-white/[0.08]"
-                    }`}
+                    className={cn(
+                      "inline-flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition-colors",
+                      active ? "border-accent bg-accent-soft text-ink" : "border-line bg-surface text-ink-2 hover:bg-surface-2"
+                    )}
                   >
-                    {name} · <span className="font-semibold">{money(value)}</span>
+                    <span className="h-2 w-2 rounded-sm" style={{ background: colorOf(name) }} aria-hidden="true" />
+                    {name}
+                    <span className="ps-num font-semibold text-ink">{money(value)}</span>
                   </button>
                 );
               })}
             </div>
-          )}
-        </div>
+          </div>
+        )}
+      </Card>
 
+      <Card className="overflow-hidden">
         {expenses.length > 0 && (
-          <div className="flex flex-wrap items-center gap-3 border-b border-white/[0.07] px-6 py-3">
+          <div className="flex flex-wrap items-center gap-2 border-b border-line p-4">
             <div className="relative min-w-[12rem] flex-1">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden="true">
-                <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-subtle" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m20 20-3.5-3.5" />
               </svg>
-              <input
-                type="search"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search expenses by category, note or amount"
-                aria-label="Search expenses"
-                className={`w-full pl-9 ${field}`}
-              />
+              <Input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by category, note or amount" aria-label="Search expenses" className="pl-9" />
             </div>
             {filtering && (
-              <button
-                type="button"
+              <Button
+                variant="ghost"
                 onClick={() => {
                   setSearch("");
                   setCategoryFilter(null);
                 }}
-                className="text-xs font-semibold text-slate-400 hover:text-white"
               >
                 Clear
-              </button>
+              </Button>
             )}
           </div>
         )}
 
         {loading ? (
-          <div className="py-14 text-center text-sm text-slate-400">Loading expenses…</div>
+          <LoadingRegion label="Loading expenses">
+            <div className="space-y-3 p-5">
+              {[0, 1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-9 w-full" />
+              ))}
+            </div>
+          </LoadingRegion>
         ) : expenses.length === 0 ? (
-          <div className="py-14 text-center text-sm text-slate-400">No expenses in this period yet.</div>
+          <EmptyState
+            title="No expenses in this period"
+            description="Add packing supplies, your eBay Store subscription, software and other costs that aren't tied to one sale."
+            action={
+              <Button variant="primary" onClick={openNew}>
+                Add your first expense
+              </Button>
+            }
+          />
         ) : shown.length === 0 ? (
-          <div className="py-14 text-center text-sm text-slate-400">No expenses match your search.</div>
+          <EmptyState title="No expenses match" description="Try another search or category." />
         ) : (
-          <ul className="divide-y divide-white/[0.05]">
+          <ul className="divide-y divide-line">
             {shown.map((expense) => {
               const stopped = Boolean(expense.endedOn);
               const details = [
                 expense.note,
-                expense.repeatMonthly ? (stopped ? `Monthly · stopped ${prettyDate(expense.endedOn as string)}` : "Monthly") : null,
+                expense.repeatMonthly ? (stopped ? `Monthly · stopped ${prettyDate(expense.endedOn as string)}` : "Repeats monthly") : null,
                 showWholeBusiness && expense.ebayUserId === null ? "All stores" : null,
               ].filter(Boolean);
               return (
-                <li key={expense.key} className="flex items-center gap-3 px-6 py-3.5 sm:gap-4">
-                  <span className="w-24 shrink-0 text-xs text-slate-500 sm:w-28">{prettyDate(expense.date)}</span>
+                <li key={expense.key} className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-2/60 sm:gap-4 sm:px-5">
+                  <span className="hidden w-24 shrink-0 text-xs text-muted sm:block">{prettyDate(expense.date)}</span>
+                  <span className="h-8 w-1 shrink-0 rounded-full" style={{ background: colorOf(expense.category) }} aria-hidden="true" />
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-2">
-                      <span className="truncate text-sm text-white">{expense.category}</span>
+                      <span className="truncate text-sm font-medium text-ink">{expense.category}</span>
                       {expense.repeatMonthly && (
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-blue-400" aria-label="Repeats monthly">
-                          <path d="M17 2l4 4-4 4" /><path d="M3 11V9a3 3 0 0 1 3-3h15" /><path d="M7 22l-4-4 4-4" /><path d="M21 13v2a3 3 0 0 1-3 3H3" />
-                        </svg>
+                        <Badge tone={stopped ? "neutral" : "accent"}>
+                          <RepeatIcon />
+                          <span className="sr-only">Repeats monthly</span>
+                        </Badge>
                       )}
                     </span>
-                    {details.length > 0 && <span className="block truncate text-xs text-slate-500">{details.join(" · ")}</span>}
+                    <span className="block truncate text-xs text-subtle">
+                      <span className="sm:hidden">{prettyDate(expense.date)}{details.length ? " · " : ""}</span>
+                      {details.join(" · ")}
+                    </span>
                   </span>
-                  <span className="text-sm font-semibold text-rose-300">−{money(Number(expense.amount))}</span>
-                  <span className="flex shrink-0 items-center">
+                  <span className="ps-num text-sm font-semibold text-loss">−{money(Number(expense.amount))}</span>
+                  <span className="flex shrink-0 items-center opacity-100 transition-opacity sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100">
                     {expense.repeatMonthly && !stopped && (
-                      <button
-                        type="button"
-                        onClick={() => void stopRepeating(expense)}
-                        disabled={busyId === expense.id}
-                        title="Stop repeating from today (past months stay)"
-                        className="rounded-lg px-2 py-1 text-[11px] font-semibold text-slate-500 transition hover:bg-white/[0.05] hover:text-white disabled:opacity-40"
-                      >
+                      <Button variant="ghost" size="sm" onClick={() => void stopRepeating(expense)} disabled={busyId === expense.id} title="Stop repeating from today (past months stay)">
                         Stop
-                      </button>
+                      </Button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => startEdit(expense)}
-                      aria-label="Edit expense"
-                      title="Edit"
-                      className="rounded-lg p-1.5 text-slate-500 transition hover:bg-white/[0.05] hover:text-white"
-                    >
+                    <IconButton label="Edit expense" size="sm" onClick={() => startEdit(expense)}>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
+                        <path d="M12 20h9" />
+                        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
                       </svg>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void remove(expense)}
-                      disabled={busyId === expense.id}
-                      aria-label="Delete expense"
-                      title="Delete"
-                      className="rounded-lg p-1.5 text-slate-500 transition hover:bg-rose-500/10 hover:text-rose-400 disabled:opacity-40"
-                    >
+                    </IconButton>
+                    <IconButton label="Delete expense" size="sm" onClick={() => void remove(expense)} disabled={busyId === expense.id} className="hover:bg-loss-soft hover:text-loss">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6" />
+                        <path d="M3 6h18" />
+                        <path d="M8 6V4h8v2" />
+                        <path d="M19 6l-1 14H6L5 6" />
                       </svg>
-                    </button>
+                    </IconButton>
                   </span>
                 </li>
               );
             })}
           </ul>
         )}
-      </section>
+      </Card>
     </div>
   );
 }

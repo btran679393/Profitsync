@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { ExpenseEntry } from "./ExpensesSection";
+import { buttonClasses } from "@/components/ui";
 
 // What the report needs from each order (worked out by the dashboard with
 // the same rules as everywhere else in ProfitSync).
@@ -134,13 +135,13 @@ export default function TaxReport({
   const row = (line: Line, sign: "+" | "-") => (
     <div
       key={line.label}
-      className={`flex items-baseline justify-between gap-4 px-6 py-3 print:px-0 print:py-1.5 ${line.strong ? "bg-white/[0.02] print:bg-transparent" : ""}`}
+      className={`flex items-baseline justify-between gap-4 px-6 py-3 print:px-0 print:py-1.5 ${line.strong ? "bg-surface-2/60 print:bg-transparent" : ""}`}
     >
       <span className="min-w-0">
-        <span className={`block text-sm print:text-black ${line.strong ? "font-semibold text-white" : "text-slate-300"}`}>{line.label}</span>
-        {line.hint && <span className="block text-[11px] text-slate-500 print:text-gray-500">{line.hint}</span>}
+        <span className={`block text-sm print:text-black ${line.strong ? "font-semibold text-ink" : "text-ink-2"}`}>{line.label}</span>
+        {line.hint && <span className="block text-[11px] text-subtle print:text-gray-500">{line.hint}</span>}
       </span>
-      <span className={`shrink-0 text-sm tabular-nums print:text-black ${line.strong ? "font-semibold text-white" : "text-slate-200"}`}>
+      <span className={`shrink-0 text-sm tabular-nums print:text-black ${line.strong ? "font-semibold text-ink" : "text-ink"}`}>
         {(sign === "-" || line.negative) && line.amount > 0 ? "−" : ""}
         {money(line.amount)}
       </span>
@@ -149,31 +150,28 @@ export default function TaxReport({
 
   return (
     <div className="space-y-6">
-      <div className="no-print flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h3 className="text-lg font-semibold text-white">Tax summary</h3>
-          <p className="mt-1 text-xs text-slate-500">A yearly profit and loss summary to give your accountant or use when you file.</p>
-        </div>
+      <div className="no-print flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-muted">A profit and loss summary for the year, to give your accountant or use when you file.</p>
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={year}
             onChange={(e) => setYear(Number(e.target.value))}
             aria-label="Tax year"
-            className="rounded-xl border border-white/10 bg-[#151d2d] px-3 py-2.5 text-sm text-slate-200 outline-none focus:border-blue-500"
+            className="h-9 rounded-lg border border-line-strong bg-surface-2 px-3 text-sm text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
           >
             {years.map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
           <button
             type="button"
             onClick={() => (allowed ? downloadCsv() : onUpgrade())}
-            className="rounded-xl border border-white/10 bg-[#0b1120] px-4 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-blue-500/40 hover:text-white"
+            className={buttonClasses("secondary", "md")}
           >
             Download CSV
           </button>
           <button
             type="button"
             onClick={() => (allowed ? window.print() : onUpgrade())}
-            className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500"
+            className={buttonClasses("primary", "md")}
           >
             Print or save as PDF
           </button>
@@ -184,39 +182,39 @@ export default function TaxReport({
         <section
           id="tax-report"
           aria-hidden={!allowed}
-          className={`overflow-hidden rounded-2xl border border-white/[0.07] bg-[#151d2d] print:rounded-none print:border-0 print:bg-white ${
+          className={`overflow-hidden rounded-xl border border-line bg-surface print:rounded-none print:border-0 print:bg-white ${
             allowed ? "" : "pointer-events-none select-none blur-[6px]"
           }`}
         >
-          <div className="border-b border-white/[0.07] px-6 py-5 print:border-gray-300 print:px-0">
-            <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500 print:text-gray-500">ProfitSync · Tax summary</p>
-            <h4 className="mt-1 text-xl font-bold text-white print:text-black">
+          <div className="border-b border-line px-6 py-5 print:border-gray-300 print:px-0">
+            <p className="text-xs font-medium uppercase tracking-[0.16em] text-subtle print:text-gray-500">ProfitSync · Tax summary</p>
+            <h4 className="mt-1 text-xl font-semibold tracking-tight text-ink print:text-black">
               {year} · {storeLabel}
             </h4>
-            <p className="mt-1 text-xs text-slate-500 print:text-gray-600">
+            <p className="mt-1 text-xs text-muted print:text-gray-600">
               {report.orderCount} order{report.orderCount === 1 ? "" : "s"}
               {report.refundCount > 0 ? ` · ${report.refundCount} refunded` : ""} · January 1 – December 31, {year}
             </p>
           </div>
 
-          <div className="divide-y divide-white/[0.05] print:divide-gray-200">
-            <p className="px-6 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wider text-slate-500 print:px-0">Income</p>
+          <div className="divide-y divide-line print:divide-gray-200">
+            <p className="px-6 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wider text-subtle print:px-0">Income</p>
             {report.income.map((line) => row(line, "+"))}
-            <p className="px-6 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wider text-slate-500 print:px-0">Business costs</p>
+            <p className="px-6 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wider text-subtle print:px-0">Business costs</p>
             {report.costs.map((line) => row(line, "-"))}
             {row({ label: "Total business costs", amount: report.totalCosts, strong: true }, "-")}
           </div>
 
-          <div className="flex items-baseline justify-between border-t border-white/[0.07] bg-blue-500/[0.06] px-6 py-5 print:border-gray-400 print:bg-transparent print:px-0">
-            <span className="text-base font-semibold text-white print:text-black">Net profit</span>
-            <span className={`text-2xl font-bold tabular-nums print:text-black ${report.netProfit >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+          <div className="flex items-baseline justify-between border-t border-line bg-accent-soft px-6 py-5 print:border-gray-400 print:bg-transparent print:px-0">
+            <span className="text-base font-semibold text-ink print:text-black">Net profit</span>
+            <span className={`text-2xl font-semibold tabular-nums print:text-black ${report.netProfit >= 0 ? "text-profit" : "text-loss"}`}>
               {money(report.netProfit)}
             </span>
           </div>
 
-          <div className="space-y-1 px-6 py-4 text-[11px] leading-5 text-slate-500 print:px-0 print:text-gray-600">
+          <div className="space-y-1 px-6 py-4 text-[11px] leading-5 text-subtle print:px-0 print:text-gray-600">
             {report.missingCost > 0 && (
-              <p className="text-amber-300 print:text-black">
+              <p className="text-warn print:text-black">
                 {report.missingCost} order{report.missingCost === 1 ? " has" : "s have"} no product cost yet, so cost of goods
                 sold may be too low. Add them on the Orders or Listings page.
               </p>
@@ -231,16 +229,16 @@ export default function TaxReport({
 
         {!allowed && (
           <div className="absolute inset-0 flex items-start justify-center p-6 pt-20">
-            <div className="max-w-sm rounded-2xl border border-blue-500/30 bg-[#0f172a]/95 p-6 text-center shadow-2xl shadow-black/50">
-              <p className="text-base font-semibold text-white">Your tax summary is ready</p>
-              <p className="mt-2 text-sm text-slate-400">
+            <div className="max-w-sm rounded-2xl border border-accent/30 bg-elevated p-6 text-center shadow-pop">
+              <p className="text-base font-semibold text-ink">Your tax summary is ready</p>
+              <p className="mt-2 text-sm text-muted">
                 See your full-year numbers, print them or save as PDF, and download a spreadsheet for your accountant with
                 Pro or Ultimate.
               </p>
               <button
                 type="button"
                 onClick={onUpgrade}
-                className="mt-4 w-full rounded-xl bg-blue-600 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500"
+                className={buttonClasses("primary", "md", "mt-4 w-full")}
               >
                 See plans
               </button>
