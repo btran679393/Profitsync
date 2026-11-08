@@ -832,7 +832,12 @@ function Dashboard() {
           target ? `/api/ebay/sync?store=${encodeURIComponent(target.id)}` : "/api/ebay/sync",
           { method: "POST", cache: "no-store" }
         );
-        const result: SyncResponse = await response.json();
+        const result: SyncResponse & { busy?: boolean } = await response.json();
+        // Another tab or an auto-sync is already on it: nothing went wrong.
+        if (response.status === 409 && result.busy) {
+          toast.info("Already syncing", result.message);
+          return;
+        }
         if (!response.ok || !result.success) {
           const reason = result.message || result.error || "Failed to sync eBay orders.";
           throw new Error(target ? `${target.name}: ${reason}` : reason);

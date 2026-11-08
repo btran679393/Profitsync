@@ -2,12 +2,15 @@ import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db/pool";
 import type { Pool } from "pg";
 import { createClient } from "@/lib/supabase/server";
+import { tryAcquireSyncLock } from "@/lib/db/syncLock";
 import { db } from "@/prisma/db";
 import { fetchSellerProfile, saveSellerProfile } from "@/lib/ebay/sellerProfile";
 import { pickConnection, storeAllowedByPlan, storeForSync } from "@/lib/ebay/activeStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Stores with thousands of listings take a while (Vercel's limit for all plans).
+export const maxDuration = 300;
 
 // ============================================================
 // eBay Trading API: GetMyeBaySelling
@@ -157,7 +160,30 @@ async function fetchActiveListings(accessToken: string) {
   throw new EbayTradingError("Too many listings to load in one go.");
 }
 
+// Only one listings sync per account at a time (see syncLock.ts).
 export async function POST(request: Request) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  }
+  const lock = await tryAcquireSyncLock(`listings:${user.id}`);
+  if (lock === "busy") {
+    return NextResponse.json(
+      { error: "A sync is already running.", message: "Your listings are already refreshing. Give it a minute.", busy: true },
+      { status: 409 }
+    );
+  }
+  try {
+    return await syncListings(request);
+  } finally {
+    await lock.release();
+  }
+}
+
+async function syncListings(request: Request) {
   let pool: Pool | null = null;
 
   try {

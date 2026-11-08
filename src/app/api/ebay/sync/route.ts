@@ -7,8 +7,17 @@ import { pickConnection, storeAllowedByPlan, storeForSync } from "@/lib/ebay/act
 import { allowedNewOrderIds, getUserPlan, ordersPerMonth } from "@/lib/billing/server";
 import type { PlanLimits } from "@/lib/billing/plans";
 import { createClient } from "@/lib/supabase/server";
+import { tryAcquireSyncLock } from "@/lib/db/syncLock";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Big stores take a while on their first sync (Vercel's limit for all plans).
+export const maxDuration = 300;
+
+// Listing photos for new orders are looked up one by one. On a first sync
+// of thousands of orders that alone could hit the time limit, so each run
+// looks up a limited number; the rest are filled in on the next sync.
+const IMAGE_LOOKUPS_PER_SYNC = 150;
+const IMAGE_TIME_BUDGET_MS = 60_000;
 // ============================================================
 // TYPES
 // ============================================================
@@ -1024,7 +1033,30 @@ async function updateExistingOrder(
 }
 
 // ============================================================
+// Only one orders sync per account at a time (see syncLock.ts).
 export async function POST(request: Request) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  }
+  const lock = await tryAcquireSyncLock(`orders:${user.id}`);
+  if (lock === "busy") {
+    return NextResponse.json(
+      { error: "A sync is already running.", message: "Your orders are already syncing. Give it a minute.", busy: true },
+      { status: 409 }
+    );
+  }
+  try {
+    return await syncOrders(request);
+  } finally {
+    await lock.release();
+  }
+}
+
+async function syncOrders(request: Request) {
   try {
     // --------------------------------------------------------
     // STEP 1: Authenticate ProfitSync user
@@ -1367,7 +1399,16 @@ export async function POST(request: Request) {
       new Map<string, string | null>();
     const imagesByOrder =
       new Map<string, string>();
+    const imageStartedAt = Date.now();
+    let imageLookups = 0;
     for (const order of ordersNeedingImages) {
+      if (
+        imageLookups >= IMAGE_LOOKUPS_PER_SYNC ||
+        Date.now() - imageStartedAt > IMAGE_TIME_BUDGET_MS
+      ) {
+        break;
+      }
+      imageLookups++;
       const imageUrl =
         await getOrderImage(
           ebayApiBase,
