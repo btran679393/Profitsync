@@ -379,3 +379,55 @@ html[data-theme="light"] .ps-app svg [stroke="#151d2d"] { stroke: #ffffff; }
 /* Softer shadows in light mode */
 html[data-theme="light"] .ps-app [class~="shadow-black/40"],
 html[data-theme="light"] .ps-app [class~="shadow-black/50"] { --tw-shadow-color: rgb(15 23 42 / 0.15); }
+
+/* ------------------------------------------------------------
+   App shell: sidebar width and collapse (desktop only; on phones the
+   sidebar is a slide-out drawer). html[data-sidebar] is set before the
+   first paint, so there's no jump on load.
+------------------------------------------------------------ */
+.ps-sidebar {
+  width: 15rem;
+  transition: width 200ms cubic-bezier(0.2, 0.8, 0.2, 1), transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.ps-show-collapsed {
+  display: none;
+}
+@media (min-width: 1024px) {
+  .ps-main {
+    padding-left: 15rem;
+    transition: padding-left 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  html[data-sidebar="collapsed"] .ps-sidebar {
+    width: 4.25rem;
+  }
+  html[data-sidebar="collapsed"] .ps-main {
+    padding-left: 4.25rem;
+  }
+  html[data-sidebar="collapsed"] .ps-hide-collapsed {
+    display: none;
+  }
+  html[data-sidebar="collapsed"] .ps-show-collapsed {
+    display: flex;
+  }
+  html[data-sidebar="collapsed"] .ps-nav-item {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  /* Collapsed: the label shows as a tooltip on hover or keyboard focus. */
+  html[data-sidebar="collapsed"] .ps-nav-item:hover .ps-nav-tip,
+  html[data-sidebar="collapsed"] .ps-nav-item:focus-visible .ps-nav-tip {
+    opacity: 1;
+    transform: translate(0, -50%);
+  }
+}
+.ps-nav-tip {
+  opacity: 0;
+  transform: translate(-4px, -50%);
+  transition: opacity 120ms, transform 120ms;
+}
+@media (min-width: 1024px) {
+  html[data-sidebar="collapsed"] .ps-sidebar nav {
+    overflow: visible;
+  }
+}

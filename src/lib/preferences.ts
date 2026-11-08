@@ -25,6 +25,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
 };
 
 export const THEME_STORAGE_KEY = "profitsync:theme";
+export const SIDEBAR_STORAGE_KEY = "profitsync:sidebar";
 
 function pick<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return allowed.includes(value as T) ? (value as T) : fallback;
@@ -65,4 +66,4 @@ export function applyTheme(choice: ThemeChoice) {
 
 // Runs before the first paint (see layout.tsx) so there's no flash of the
 // wrong colours.
-export const THEME_BOOT_SCRIPT = `(function(){try{var c=localStorage.getItem("${THEME_STORAGE_KEY}")||"dark";var t=c==="system"?(window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):c;document.documentElement.setAttribute("data-theme",t==="light"?"light":"dark")}catch(e){}})()`;
+export const THEME_BOOT_SCRIPT = `(function(){try{var c=localStorage.getItem("${THEME_STORAGE_KEY}")||"dark";var t=c==="system"?(window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):c;document.documentElement.setAttribute("data-theme",t==="light"?"light":"dark");if(localStorage.getItem("${SIDEBAR_STORAGE_KEY}")==="collapsed")document.documentElement.setAttribute("data-sidebar","collapsed")}catch(e){}})()`;

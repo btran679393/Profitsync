@@ -10,7 +10,10 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import AccountBadge from "./AccountBadge";
+import { Badge, Button, ConfirmProvider, Notice, PageHeader, SegmentedControl, ToastProvider, useToast } from "@/components/ui";
+import Sidebar from "./shell/Sidebar";
+import Topbar from "./shell/Topbar";
+import { SYNC_EVENT, useLastSynced } from "./shell/useShell";
 import ListingsSection, { type ListingRange } from "./ListingsSection";
 import StoreShippingSetting from "./StoreShippingSetting";
 import StoreSwitcher, { type EbayStore } from "./StoreSwitcher";
@@ -47,7 +50,18 @@ import { ShippingInput, OrderDetailsPanel } from "./dashboard/OrderParts";
 // MAIN DASHBOARD
 // ============================================================
 
+// The page: shared toast and confirm-dialog providers around the dashboard.
 export default function Home() {
+  return (
+    <ToastProvider>
+      <ConfirmProvider>
+        <Dashboard />
+      </ConfirmProvider>
+    </ToastProvider>
+  );
+}
+
+function Dashboard() {
   const router = useRouter();
 
   // Orders as loaded; `orders` (below) adds the active store's shipping default.
@@ -61,19 +75,11 @@ export default function Home() {
   const syncInFlightRef = useRef(false);
 
   const [syncing, setSyncing] = useState(false);
-  const [syncMessage, setSyncMessage] = useState("");
-  const [syncError, setSyncError] = useState(false);
-
-  // Success messages fade away after a few seconds; errors stay until dismissed.
-  useEffect(() => {
-    if (!syncMessage || syncError) return;
-    const id = window.setTimeout(() => setSyncMessage(""), 8000);
-    return () => window.clearTimeout(id);
-  }, [syncMessage, syncError]);
+  // Success and error messages appear as toasts (bottom right).
+  const toast = useToast();
   const [loadError, setLoadError] = useState("");
 
   const [loggingOut, setLoggingOut] = useState(false);
-  const [logoutError, setLogoutError] = useState("");
 
   const [search, setSearch] = useState("");
   const [filter, setFilter] =
@@ -271,7 +277,6 @@ export default function Home() {
 
     try {
       setLoggingOut(true);
-      setLogoutError("");
 
       const supabase = createClient();
 
@@ -280,7 +285,6 @@ export default function Home() {
       if (error) throw error;
 
       setOrders([]);
-      setSyncMessage("");
       setLoadError("");
 
       router.replace("/login");
@@ -288,9 +292,7 @@ export default function Home() {
     } catch (error) {
       console.error("Logout failed:", error);
 
-      setLogoutError(
-        "Unable to log out. Please try again."
-      );
+      toast.error("Couldn't log out", "Please try again.");
 
       setLoggingOut(false);
     }
@@ -565,7 +567,6 @@ export default function Home() {
     const data: { success?: boolean; error?: string } = await response.json();
     if (!response.ok || !data.success) throw new Error(data.error || "Couldn't switch stores.");
     setSellerName("");
-    setSyncMessage("");
     setSelectedOrderId(null);
     await Promise.all([loadStores(), loadOrders(), loadListings(), loadExpenses()]);
   }
@@ -829,8 +830,6 @@ export default function Home() {
 
     try {
       setSyncing(true);
-      setSyncMessage("");
-      setSyncError(false);
 
       // In the "All stores" view, sync each store in turn.
       const targets: Array<EbayStore | null> = allStores ? stores.filter((s) => !s.locked) : [activeStore];
@@ -873,25 +872,24 @@ export default function Home() {
           `${(data.refundsUpdated ?? 0) + (data.refundedImported ?? 0)} refund${(data.refundsUpdated ?? 0) + (data.refundedImported ?? 0) === 1 ? "" : "s"} updated`,
       ].filter(Boolean);
       const overLimit = results.reduce((sum, r) => sum + (r.ordersOverPlanLimit ?? 0), 0);
-      setSyncMessage(
-        `Synced ${found} eBay order${found === 1 ? "" : "s"}` +
-          (changes.length ? ` · ${changes.join(" · ")}` : " · everything is up to date") +
-          (overLimit > 0
-            ? ` · ${overLimit} more order${overLimit === 1 ? "" : "s"} not imported: the Free plan includes ` +
-              `${results[0]?.monthlyOrderLimit ?? 50} a month. Upgrade on Plan & billing for unlimited orders.`
-            : "")
+      toast.success(
+        `Synced ${found} order${found === 1 ? "" : "s"}`,
+        changes.length ? changes.join(" · ") : "Everything is up to date."
       );
+      if (overLimit > 0) {
+        toast.info(
+          `${overLimit} more order${overLimit === 1 ? "" : "s"} not imported`,
+          `The Free plan includes ${results[0]?.monthlyOrderLimit ?? 50} orders a month. Upgrade on Plan & billing for unlimited orders.`
+        );
+      }
       // Usage on the plan page changes with new orders.
       if (onFreePlan) void loadBilling();
     } catch (error) {
       console.error("Sync failed:", error);
 
-      setSyncError(true);
-
-      setSyncMessage(
-        error instanceof Error
-          ? error.message
-          : "Something went wrong syncing orders."
+      toast.error(
+        "Sync didn't finish",
+        error instanceof Error ? error.message : "Something went wrong syncing orders."
       );
     } finally {
       setSyncing(false);
@@ -907,12 +905,16 @@ export default function Home() {
   const AUTO_SYNC_MS = 6 * 60 * 60 * 1000;
   const syncKey = `profitsync:lastSync:${allStores ? "all" : activeStoreId ?? "none"}`;
 
+  // "Synced 2h ago" in the top bar.
+  const lastSyncedAt = useLastSynced(syncKey);
+
   function recordSync() {
     try {
       window.localStorage.setItem(syncKey, String(Date.now()));
     } catch {
       // Private browsing etc.: auto-sync just runs again next time.
     }
+    window.dispatchEvent(new Event(SYNC_EVENT));
   }
 
   useEffect(() => {
@@ -945,8 +947,7 @@ export default function Home() {
     void (async () => {
       await Promise.resolve();
       if (failed) {
-        setSyncError(true);
-        setSyncMessage(`eBay store not connected: ${failed}`);
+        toast.error("eBay store not connected", failed);
         return;
       }
       await loadStores();
@@ -1353,485 +1354,179 @@ export default function Home() {
     navigate("orders");
   }
 
-  const navItemClass = (active: boolean) =>
-    `flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm transition ${
-      active
-        ? "border border-blue-500/20 bg-blue-600/15 font-semibold text-blue-400"
-        : "border border-transparent font-medium text-slate-400 hover:bg-white/5 hover:text-white"
-    }`;
-
   // ==========================================================
   // RENDER
   // ==========================================================
 
+  const dateRangeOptions = [
+    { value: "7d", label: "7 days" },
+    { value: "30d", label: "30 days" },
+    { value: "90d", label: "90 days" },
+    { value: "all", label: "All time" },
+  ] as const;
+  const showsDateRange = view === "dashboard" || view === "orders" || view === "expenses";
+
   return (
-    <div className="ps-app min-h-screen bg-[#0b1120] text-slate-100">
-      {/* =====================================================
-          MOBILE HEADER
-      ===================================================== */}
+    <div className="ps-app min-h-screen bg-bg text-ink-2">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[80] focus:rounded-lg focus:bg-accent focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-on-accent"
+      >
+        Skip to content
+      </a>
 
-      <div className="flex items-center justify-between border-b border-white/10 bg-[#101827] px-5 py-4 lg:hidden">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white">
-            <Icon name="chart" />
-          </div>
+      <Sidebar
+        view={view}
+        onNavigate={(target) => (target === "orders" ? goToOrders() : navigate(target))}
+        badges={{
+          taxes: onFreePlan ? <Badge tone="accent">Pro</Badge> : null,
+          billing: billing?.enabled ? (
+            <Badge tone={billing.plan === "free" ? "neutral" : "profit"}>{PLANS[billing.plan].name}</Badge>
+          ) : null,
+        }}
+        mobileOpen={sidebarOpen}
+        onCloseMobile={() => setSidebarOpen(false)}
+        onLogout={() => void logout()}
+        loggingOut={loggingOut}
+      />
 
-          <span className="text-lg font-bold">
-            ProfitSync
-          </span>
-        </div>
-
-        <button
-          type="button"
-          onClick={() =>
-            setSidebarOpen(!sidebarOpen)
+      <div className="ps-main">
+        <Topbar
+          onOpenMenu={() => setSidebarOpen(true)}
+          hasStore={stores.length > 0}
+          syncing={syncing}
+          syncDisabled={syncing || loading || loggingOut || savingId !== null}
+          onSync={() => void syncEbayOrders()}
+          lastSyncedAt={lastSyncedAt}
+          now={currentTime}
+          switcher={
+            <StoreSwitcher
+              stores={stores}
+              loading={storesLoading}
+              allStores={allStores}
+              canUseAllStores={storePlan.canUseAllStores}
+              atStoreLimit={storePlan.maxStores !== null && stores.length >= storePlan.maxStores}
+              onUpgrade={goToPlans}
+              onSwitch={switchStore}
+              onRemove={removeStore}
+            />
           }
-          aria-label="Toggle navigation"
-          className="relative z-50 rounded-lg border border-white/10 p-2 text-slate-300"
-        >
-          <Icon
-            name={sidebarOpen ? "close" : "menu"}
-          />
-        </button>
-      </div>
-
-      {/* =====================================================
-          MOBILE SIDEBAR BACKDROP
-      ===================================================== */}
-
-      {sidebarOpen && (
-        <button
-          type="button"
-          aria-label="Close navigation"
-          onClick={() => setSidebarOpen(false)}
-          className="fixed inset-0 z-30 bg-black/60 lg:hidden"
         />
-      )}
 
-      {/* =====================================================
-          SIDEBAR
-      ===================================================== */}
-
-      <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-white/[0.07] bg-[#101827] transition-transform duration-200 lg:translate-x-0 ${
-          sidebarOpen
-            ? "translate-x-0"
-            : "-translate-x-full"
-        }`}
-      >
-        {/* Logo */}
-
-        <div className="flex h-20 items-center gap-3 border-b border-white/[0.07] px-6">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-lg shadow-blue-600/20">
-            <Icon name="chart" size={22} />
-          </div>
-
-          <div>
-            <h1 className="text-xl font-bold tracking-tight text-white">
-              ProfitSync
-            </h1>
-
-            <p className="text-[11px] tracking-widest text-slate-500">
-              SELLER ANALYTICS
-            </p>
-          </div>
-        </div>
-
-        {/* Navigation */}
-
-        <div className="flex-1 px-4 py-7">
-          <p className="mb-4 px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-            Workspace
-          </p>
-
-          <nav className="space-y-2">
-            <button
-              type="button"
-              onClick={() => navigate("dashboard")}
-              aria-current={view === "dashboard" ? "page" : undefined}
-              className={navItemClass(view === "dashboard")}
-            >
-              <Icon name="dashboard" size={19} />
-              Dashboard
-            </button>
-
-            <button
-              type="button"
-              onClick={() => goToOrders()}
-              aria-current={view === "orders" ? "page" : undefined}
-              className={navItemClass(view === "orders")}
-            >
-              <Icon name="orders" size={19} />
-              Orders
-            </button>
-
-            <button
-              type="button"
-              onClick={() => navigate("listings")}
-              aria-current={view === "listings" ? "page" : undefined}
-              className={navItemClass(view === "listings")}
-            >
-              <Icon name="box" size={19} />
-              Listings
-            </button>
-
-            <button
-              type="button"
-              onClick={() => navigate("expenses")}
-              aria-current={view === "expenses" ? "page" : undefined}
-              className={navItemClass(view === "expenses")}
-            >
-              <Icon name="wallet" size={19} />
-              Expenses
-            </button>
-
-            <button
-              type="button"
-              onClick={() => navigate("taxes")}
-              aria-current={view === "taxes" ? "page" : undefined}
-              className={navItemClass(view === "taxes")}
-            >
-              <Icon name="receipt" size={19} />
-              Taxes
-              {onFreePlan && (
-                <span className="ml-auto rounded-md bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-300">
-                  Pro
-                </span>
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => navigate("billing")}
-              aria-current={view === "billing" ? "page" : undefined}
-              className={navItemClass(view === "billing")}
-            >
-              <Icon name="sparkle" size={19} />
-              Plan &amp; billing
-              {billing?.enabled && (
-                <span
-                  className={`ml-auto rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                    billing.plan === "free" ? "bg-white/[0.06] text-slate-400" : "bg-emerald-500/15 text-emerald-300"
-                  }`}
-                >
-                  {PLANS[billing.plan].name}
-                </span>
-              )}
-            </button>
-
-          </nav>
-
-          {/* eBay stores: switch between them or add another */}
-
-          <StoreSwitcher
-            stores={stores}
-            loading={storesLoading}
-            allStores={allStores}
-            canUseAllStores={storePlan.canUseAllStores}
-            atStoreLimit={storePlan.maxStores !== null && stores.length >= storePlan.maxStores}
-            onUpgrade={goToPlans}
-            onSwitch={switchStore}
-            onRemove={removeStore}
-          />
-        </div>
-
-        {/* Account, settings and log out */}
-
-        <div className="border-t border-white/[0.07] p-4">
-          <AccountBadge />
-
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => navigate("settings")}
-              aria-current={view === "settings" ? "page" : undefined}
-              className={`flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
-                view === "settings"
-                  ? "bg-blue-600/15 text-blue-400"
-                  : "text-slate-400 hover:bg-white/5 hover:text-white"
-              }`}
-            >
-              <Icon name="gear" size={17} />
-              Settings
-            </button>
-
-            <button
-              type="button"
-              onClick={logout}
-              disabled={
-                loggingOut ||
-                syncing ||
-                savingId !== null
-              }
-              className="flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-400 transition hover:bg-red-500/10 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Icon name="logout" size={17} />
-
-              {loggingOut
-                ? "Logging out..."
-                : "Log out"}
-            </button>
-          </div>
-        </div>
-      </aside>
-
-      {/* =====================================================
-          MAIN CONTENT
-      ===================================================== */}
-
-      <main
-        id="dashboard"
-        className="min-h-screen lg:ml-64"
-      >
-        <div className="mx-auto max-w-[1600px] px-5 py-7 sm:px-8 lg:px-10">
-          {/* =================================================
-              TOP HEADER
-          ================================================= */}
-
-          <header className="mb-9 flex flex-col gap-5 border-b border-white/[0.07] pb-7 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="mb-2 flex items-center gap-2 text-xs text-slate-500">
-                <span>Workspace</span>
-                <span>/</span>
-                <span className="text-blue-400">
-                  {view === "dashboard" ? "Dashboard" : VIEW_COPY[view].title}
-                </span>
-              </div>
-
-              {view === "dashboard" ? (
+      <main id="main-content" tabIndex={-1} className="outline-none">
+        <div className="mx-auto max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+          <PageHeader
+            title={
+              view === "dashboard" ? (
                 <>
-                  <h2 className="text-3xl font-bold tracking-tight text-white">
-                    {greeting}
-                    {greetingName ? `, ${greetingName}` : ""}{" "}
-                    <span aria-hidden="true">👋</span>
-                  </h2>
-
-                  <p className="mt-2 text-sm leading-6 text-slate-400">
-                    {loading || !activity ? (
-                      "Loading your latest numbers…"
-                    ) : orders.length === 0 ? (
-                      <>No sales yet. Click &ldquo;Sync eBay Orders&rdquo; to bring in your eBay sales.</>
-                    ) : (
-                      <>
-                        <span className="font-semibold text-slate-200">Today:</span>{" "}
-                        {activity.today.sales === 0 ? (
-                          "no sales yet"
-                        ) : (
-                          <>
-                            {activity.today.sales} sale{activity.today.sales === 1 ? "" : "s"} ·{" "}
-                            <span className={`font-semibold ${activity.today.profit < 0 ? "text-red-400" : "text-emerald-400"}`}>
-                              {activity.today.profit < 0 ? "−" : "+"}{money(Math.abs(activity.today.profit))}
-                            </span>
-                          </>
-                        )}
-                        <span className="mx-2 text-slate-600">|</span>
-                        <span className="font-semibold text-slate-200">Last 7 days:</span>{" "}
-                        {activity.week.sales === 0 ? (
-                          "no sales"
-                        ) : (
-                          <>
-                            {activity.week.sales} sale{activity.week.sales === 1 ? "" : "s"} ·{" "}
-                            <span className={`font-semibold ${activity.week.profit < 0 ? "text-red-400" : "text-emerald-400"}`}>
-                              {activity.week.profit < 0 ? "−" : "+"}{money(Math.abs(activity.week.profit))}
-                            </span>
-                          </>
-                        )}
-                        {activity.needsCost > 0 && (
-                          <>
-                            <span className="mx-2 text-slate-600">|</span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setDateRange("all");
-                                goToOrders("pending");
-                              }}
-                              className="font-semibold text-amber-400 transition hover:text-amber-300"
-                            >
-                              {activity.needsCost} order{activity.needsCost === 1 ? " needs" : "s need"} a cost →
-                            </button>
-                          </>
-                        )}
-                      </>
-                    )}
-                  </p>
+                  {greeting}
+                  {greetingName ? `, ${greetingName}` : ""}
                 </>
               ) : (
+                VIEW_COPY[view].title
+              )
+            }
+            description={
+              view !== "dashboard" ? (
+                VIEW_COPY[view].subtitle
+              ) : loading || !activity ? (
+                "Loading your latest numbers…"
+              ) : orders.length === 0 ? (
+                <>No sales yet. Press Sync to bring in your orders.</>
+              ) : (
+                <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span>
+                    <span className="font-medium text-ink-2">Today</span>{" "}
+                    {activity.today.sales === 0 ? (
+                      "no sales yet"
+                    ) : (
+                      <>
+                        {activity.today.sales} sale{activity.today.sales === 1 ? "" : "s"} ·{" "}
+                        <span className={`ps-num font-semibold ${activity.today.profit < 0 ? "text-loss" : "text-profit"}`}>
+                          {activity.today.profit < 0 ? "−" : "+"}
+                          {money(Math.abs(activity.today.profit))}
+                        </span>
+                      </>
+                    )}
+                  </span>
+                  <span className="text-line-strong" aria-hidden="true">|</span>
+                  <span>
+                    <span className="font-medium text-ink-2">Last 7 days</span>{" "}
+                    {activity.week.sales === 0 ? (
+                      "no sales"
+                    ) : (
+                      <>
+                        {activity.week.sales} sale{activity.week.sales === 1 ? "" : "s"} ·{" "}
+                        <span className={`ps-num font-semibold ${activity.week.profit < 0 ? "text-loss" : "text-profit"}`}>
+                          {activity.week.profit < 0 ? "−" : "+"}
+                          {money(Math.abs(activity.week.profit))}
+                        </span>
+                      </>
+                    )}
+                  </span>
+                  {activity.needsCost > 0 && (
+                    <>
+                      <span className="text-line-strong" aria-hidden="true">|</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDateRange("all");
+                          goToOrders("pending");
+                        }}
+                        className="font-medium text-warn underline-offset-2 hover:underline"
+                      >
+                        {activity.needsCost} order{activity.needsCost === 1 ? " needs" : "s need"} a cost →
+                      </button>
+                    </>
+                  )}
+                </span>
+              )
+            }
+            actions={
+              showsDateRange ? (
                 <>
-                  <h2 className="text-3xl font-bold tracking-tight text-white">
-                    {VIEW_COPY[view].title}
-                  </h2>
-
-                  <p className="mt-2 text-sm text-slate-400">
-                    {VIEW_COPY[view].subtitle}
-                  </p>
+                  {view === "orders" && (
+                    <>
+                      {!allStores && <StoreShippingSetting value={storeShipping} onSave={saveStoreShipping} />}
+                      <OrderTools
+                        orders={toolOrders}
+                        periodLabel={dateRangeLabel(dateRange)}
+                        shippingEnabled={shippingEnabled}
+                        onImported={loadOrders}
+                        allowed={limits.exports}
+                        onUpgrade={goToPlans}
+                      />
+                    </>
+                  )}
+                  <SegmentedControl label="Date range" value={dateRange} options={dateRangeOptions} onChange={setDateRange} />
                 </>
-              )}
-            </div>
-
-            <button
-              type="button"
-              onClick={syncEbayOrders}
-              disabled={
-                syncing ||
-                loading ||
-                loggingOut ||
-                savingId !== null
-              }
-              className="inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/15 transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Icon
-                name="refresh"
-                size={17}
-                className={
-                  syncing ? "animate-spin" : ""
-                }
-              />
-
-              {syncing
-                ? "Syncing Orders..."
-                : "Sync eBay Orders"}
-            </button>
-          </header>
-
-          {/* =================================================
-              NOTIFICATIONS
-          ================================================= */}
-
-          {logoutError && (
-            <div
-              role="alert"
-              className="mb-6 rounded-xl border border-red-500/20 bg-red-500/10 px-5 py-4 text-sm text-red-400"
-            >
-              {logoutError}
-            </div>
-          )}
-
-          {syncMessage && (
-            <div
-              role={syncError ? "alert" : "status"}
-              className={`mb-6 rounded-xl border px-5 py-4 text-sm ${
-                syncError
-                  ? "border-red-500/20 bg-red-500/10 text-red-400"
-                  : "border-emerald-500/20 bg-emerald-500/10 text-emerald-400"
-              }`}
-            >
-              <div className="flex items-start justify-between gap-4">
-                <span>{syncMessage}</span>
-                <button
-                  type="button"
-                  onClick={() => setSyncMessage("")}
-                  aria-label="Dismiss"
-                  className="shrink-0 opacity-60 transition hover:opacity-100"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-          )}
+              ) : undefined
+            }
+          />
 
           {loadError && (
-            <div
-              role="alert"
-              className="mb-6 rounded-xl border border-red-500/20 bg-red-500/10 px-5 py-4 text-sm text-red-400"
-            >
+            <Notice tone="loss" className="mb-6">
               {loadError}
-            </div>
+            </Notice>
           )}
 
           {onFreePlan && billing && (view === "dashboard" || view === "orders") && (
-            <div className="mb-6 flex flex-col gap-3 rounded-xl border border-blue-500/20 bg-blue-500/[0.06] px-5 py-3.5 text-sm sm:flex-row sm:items-center sm:justify-between">
-              <span className="text-slate-300">
-                <span className="font-semibold text-white">Free plan</span> ·{" "}
-                {Math.min(billing.usage.ordersThisMonth, billing.limits.monthlyOrders ?? 0)} of{" "}
-                {billing.limits.monthlyOrders} orders this month · last {billing.limits.historyDays} days of history
-              </span>
-              <button
-                type="button"
-                onClick={goToPlans}
-                className="shrink-0 self-start rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-500 sm:self-auto"
-              >
-                Unlock unlimited orders
-              </button>
-            </div>
+            <Notice
+              className="mb-6"
+              action={
+                <Button variant="primary" size="sm" onClick={goToPlans}>
+                  Unlock unlimited orders
+                </Button>
+              }
+            >
+              <span className="font-semibold text-ink">Free plan</span> ·{" "}
+              <span className="ps-num">
+                {Math.min(billing.usage.ordersThisMonth, billing.limits.monthlyOrders ?? 0)} of {billing.limits.monthlyOrders}
+              </span>{" "}
+              orders this month · last {billing.limits.historyDays} days of history
+            </Notice>
           )}
 
-          {(view === "dashboard" || view === "orders" || view === "expenses") && (
-          <>
-          {/* =================================================
-              OVERVIEW HEADER + DATE FILTER
-          ================================================= */}
-
-          <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
-            <div className="min-w-[12rem]">
-              <h3 className="text-lg font-semibold text-white">
-                {view === "orders" ? "Order history" : view === "expenses" ? "Your expenses" : "Financial Overview"}
-              </h3>
-
-              <p className="mt-1 text-xs text-slate-500">
-                {view === "orders" ? "Choose which orders to show" : view === "expenses" ? "Choose which expenses to show" : "Your store at a glance"}
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-            {view === "orders" && (
-              <div className="flex flex-wrap items-center gap-2">
-                {!allStores && <StoreShippingSetting value={storeShipping} onSave={saveStoreShipping} />}
-                <OrderTools
-                  orders={toolOrders}
-                  periodLabel={dateRangeLabel(dateRange)}
-                  shippingEnabled={shippingEnabled}
-                  onImported={loadOrders}
-                  allowed={limits.exports}
-                  onUpgrade={goToPlans}
-                />
-              </div>
-            )}
-
-            <div className="relative inline-flex w-fit items-center">
-              <Icon
-                name="calendar"
-                size={16}
-                className="absolute left-3 text-slate-400"
-              />
-
-              <select
-                value={dateRange}
-                onChange={(event) =>
-                  setDateRange(
-                    event.target.value as DateRange
-                  )
-                }
-                aria-label="Select date range"
-                className="min-w-44 appearance-none rounded-xl border border-white/10 bg-[#151d2d] py-2.5 pl-10 pr-10 text-sm text-slate-200 outline-none transition focus:border-blue-500"
-              >
-                <option value="7d">
-                  Last 7 Days
-                </option>
-
-                <option value="30d">
-                  Last 30 Days
-                </option>
-
-                <option value="90d">
-                  Last 90 Days
-                </option>
-
-                <option value="all">
-                  All Time
-                </option>
-              </select>
-
-              <Icon
-                name="chevron"
-                size={15}
-                className="pointer-events-none absolute right-3 rotate-90 text-slate-500"
-              />
-            </div>
-            </div>
-          </div>
-
-          </>
-          )}
           {view === "dashboard" && (
           <>
           {/* =================================================
@@ -2739,6 +2434,7 @@ export default function Home() {
           </footer>
         </div>
       </main>
+      </div>
 
       {/* =====================================================
           ORDER DETAILS PANEL

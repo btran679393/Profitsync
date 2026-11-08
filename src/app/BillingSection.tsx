@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useConfirm } from "@/components/ui";
 import {
   PLANS,
   yearlySavingsCents,
@@ -87,6 +88,7 @@ export default function BillingSection({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const confirm = useConfirm();
 
   if (loading && !billing) {
     return <div className="h-64 animate-pulse rounded-2xl bg-white/[0.04]" />;
@@ -102,10 +104,11 @@ export default function BillingSection({
     setError("");
     setMessage("");
     if (paying) {
-      const ok = window.confirm(
-        `Switch to ${PLANS[target].name} (${interval === "year" ? "yearly" : "monthly"})?\n\n` +
-          "Stripe charges or credits the difference for the rest of your current period straight away."
-      );
+      const ok = await confirm({
+        title: `Switch to ${PLANS[target].name} (${interval === "year" ? "yearly" : "monthly"})?`,
+        description: "Stripe charges or credits the difference for the rest of your current period straight away.",
+        confirmLabel: "Switch plan",
+      });
       if (!ok) return;
     }
     setBusy(`${target}-${interval}`);

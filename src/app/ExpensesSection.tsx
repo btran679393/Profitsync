@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { EXPENSE_CATEGORIES, MAX_CATEGORY_LENGTH } from "@/lib/expenses";
+import { useConfirm } from "@/components/ui";
 
 // An expense as saved.
 export type Expense = {
@@ -93,6 +94,7 @@ export default function ExpensesSection({
   const [busyId, setBusyId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   // Suggested categories first, then the seller's own.
   const options = useMemo(() => {
@@ -189,10 +191,22 @@ export default function ExpensesSection({
   }
 
   async function remove(expense: ExpenseEntry) {
-    const text = expense.repeatMonthly
-      ? `Delete the monthly ${expense.category.toLowerCase()} expense and every month it counted in?\n\nTo keep past months and only stop it from now on, choose "Stop" instead.`
-      : `Delete this ${money(Number(expense.amount))} ${expense.category.toLowerCase()} expense?`;
-    if (!window.confirm(text)) return;
+    const ok = await confirm(
+      expense.repeatMonthly
+        ? {
+            title: `Delete the monthly ${expense.category.toLowerCase()} expense?`,
+            description: 'This removes it from every month it counted in. To keep past months and only stop it from now on, choose "Stop" instead.',
+            confirmLabel: "Delete",
+            danger: true,
+          }
+        : {
+            title: `Delete this ${money(Number(expense.amount))} expense?`,
+            description: `${expense.category}${expense.note ? ` · ${expense.note}` : ""}`,
+            confirmLabel: "Delete",
+            danger: true,
+          }
+    );
+    if (!ok) return;
     setBusyId(expense.id);
     try {
       await onDelete(expense.id);
@@ -203,7 +217,12 @@ export default function ExpensesSection({
   }
 
   async function stopRepeating(expense: ExpenseEntry) {
-    if (!window.confirm(`Stop the monthly ${expense.category.toLowerCase()} expense? Past months stay counted.`)) return;
+    const ok = await confirm({
+      title: `Stop the monthly ${expense.category.toLowerCase()} expense?`,
+      description: "It won't count from today on. Past months stay counted.",
+      confirmLabel: "Stop repeating",
+    });
+    if (!ok) return;
     setBusyId(expense.id);
     try {
       await onUpdate(expense.id, { endedOn: todayKey() });

@@ -65,7 +65,9 @@ function initials(name: string): string {
   return letters.toUpperCase();
 }
 
-export default function AccountBadge() {
+// The signed-in person: avatar, name and email. "sidebar" is the compact
+// version at the bottom of the sidebar (just the avatar when it's collapsed).
+export default function AccountBadge({ variant = "card" }: { variant?: "card" | "sidebar" }) {
   const [account, setAccount] = useState<Account | null>(null);
   const [pictureFailed, setPictureFailed] = useState(false);
 
@@ -80,37 +82,52 @@ export default function AccountBadge() {
     };
   }, []);
 
-  if (!account) return null;
+  if (!account) {
+    return variant === "sidebar" ? <div className="h-10" aria-hidden="true" /> : null;
+  }
 
   const label = PROVIDER_LABELS[account.provider];
+  const small = variant === "sidebar";
+  const size = small ? "h-8 w-8 text-xs" : "h-10 w-10 text-sm";
+  const avatar =
+    account.picture && !pictureFailed ? (
+      // eslint-disable-next-line @next/next/no-img-element -- avatar comes from Google/Facebook, not a static asset
+      <img
+        src={account.picture}
+        alt=""
+        referrerPolicy="no-referrer"
+        onError={() => setPictureFailed(true)}
+        className={`${size} shrink-0 rounded-full object-cover ring-1 ring-line`}
+      />
+    ) : (
+      <div className={`${size} flex shrink-0 items-center justify-center rounded-full bg-accent font-semibold text-on-accent`}>
+        {initials(account.name || account.email || "?")}
+      </div>
+    );
+
+  if (small) {
+    return (
+      <div className="ps-nav-item flex items-center gap-2.5 rounded-lg px-1.5 py-1" title={`${account.name} · ${account.email}`}>
+        {avatar}
+        <div className="ps-hide-collapsed min-w-0">
+          <p className="truncate text-[13px] font-semibold text-ink">{account.name}</p>
+          <p className="truncate text-xs text-subtle">{account.email}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="mb-3 flex items-center gap-3 rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-3">
-      {account.picture && !pictureFailed ? (
-        // eslint-disable-next-line @next/next/no-img-element -- avatar comes from Google/Facebook, not a static asset
-        <img
-          src={account.picture}
-          alt=""
-          referrerPolicy="no-referrer"
-          onError={() => setPictureFailed(true)}
-          className="h-10 w-10 shrink-0 rounded-full object-cover"
-        />
-      ) : (
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">
-          {initials(account.name || account.email || "?")}
-        </div>
-      )}
-
+    <div className="flex items-center gap-3 rounded-xl border border-line bg-surface-2 px-3 py-3">
+      {avatar}
       <div className="min-w-0">
-        <p className="truncate text-sm font-semibold text-white" title={account.name}>
+        <p className="truncate text-sm font-semibold text-ink" title={account.name}>
           {account.name}
         </p>
-        <p className="truncate text-xs text-slate-400" title={account.email}>
+        <p className="truncate text-xs text-muted" title={account.email}>
           {account.email}
         </p>
-        {label && (
-          <p className="mt-0.5 text-[11px] text-slate-500">Signed in with {label}</p>
-        )}
+        {label && <p className="mt-0.5 text-[11px] text-subtle">Signed in with {label}</p>}
       </div>
     </div>
   );
