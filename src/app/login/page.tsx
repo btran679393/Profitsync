@@ -522,6 +522,7 @@ export default function LoginPage() {
         <footer className="relative z-10 flex flex-col items-center justify-between gap-2 px-6 py-6 text-xs text-slate-400 sm:flex-row sm:px-10">
           <p>© {new Date().getFullYear()} ProfitSync</p>
           <div className="flex items-center gap-4">
+            <Link href="/pricing" className="transition hover:text-slate-600">Pricing</Link>
             <Link href="/privacy" className="transition hover:text-slate-600">Privacy</Link>
             <span className="flex items-center gap-1.5">
               <Icon name="shield" className="h-3.5 w-3.5" />

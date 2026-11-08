@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { Pool } from "pg";
+import { getUserPlan } from "@/lib/billing/server";
 
 type EbayTokenResponse = {
   access_token?: string;
@@ -46,7 +47,8 @@ export async function GET(request: NextRequest) {
     } else {
       url.searchParams.set("ebay", "connected");
     }
-    url.hash = "listings";
+    // Over the plan's store limit: land on the plans page.
+    url.hash = body.upgrade ? "billing" : "listings";
     const response = NextResponse.redirect(url, 303);
 
     response.cookies.delete("ebay_oauth_state");
@@ -323,6 +325,10 @@ export async function GET(request: NextRequest) {
       const client = await pool.connect();
 
       try {
+        // Read the plan first: outside the transaction, so a missing billing
+        // table can't abort it.
+        const { limits } = await getUserPlan(client, user.id);
+
         await client.query("BEGIN");
 
         // Prevent concurrent connections for the same seller.
@@ -393,6 +399,25 @@ export async function GET(request: NextRequest) {
             ]
           );
         } else {
+          // A new store: only if the seller's plan has room for it.
+          if (limits.maxStores !== null) {
+            const count = await client.query<{ count: string }>(
+              `SELECT count(*) AS count FROM public."ebayConnection"
+               WHERE "userId" = $1 AND environment = $2 AND "ebayUserId" IS NOT NULL`,
+              [user.id, environment]
+            );
+            if (Number(count.rows[0]?.count ?? 0) >= limits.maxStores) {
+              await client.query("ROLLBACK");
+              return respond(
+                {
+                  error: `Your plan includes ${limits.maxStores} eBay store${limits.maxStores === 1 ? "" : "s"}. Upgrade to add another.`,
+                  upgrade: true,
+                },
+                402
+              );
+            }
+          }
+
           await client.query(
             `
               INSERT INTO public."ebayConnection" (

@@ -3,7 +3,7 @@ import { Pool } from "pg";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/prisma/db";
 import { fetchSellerProfile, saveSellerProfile } from "@/lib/ebay/sellerProfile";
-import { pickConnection, storeForSync } from "@/lib/ebay/activeStore";
+import { pickConnection, storeAllowedByPlan, storeForSync } from "@/lib/ebay/activeStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -194,6 +194,19 @@ export async function POST(request: Request) {
         { error: "No eBay account connected. Please connect your eBay account." },
         { status: 409 }
       );
+    }
+
+    // Stores beyond the seller's plan limit can't sync.
+    const planPool = new Pool({ connectionString: databaseUrl, max: 1, connectionTimeoutMillis: 10000 });
+    try {
+      if (!(await storeAllowedByPlan(planPool, user.id, connection.ebayUserId))) {
+        return NextResponse.json(
+          { error: "Your plan doesn't include this many stores. Upgrade to sync this one.", upgrade: true },
+          { status: 402 }
+        );
+      }
+    } finally {
+      await planPool.end();
     }
 
     // STEP 4: The order sync refreshes the access token; ask for that first.

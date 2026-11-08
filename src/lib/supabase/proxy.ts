@@ -59,12 +59,15 @@ export async function updateSession(request: NextRequest) {
     pathname === "/login" ||
     pathname === "/privacy" ||
     pathname === "/privacy/" ||
+    pathname === "/pricing" ||
     pathname === "/reset-password" ||
     pathname.startsWith("/auth/callback");
 
-  // eBay must be able to deliver account-deletion notifications.
+  // eBay must be able to deliver account-deletion notifications, and Stripe
+  // payment events. Both check their own signatures.
   const isEbayWebhook =
-    pathname === "/api/ebay/account-deletion";
+    pathname === "/api/ebay/account-deletion" ||
+    pathname === "/api/billing/webhook";
 
   // Protect all other pages and API routes.
   if (!isAuthenticated && !isPublicPage && !isEbayWebhook) {

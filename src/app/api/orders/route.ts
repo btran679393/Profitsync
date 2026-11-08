@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Pool } from "pg";
 import { existingColumns } from "@/lib/db/optionalColumns";
 import { resolveActiveEbayUserId } from "@/lib/ebay/activeStore";
+import { getUserPlan } from "@/lib/billing/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -20,16 +21,33 @@ export async function GET() {
     const extra = OPTIONAL_COLUMNS.filter((c) => optional.has(c)).map((c) => ` "${c}",`).join("");
     // Only the store the seller is viewing (all orders if none is connected).
     const store = await resolveActiveEbayUserId(pool, user);
+    // Free plan: only recent history, and only the month's allowance of
+    // orders (the earliest ones each month), even if more were saved earlier.
+    const { limits } = await getUserPlan(pool, user.id);
+    const limited = limits.monthlyOrders !== null;
+    const historyDays = limited ? limits.historyDays : null;
+    const perMonth = limits.monthlyOrders;
     const result = await pool.query(`
+      WITH ranked AS (
+        SELECT o.*,
+          row_number() OVER (
+            PARTITION BY date_trunc('month', o."orderDate" AT TIME ZONE 'UTC')
+            ORDER BY o."orderDate" ASC, o.id ASC
+          ) AS "monthRank"
+        FROM public."order" o
+        WHERE o."userId" = $1
+      )
       SELECT id, "ebayOrderId", "ebayUserId", "ebayBuyerId", "userId",
         item, "imageUrl", "salePrice", "ebayFees", "productCost", status,
         "refundAmount", "refundedAt", "refundOutcome", "refundShippingLoss", "refundFeeLoss",
         "ebayItemId", quantity,${extra}
         "orderDate", "createdAt", "updatedAt"
-      FROM public."order"
-      WHERE "userId" = $1 AND ($2::text IS NULL OR "ebayUserId" = $2)
+      FROM ranked
+      WHERE ($2::text IS NULL OR "ebayUserId" = $2)
+        AND ($3::int IS NULL OR "orderDate" >= now() - make_interval(days => $3::int))
+        AND ($4::int IS NULL OR "monthRank" <= $4::int)
       ORDER BY "orderDate" DESC, id DESC
-    `, [user.id, store]);
+    `, [user.id, store, historyDays, perMonth]);
     return NextResponse.json(result.rows, {
       headers: {
         "Cache-Control": "private, no-store, max-age=0",

@@ -288,17 +288,30 @@ function ShippingImport({
   );
 }
 
+export function ProTag() {
+  return (
+    <span className="ml-0.5 rounded-md bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-300">
+      Pro
+    </span>
+  );
+}
+
 // The two buttons shown on the Orders page.
 export default function OrderTools({
   orders,
   periodLabel,
   shippingEnabled,
   onImported,
+  allowed = true,
+  onUpgrade,
 }: {
   orders: ToolOrder[];
   periodLabel: string;
   shippingEnabled: boolean;
   onImported: () => Promise<void>;
+  // False on the Free plan: the buttons show a Pro tag and open the plans page.
+  allowed?: boolean;
+  onUpgrade?: () => void;
 }) {
   const [importing, setImporting] = useState(false);
   const knownOrderIds = useMemo(
@@ -312,17 +325,17 @@ export default function OrderTools({
     <div className="flex flex-wrap gap-2">
       <button
         type="button"
-        onClick={() => downloadCsv(orders, periodLabel)}
-        disabled={orders.length === 0}
+        onClick={() => (allowed ? downloadCsv(orders, periodLabel) : onUpgrade?.())}
+        disabled={allowed && orders.length === 0}
         className={button}
         title="Spreadsheet of the orders in this date range, for taxes or your accountant"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" /></svg>
-        Download CSV
+        Download CSV{!allowed && <ProTag />}
       </button>
-      <button type="button" onClick={() => setImporting(true)} className={button} title="Fill in label costs from a Pirate Ship (or similar) spreadsheet">
+      <button type="button" onClick={() => (allowed ? setImporting(true) : onUpgrade?.())} className={button} title="Fill in label costs from a Pirate Ship (or similar) spreadsheet">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 21V9" /><path d="m7 14 5-5 5 5" /><path d="M5 3h14" /></svg>
-        Import shipping costs
+        Import shipping costs{!allowed && <ProTag />}
       </button>
       {importing && (
         <ShippingImport

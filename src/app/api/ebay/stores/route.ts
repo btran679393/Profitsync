@@ -3,6 +3,7 @@ import { Pool } from "pg";
 import { createClient } from "@/lib/supabase/server";
 import { existingColumns } from "@/lib/db/optionalColumns";
 import { ALL_STORES, activeStoreId, isAllStores, pickConnection } from "@/lib/ebay/activeStore";
+import { getUserPlan, lockedStoreIds } from "@/lib/billing/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,7 +28,7 @@ async function loadStores(pool: Pool, userId: string) {
     SELECT "ebayUserId", "updatedAt", "refreshTokenExpiresAt"${extra}
     FROM public."ebayConnection"
     WHERE "userId" = $1 AND environment = 'PRODUCTION' AND "ebayUserId" IS NOT NULL
-    ORDER BY "createdAt" ASC
+    ORDER BY "createdAt" ASC, id ASC
     `,
     [userId]
   );
@@ -47,16 +48,25 @@ export async function GET() {
   const pool = newPool();
   try {
     const rows = await loadStores(pool, user.id);
-    const allStores = isAllStores(user) && rows.length > 1;
-    const active = allStores ? null : pickConnection(rows, activeStoreId(user))?.ebayUserId ?? null;
+    // Stores beyond the plan's limit stay connected but locked.
+    const { limits } = await getUserPlan(pool, user.id);
+    const locked = lockedStoreIds(rows.map((row) => row.ebayUserId as string), limits);
+    const usable = rows.filter((row) => !locked.has(row.ebayUserId as string));
+    const allStores = isAllStores(user) && rows.length > 1 && limits.allStoresView && locked.size === 0;
+    const active = allStores
+      ? null
+      : pickConnection(usable, isAllStores(user) ? null : activeStoreId(user))?.ebayUserId ?? null;
     return NextResponse.json(
       {
         allStores,
+        canUseAllStores: limits.allStoresView && locked.size === 0,
+        maxStores: limits.maxStores,
         stores: rows.map((row) => ({
           id: row.ebayUserId,
           name: row.storeName || row.ebayUsername || "eBay store",
           username: row.ebayUsername ?? null,
           active: row.ebayUserId === active,
+          locked: locked.has(row.ebayUserId as string),
           // eBay sign-ins last about 18 months; after that, reconnect.
           needsReconnect: new Date(row.refreshTokenExpiresAt).getTime() <= Date.now(),
         })),
@@ -96,6 +106,19 @@ export async function POST(request: Request) {
     const rows = await loadStores(pool, user.id);
     if (id !== ALL_STORES && !rows.some((row) => row.ebayUserId === id)) {
       return NextResponse.json({ error: "That store isn't connected to your account." }, { status: 404 });
+    }
+    const { limits } = await getUserPlan(pool, user.id);
+    const locked = lockedStoreIds(rows.map((row) => row.ebayUserId as string), limits);
+    if (id === ALL_STORES ? !limits.allStoresView || locked.size > 0 : locked.has(id)) {
+      return NextResponse.json(
+        {
+          error: id === ALL_STORES
+            ? "The All stores view is part of the Pro and Ultimate plans."
+            : "Your plan doesn't include this many stores. Upgrade to use this one.",
+          upgrade: true,
+        },
+        { status: 402 }
+      );
     }
     const { error: updateError } = await supabase.auth.updateUser({ data: { activeEbayUserId: id } });
     if (updateError) throw updateError;

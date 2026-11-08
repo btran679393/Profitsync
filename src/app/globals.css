@@ -131,3 +131,26 @@ body {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* Printing the tax summary: only the report, black on white. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #tax-report,
+  #tax-report * {
+    visibility: visible;
+  }
+  #tax-report {
+    position: absolute;
+    inset: 0 0 auto 0;
+    padding: 0 0.5in;
+  }
+  html,
+  body {
+    background: #fff !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}

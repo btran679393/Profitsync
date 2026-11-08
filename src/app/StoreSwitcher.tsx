@@ -8,6 +8,8 @@ export type EbayStore = {
   username: string | null;
   active: boolean;
   needsReconnect: boolean;
+  // Beyond the plan's store limit: kept, but can't be opened until upgrading.
+  locked?: boolean;
 };
 
 // Starts eBay's sign-in. eBay always asks which account to use, so this
@@ -15,6 +17,14 @@ export type EbayStore = {
 const CONNECT_URL = "/api/ebay/auth";
 
 export const ALL_STORES = "__all__";
+
+function LockIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-slate-500" aria-label="Needs an upgrade">
+      <rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </svg>
+  );
+}
 
 function StoreAvatar({ name, active }: { name: string; active: boolean }) {
   return (
@@ -42,10 +52,18 @@ export default function StoreSwitcher({
   onSwitch,
   onRemove,
   allStores = false,
+  canUseAllStores = true,
+  atStoreLimit = false,
+  onUpgrade,
 }: {
   stores: EbayStore[];
   loading: boolean;
   allStores?: boolean;
+  // The plan includes the combined "All stores" view.
+  canUseAllStores?: boolean;
+  // Adding another store needs a bigger plan.
+  atStoreLimit?: boolean;
+  onUpgrade?: () => void;
   onSwitch: (id: string) => Promise<void>;
   onRemove: (id: string) => Promise<void>;
 }) {
@@ -96,6 +114,12 @@ This deletes its orders, listings and costs from ProfitSync. Nothing changes on 
   async function choose(id: string) {
     if (showingAll ? id === ALL_STORES : id === active?.id) {
       setOpen(false);
+      return;
+    }
+    const lockedChoice = id === ALL_STORES ? !canUseAllStores : stores.find((s) => s.id === id)?.locked;
+    if (lockedChoice) {
+      setOpen(false);
+      onUpgrade?.();
       return;
     }
     setSwitchingId(id);
@@ -187,9 +211,11 @@ This deletes its orders, listings and costs from ProfitSync. Nothing changes on 
                   <StoreAvatar name="All" active={showingAll} />
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm text-white">All stores</span>
-                    <span className="block text-[11px] text-slate-500">Combined totals</span>
+                    <span className="block text-[11px] text-slate-500">{canUseAllStores ? "Combined totals" : "Pro and Ultimate plans"}</span>
                   </span>
-                  {switchingId === ALL_STORES ? (
+                  {!canUseAllStores ? (
+                    <LockIcon />
+                  ) : switchingId === ALL_STORES ? (
                     <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-500 border-t-transparent" aria-label="Working" />
                   ) : showingAll ? (
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-label="Current view"><path d="M5 12l4 4L19 6" /></svg>
@@ -214,9 +240,13 @@ This deletes its orders, listings and costs from ProfitSync. Nothing changes on 
                     <StoreAvatar name={store.name} active={(!showingAll && store.id === active.id)} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm text-white">{store.name}</span>
-                      {store.needsReconnect && <span className="block text-[11px] text-amber-400">Needs reconnecting</span>}
+                      {store.locked ? (
+                        <span className="block text-[11px] text-slate-500">Locked · upgrade to open</span>
+                      ) : store.needsReconnect && <span className="block text-[11px] text-amber-400">Needs reconnecting</span>}
                     </span>
-                    {switchingId === store.id ? (
+                    {store.locked ? (
+                      <LockIcon />
+                    ) : switchingId === store.id ? (
                       <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-500 border-t-transparent" aria-label="Working" />
                     ) : (!showingAll && store.id === active.id) ? (
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-label="Current store">
@@ -240,13 +270,30 @@ This deletes its orders, listings and costs from ProfitSync. Nothing changes on 
               ))}
             </div>
             <div className="border-t border-white/[0.07] p-1.5">
-              <a
-                href={CONNECT_URL}
-                className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-sm font-semibold text-blue-400 transition hover:bg-blue-500/10 hover:text-blue-300"
-              >
-                <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-dashed border-blue-500/40 text-base">+</span>
-                Add eBay store
-              </a>
+              {atStoreLimit ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    onUpgrade?.();
+                  }}
+                  className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left text-sm font-semibold text-blue-400 transition hover:bg-blue-500/10 hover:text-blue-300"
+                >
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-dashed border-blue-500/40 text-base">+</span>
+                  <span>
+                    Add eBay store
+                    <span className="block text-[11px] font-normal text-slate-500">Upgrade for more stores</span>
+                  </span>
+                </button>
+              ) : (
+                <a
+                  href={CONNECT_URL}
+                  className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-sm font-semibold text-blue-400 transition hover:bg-blue-500/10 hover:text-blue-300"
+                >
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-dashed border-blue-500/40 text-base">+</span>
+                  Add eBay store
+                </a>
+              )}
             </div>
           </div>
         )}

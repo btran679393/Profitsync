@@ -20,7 +20,8 @@
     "event-notification-nodejs-sdk": "^1.0.3",
     "next": "^16.4.2",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "stripe": "^23.1.0"
   },
   "devDependencies": {
     "@prisma/cli-engine": "^0.2.3",

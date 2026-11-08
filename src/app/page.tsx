@@ -17,6 +17,9 @@ import StoreSwitcher, { type EbayStore } from "./StoreSwitcher";
 import OrderTools, { type ToolOrder } from "./OrderTools";
 import ExpensesSection, { type Expense, type NewExpense } from "./ExpensesSection";
 import MonthlyGoal from "./MonthlyGoal";
+import BillingSection from "./BillingSection";
+import TaxReport, { type TaxOrder } from "./TaxReport";
+import { PLANS, type BillingStatus } from "@/lib/billing/plans";
 
 // ============================================================
 // TYPES
@@ -100,6 +103,9 @@ type SyncResponse = {
   imagesUpdated?: number;
   refundedImported?: number;
   refundsUpdated?: number;
+  // Free plan: new orders left out because the month's allowance is used.
+  ordersOverPlanLimit?: number;
+  monthlyOrderLimit?: number | null;
   error?: string;
   message?: string;
 };
@@ -135,7 +141,9 @@ type IconName =
   | "save"
   | "info"
   | "trending"
-  | "external";
+  | "external"
+  | "receipt"
+  | "sparkle";
 
 // ============================================================
 // UTILITIES
@@ -245,7 +253,7 @@ function getOrderProfit(order: Order) {
 // so Back, refresh and shared links open the same view.
 // ============================================================
 
-type View = "dashboard" | "orders" | "listings" | "expenses";
+type View = "dashboard" | "orders" | "listings" | "expenses" | "taxes" | "billing";
 
 function subscribeToHash(onChange: () => void) {
   window.addEventListener("hashchange", onChange);
@@ -256,6 +264,8 @@ function viewFromHash(hash: string): View {
   if (hash === "#orders") return "orders";
   if (hash === "#listings") return "listings";
   if (hash === "#expenses") return "expenses";
+  if (hash === "#taxes") return "taxes";
+  if (hash === "#billing") return "billing";
   return "dashboard";
 }
 
@@ -275,6 +285,14 @@ const VIEW_COPY: Record<View, { title: string; subtitle: string }> = {
   expenses: {
     title: "Expenses",
     subtitle: "Packing supplies, subscriptions and other costs that aren't tied to one sale.",
+  },
+  taxes: {
+    title: "Taxes",
+    subtitle: "Your yearly profit and loss, ready for tax time.",
+  },
+  billing: {
+    title: "Plan & billing",
+    subtitle: "Choose the plan that fits your business.",
   },
 };
 
@@ -521,6 +539,17 @@ function Icon({
         <path d="M3 3v18h18" />
         <path d="m7 15 4-4 3 3 6-7" />
       </>
+    ),
+
+    receipt: (
+      <>
+        <path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2z" />
+        <path d="M9 8h6M9 12h6M9 16h3" />
+      </>
+    ),
+
+    sparkle: (
+      <path d="M12 3l1.9 5.6L19.5 10.5l-5.6 1.9L12 18l-1.9-5.6L4.5 10.5l5.6-1.9z" />
     ),
 
     wallet: (
@@ -1768,6 +1797,11 @@ export default function Home() {
   const [storesLoading, setStoresLoading] = useState(true);
   // "All stores" view: every connected store's data combined.
   const [allStores, setAllStores] = useState(false);
+  // What the seller's plan allows for stores (from /api/ebay/stores).
+  const [storePlan, setStorePlan] = useState<{ canUseAllStores: boolean; maxStores: number | null }>({
+    canUseAllStores: true,
+    maxStores: null,
+  });
   const activeStore = allStores ? null : stores.find((store) => store.active) ?? null;
   const activeStoreId = activeStore?.id ?? null;
 
@@ -1827,9 +1861,11 @@ export default function Home() {
     try {
       const response = await fetch("/api/ebay/stores", { cache: "no-store" });
       if (!response.ok) throw new Error("Failed to load stores.");
-      const data: { stores?: EbayStore[]; allStores?: boolean } = await response.json();
+      const data: { stores?: EbayStore[]; allStores?: boolean; canUseAllStores?: boolean; maxStores?: number | null } =
+        await response.json();
       setStores(data.stores ?? []);
       setAllStores(Boolean(data.allStores));
+      setStorePlan({ canUseAllStores: data.canUseAllStores !== false, maxStores: data.maxStores ?? null });
     } catch (error) {
       console.error("Loading eBay stores failed:", error);
     } finally {
@@ -1879,6 +1915,52 @@ export default function Home() {
     if (!response.ok) throw new Error("Couldn't delete the expense.");
     await loadExpenses();
   }
+
+  // ----------------------------------------------------------
+  // PLAN & BILLING
+  // ----------------------------------------------------------
+
+  const [billing, setBilling] = useState<BillingStatus | null>(null);
+  const [billingLoading, setBillingLoading] = useState(true);
+  const [billingNotice, setBillingNotice] = useState("");
+
+  const loadBilling = useCallback(async (syncFromStripe = false) => {
+    try {
+      const response = await fetch(`/api/billing${syncFromStripe ? "?sync=1" : ""}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("Failed to load plan.");
+      setBilling((await response.json()) as BillingStatus);
+    } catch (error) {
+      console.error("Loading plan failed:", error);
+    } finally {
+      setBillingLoading(false);
+    }
+  }, []);
+
+  // Until billing is switched on (or while it loads), nothing is limited.
+  const limits = billing?.enabled ? billing.limits : PLANS.ultimate.limits;
+  const onFreePlan = Boolean(billing?.enabled && billing.plan === "free");
+  const goToPlans = () => navigate("billing");
+
+  // Coming back from Stripe checkout or the billing portal.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const result = params.get("billing");
+    void (async () => {
+      await Promise.resolve();
+      if (!result) {
+        await loadBilling();
+        return;
+      }
+      history.replaceState(null, "", window.location.pathname + window.location.hash);
+      await loadBilling(true);
+      if (result === "success") setBillingNotice("Payment received. Your new plan is active, thank you!");
+      else if (result === "cancelled") setBillingNotice("Checkout cancelled. You haven't been charged.");
+      // Plan changes can unlock stores and orders: refresh everything.
+      await Promise.all([loadStores(), loadOrders()]);
+    })();
+    // Runs once when the page opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Switch the whole dashboard to another connected store.
   async function switchStore(id: string) {
@@ -1968,7 +2050,7 @@ export default function Home() {
     try {
       // In the "All stores" view, refresh each store's listings in turn.
       let data: { success?: boolean; message?: string; error?: string } = {};
-      for (const target of allStores ? stores : [null]) {
+      for (const target of allStores ? stores.filter((s) => !s.locked) : [activeStore]) {
         const response = await fetch(
           target ? `/api/ebay/listings/sync?store=${encodeURIComponent(target.id)}` : "/api/ebay/listings/sync",
           { method: "POST", cache: "no-store" }
@@ -2158,7 +2240,7 @@ export default function Home() {
       setSyncError(false);
 
       // In the "All stores" view, sync each store in turn.
-      const targets: Array<EbayStore | null> = allStores ? stores : [null];
+      const targets: Array<EbayStore | null> = allStores ? stores.filter((s) => !s.locked) : [activeStore];
       const results: SyncResponse[] = [];
       for (const target of targets) {
         const response = await fetch(
@@ -2197,10 +2279,17 @@ export default function Home() {
         (data.refundsUpdated ?? 0) + (data.refundedImported ?? 0) > 0 &&
           `${(data.refundsUpdated ?? 0) + (data.refundedImported ?? 0)} refund${(data.refundsUpdated ?? 0) + (data.refundedImported ?? 0) === 1 ? "" : "s"} updated`,
       ].filter(Boolean);
+      const overLimit = results.reduce((sum, r) => sum + (r.ordersOverPlanLimit ?? 0), 0);
       setSyncMessage(
         `Synced ${found} eBay order${found === 1 ? "" : "s"}` +
-          (changes.length ? ` · ${changes.join(" · ")}` : " · everything is up to date")
+          (changes.length ? ` · ${changes.join(" · ")}` : " · everything is up to date") +
+          (overLimit > 0
+            ? ` · ${overLimit} more order${overLimit === 1 ? "" : "s"} not imported: the Free plan includes ` +
+              `${results[0]?.monthlyOrderLimit ?? 50} a month. Upgrade on Plan & billing for unlimited orders.`
+            : "")
       );
+      // Usage on the plan page changes with new orders.
+      if (onFreePlan) void loadBilling();
     } catch (error) {
       console.error("Sync failed:", error);
 
@@ -2235,6 +2324,8 @@ export default function Home() {
 
   useEffect(() => {
     if (storesLoading || stores.length === 0) return;
+    // Automatic sync is a paid-plan feature (Free syncs with the button).
+    if (billingLoading || !limits.autoSync) return;
     let last = 0;
     try {
       last = Number(window.localStorage.getItem(syncKey) ?? 0);
@@ -2246,9 +2337,9 @@ export default function Home() {
       await Promise.resolve();
       await syncEbayOrders();
     })();
-    // Re-check only when the store (or All stores view) changes.
+    // Re-check only when the store (or All stores view) or plan changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storesLoading, syncKey]);
+  }, [storesLoading, syncKey, billingLoading, limits.autoSync]);
 
   // Coming back from eBay after adding a store: show the result, and bring
   // in the new store's orders and listings straight away.
@@ -2299,6 +2390,22 @@ export default function Home() {
   // ----------------------------------------------------------
 
   // Orders in the chosen date range, flattened for the CSV download.
+  // Every loaded order, for the yearly tax summary.
+  const taxOrders = useMemo<TaxOrder[]>(
+    () =>
+      orders.map((order) => ({
+        orderDate: order.orderDate,
+        refunded: isFullyRefunded(order),
+        salePrice: order.salePrice,
+        ebayFees: order.ebayFees,
+        otherFees: order.otherFees,
+        shipping: getShippingCost(order),
+        productCost: hasRecordedCost(order) ? Number(order.savedProductCost) : null,
+        refundLoss: getRefundLoss(order),
+      })),
+    [orders]
+  );
+
   const toolOrders = useMemo<ToolOrder[]>(
     () =>
       periodOrders.map((order) => ({
@@ -2784,11 +2891,54 @@ export default function Home() {
               Expenses
             </button>
 
+            <button
+              type="button"
+              onClick={() => navigate("taxes")}
+              aria-current={view === "taxes" ? "page" : undefined}
+              className={navItemClass(view === "taxes")}
+            >
+              <Icon name="receipt" size={19} />
+              Taxes
+              {onFreePlan && (
+                <span className="ml-auto rounded-md bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-300">
+                  Pro
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => navigate("billing")}
+              aria-current={view === "billing" ? "page" : undefined}
+              className={navItemClass(view === "billing")}
+            >
+              <Icon name="sparkle" size={19} />
+              Plan &amp; billing
+              {billing?.enabled && (
+                <span
+                  className={`ml-auto rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                    billing.plan === "free" ? "bg-white/[0.06] text-slate-400" : "bg-emerald-500/15 text-emerald-300"
+                  }`}
+                >
+                  {PLANS[billing.plan].name}
+                </span>
+              )}
+            </button>
+
           </nav>
 
           {/* eBay stores: switch between them or add another */}
 
-          <StoreSwitcher stores={stores} loading={storesLoading} allStores={allStores} onSwitch={switchStore} onRemove={removeStore} />
+          <StoreSwitcher
+            stores={stores}
+            loading={storesLoading}
+            allStores={allStores}
+            canUseAllStores={storePlan.canUseAllStores}
+            atStoreLimit={storePlan.maxStores !== null && stores.length >= storePlan.maxStores}
+            onUpgrade={goToPlans}
+            onSwitch={switchStore}
+            onRemove={removeStore}
+          />
         </div>
 
         {/* Logout */}
@@ -2982,7 +3132,24 @@ export default function Home() {
             </div>
           )}
 
-          {view !== "listings" && (
+          {onFreePlan && billing && (view === "dashboard" || view === "orders") && (
+            <div className="mb-6 flex flex-col gap-3 rounded-xl border border-blue-500/20 bg-blue-500/[0.06] px-5 py-3.5 text-sm sm:flex-row sm:items-center sm:justify-between">
+              <span className="text-slate-300">
+                <span className="font-semibold text-white">Free plan</span> ·{" "}
+                {Math.min(billing.usage.ordersThisMonth, billing.limits.monthlyOrders ?? 0)} of{" "}
+                {billing.limits.monthlyOrders} orders this month · last {billing.limits.historyDays} days of history
+              </span>
+              <button
+                type="button"
+                onClick={goToPlans}
+                className="shrink-0 self-start rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-500 sm:self-auto"
+              >
+                Unlock unlimited orders
+              </button>
+            </div>
+          )}
+
+          {(view === "dashboard" || view === "orders" || view === "expenses") && (
           <>
           {/* =================================================
               OVERVIEW HEADER + DATE FILTER
@@ -3008,6 +3175,8 @@ export default function Home() {
                   periodLabel={dateRangeLabel(dateRange)}
                   shippingEnabled={shippingEnabled}
                   onImported={loadOrders}
+                  allowed={limits.exports}
+                  onUpgrade={goToPlans}
                 />
               </div>
             )}
@@ -3878,6 +4047,29 @@ export default function Home() {
           {/* =================================================
               LISTINGS
           ================================================= */}
+
+          {view === "taxes" && (
+            <TaxReport
+              orders={taxOrders}
+              expenses={expenses}
+              storeLabel={allStores ? "All stores" : activeStore?.name ?? "Your store"}
+              allowed={limits.exports}
+              onUpgrade={goToPlans}
+            />
+          )}
+
+          {view === "billing" && (
+            <BillingSection
+              key={billing?.interval ?? "none"}
+              billing={billing}
+              loading={billingLoading}
+              notice={billingNotice}
+              onChanged={async () => {
+                await loadBilling(true);
+                await Promise.all([loadStores(), loadOrders()]);
+              }}
+            />
+          )}
 
           {view === "expenses" && (
             <ExpensesSection

@@ -2,7 +2,9 @@ import { createHmac } from "crypto";
 import { Pool, type PoolClient } from "pg";
 import { NextResponse } from "next/server";
 import { db } from "@/prisma/db";
-import { pickConnection, storeForSync } from "@/lib/ebay/activeStore";
+import { pickConnection, storeAllowedByPlan, storeForSync } from "@/lib/ebay/activeStore";
+import { allowedNewOrderIds, getUserPlan, ordersPerMonth } from "@/lib/billing/server";
+import type { PlanLimits } from "@/lib/billing/plans";
 import { createClient } from "@/lib/supabase/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -1112,6 +1114,25 @@ export async function POST(request: Request) {
         { status: 401 }
       );
     }
+    // The seller's plan: stores beyond its limit can't sync, and Free
+    // imports a limited number of orders.
+    const planPool = new Pool({ connectionString: databaseUrl, max: 1, connectionTimeoutMillis: 10000 });
+    let planLimits: PlanLimits;
+    try {
+      if (!(await storeAllowedByPlan(planPool, userId, ebayUserId))) {
+        return NextResponse.json(
+          {
+            error: "Your plan doesn't include this many stores.",
+            message: "Upgrade your plan to sync this store.",
+            upgrade: true,
+          },
+          { status: 402 }
+        );
+      }
+      planLimits = (await getUserPlan(planPool, userId)).limits;
+    } finally {
+      await planPool.end();
+    }
     let accessToken =
       connection.accessToken;
     // --------------------------------------------------------
@@ -1226,7 +1247,7 @@ export async function POST(request: Request) {
     // --------------------------------------------------------
     // STEP 6: Retrieve historical eBay orders
     // --------------------------------------------------------
-    const ebayOrders =
+    let ebayOrders =
       await getHistoricalOrders(
         ebayApiBase,
         accessToken
@@ -1289,6 +1310,28 @@ export async function POST(request: Request) {
           order,
         ])
     );
+    // --------------------------------------------------------
+    // STEP 8b: Plan limits on new orders (history window and,
+    // on Free, the monthly allowance). Orders already imported
+    // keep updating as usual.
+    // --------------------------------------------------------
+    let ordersOverPlanLimit = 0;
+    if (planLimits.monthlyOrders !== null || planLimits.historyDays < ORDER_HISTORY_DAYS) {
+      const newOrders = ebayOrders.filter(
+        (order): order is EbayOrder & { orderId: string } =>
+          Boolean(order.orderId) && !existingIds.has(order.orderId)
+      );
+      const countPool = new Pool({ connectionString: databaseUrl, max: 1, connectionTimeoutMillis: 10000 });
+      try {
+        const { allowed, overLimit } = allowedNewOrderIds(newOrders, await ordersPerMonth(countPool, userId), planLimits);
+        ordersOverPlanLimit = overLimit;
+        ebayOrders = ebayOrders.filter(
+          (order) => !order.orderId || existingIds.has(order.orderId) || allowed.has(order.orderId)
+        );
+      } finally {
+        await countPool.end();
+      }
+    }
     // --------------------------------------------------------
     // STEP 9: Retrieve missing listing images
     // --------------------------------------------------------
@@ -1800,6 +1843,8 @@ export async function POST(request: Request) {
       otherFeeOrdersFound: otherFeesByOrder?.size ?? null,
       fullyRefunded,
       partiallyRefunded,
+      ordersOverPlanLimit,
+      monthlyOrderLimit: planLimits.monthlyOrders,
       financialOrdersMatched:
         feesByOrder.size,
       refundedOrdersMatched:

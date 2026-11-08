@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { Pool } from "pg";
 import { createClient } from "@/lib/supabase/server";
 import { isMissingColumn } from "@/lib/db/optionalColumns";
+import { getUserPlan } from "@/lib/billing/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,6 +43,12 @@ export async function POST(request: Request) {
 
   const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 10000 });
   try {
+    if (!(await getUserPlan(pool, user.id)).limits.exports) {
+      return NextResponse.json(
+        { error: "Importing shipping costs is part of the Pro and Ultimate plans.", upgrade: true },
+        { status: 402 }
+      );
+    }
     const result = await pool.query(
       `
       UPDATE public."order" o
