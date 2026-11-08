@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { Pool } from "pg";
+import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { setupNeeded } from "@/lib/setupNeeded";
 
@@ -34,7 +34,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const shippingCost = clearing ? null : parseMoney(body.shippingCost);
     if (!clearing && shippingCost === null) return NextResponse.json({ error: "Enter a shipping cost like 4.50." }, { status: 400 });
     if (!process.env.DATABASE_URL) return NextResponse.json({ error: "Database configuration unavailable." }, { status: 503 });
-    const shipPool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 10000 });
+    const shipPool = getPool();
     try {
       const result = await shipPool.query(
         `UPDATE public."order" SET "shippingCost" = $1::numeric, "updatedAt" = NOW()
@@ -52,7 +52,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       }
       console.error("Saving shipping cost failed:", e);
       return NextResponse.json({ error: "Couldn't save the shipping cost." }, { status: 500 });
-    } finally { await shipPool.end(); }
+    }
   }
   const refundMode = "refundOutcome" in body;
   let cost: number | null = null;
@@ -73,7 +73,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (cost === null) return NextResponse.json({ error: "Invalid product cost." }, { status: 400 });
   }
   if (!process.env.DATABASE_URL) return NextResponse.json({ error: "Database configuration unavailable." }, { status: 503 });
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 10000 });
+  const pool = getPool();
   try {
     const result = refundMode
       ? await pool.query(`
@@ -100,5 +100,5 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   } catch (e) {
     console.error("Order update failed:", e);
     return NextResponse.json({ error: "Failed to update order. Verify the refund-loss database migration ran." }, { status: 500 });
-  } finally { await pool.end(); }
+  }
 }

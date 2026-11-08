@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { Pool } from "pg";
+import { getPool } from "@/lib/db/pool";
+import type { Pool } from "pg";
 import { createClient } from "@/lib/supabase/server";
 import { resolveActiveEbayUserId } from "@/lib/ebay/activeStore";
 import { existingColumns } from "@/lib/db/optionalColumns";
@@ -18,7 +19,7 @@ function isMissingTable(error: unknown) {
 }
 
 function newPool() {
-  return new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 10000 });
+  return getPool();
 }
 
 async function signedInUser() {
@@ -81,8 +82,6 @@ export async function GET() {
     if (isMissingTable(e)) return NextResponse.json({ enabled: false, expenses: [] });
     console.error("Loading expenses failed:", e);
     return NextResponse.json({ error: "Couldn't load expenses." }, { status: 500 });
-  } finally {
-    await pool.end();
   }
 }
 
@@ -130,8 +129,6 @@ export async function POST(request: Request) {
     }
     console.error("Adding expense failed:", e);
     return NextResponse.json({ error: "Couldn't add the expense." }, { status: 500 });
-  } finally {
-    await pool.end();
   }
 }
 
@@ -200,8 +197,6 @@ export async function PATCH(request: Request) {
   } catch (e) {
     console.error("Updating expense failed:", e);
     return NextResponse.json({ error: "Couldn't save the expense." }, { status: 500 });
-  } finally {
-    await pool.end();
   }
 }
 
@@ -222,7 +217,5 @@ export async function DELETE(request: Request) {
   } catch (e) {
     console.error("Deleting expense failed:", e);
     return NextResponse.json({ error: "Couldn't delete the expense." }, { status: 500 });
-  } finally {
-    await pool.end();
   }
 }

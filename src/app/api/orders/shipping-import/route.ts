@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { Pool } from "pg";
+import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { isMissingColumn } from "@/lib/db/optionalColumns";
 import { getUserPlan } from "@/lib/billing/server";
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
   if (ids.length === 0) return NextResponse.json({ error: "No usable rows to import." }, { status: 400 });
   if (!process.env.DATABASE_URL) return NextResponse.json({ error: "Database configuration unavailable." }, { status: 503 });
 
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 10000 });
+  const pool = getPool();
   try {
     if (!(await getUserPlan(pool, user.id)).limits.exports) {
       return NextResponse.json(
@@ -72,7 +72,5 @@ export async function POST(request: Request) {
     }
     console.error("Shipping import failed:", e);
     return NextResponse.json({ error: "Couldn't import shipping costs." }, { status: 500 });
-  } finally {
-    await pool.end();
   }
 }

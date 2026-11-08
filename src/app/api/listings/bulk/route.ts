@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { Pool } from "pg";
+import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { isMissingColumn } from "@/lib/db/optionalColumns";
 import { setupNeeded } from "@/lib/setupNeeded";
@@ -56,7 +56,7 @@ export async function POST(request: Request) {
   if (!process.env.DATABASE_URL) {
     return NextResponse.json({ error: "Database configuration unavailable." }, { status: 503 });
   }
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 10000 });
+  const pool = getPool();
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -117,6 +117,5 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Couldn't update the listings. Please try again." }, { status: 500 });
   } finally {
     client.release();
-    await pool.end();
   }
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
+import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
-import { Pool } from "pg";
 import { existingColumns } from "@/lib/db/optionalColumns";
 import { resolveActiveEbayUserId } from "@/lib/ebay/activeStore";
 import { getUserPlan } from "@/lib/billing/server";
@@ -15,7 +15,7 @@ export async function GET() {
   const { data: { user }, error } = await supabase.auth.getUser();
   if (error || !user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
   if (!process.env.DATABASE_URL) return NextResponse.json({ error: "Database configuration unavailable." }, { status: 503 });
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 10000 });
+  const pool = getPool();
   try {
     const optional = await existingColumns(pool, "order", OPTIONAL_COLUMNS);
     const extra = OPTIONAL_COLUMNS.filter((c) => optional.has(c)).map((c) => ` "${c}",`).join("");
@@ -58,5 +58,5 @@ export async function GET() {
   } catch (e) {
     console.error("Failed to retrieve orders:", e);
     return NextResponse.json({ error: "Failed to retrieve orders." }, { status: 500 });
-  } finally { await pool.end(); }
+  }
 }

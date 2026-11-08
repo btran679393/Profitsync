@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { Pool } from "pg";
+import { getPool } from "@/lib/db/pool";
+import type { Pool } from "pg";
 import { createClient } from "@/lib/supabase/server";
 import { existingColumns } from "@/lib/db/optionalColumns";
 import { ALL_STORES, activeStoreId, isAllStores, pickConnection } from "@/lib/ebay/activeStore";
@@ -17,7 +18,7 @@ type StoreRow = {
 };
 
 function newPool() {
-  return new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 10000 });
+  return getPool();
 }
 
 async function loadStores(pool: Pool, userId: string) {
@@ -76,8 +77,6 @@ export async function GET() {
   } catch (e) {
     console.error("Loading eBay stores failed:", e);
     return NextResponse.json({ error: "Couldn't load your eBay stores." }, { status: 500 });
-  } finally {
-    await pool.end();
   }
 }
 
@@ -126,8 +125,6 @@ export async function POST(request: Request) {
   } catch (e) {
     console.error("Switching eBay store failed:", e);
     return NextResponse.json({ error: "Couldn't switch stores. Please try again." }, { status: 500 });
-  } finally {
-    await pool.end();
   }
 }
 
@@ -197,6 +194,5 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Couldn't remove the store. Please try again." }, { status: 500 });
   } finally {
     client.release();
-    await pool.end();
   }
 }

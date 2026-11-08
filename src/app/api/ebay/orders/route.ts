@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
+import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
-import { Pool } from "pg";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,11 +44,7 @@ export async function GET() {
     // STEP 3: Connect to PostgreSQL.
     // ============================================================
 
-    const pool = new Pool({
-      connectionString: databaseUrl,
-      max: 1,
-      connectionTimeoutMillis: 10000,
-    });
+    const pool = getPool();
 
     try {
       // ============================================================
@@ -110,7 +106,6 @@ export async function GET() {
       // STEP 6: Close the database connection.
       // ============================================================
 
-      await pool.end();
     }
   } catch (error) {
     console.error("Failed to retrieve eBay orders:", error);

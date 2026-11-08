@@ -1,6 +1,6 @@
 
 import { createHash, createHmac } from "crypto";
-import { Pool } from "pg";
+import { getPool } from "@/lib/db/pool";
 import { NextRequest, NextResponse } from "next/server";
 import { validateSignature } from "event-notification-nodejs-sdk/lib/validator";
 
@@ -218,11 +218,7 @@ export async function POST(request: NextRequest) {
     ])
   );
 
-  const pool = new Pool({
-    connectionString: databaseUrl,
-    max: 1,
-    connectionTimeoutMillis: 10000,
-  });
+  const pool = getPool();
 
   let client;
 
@@ -385,6 +381,5 @@ export async function POST(request: NextRequest) {
     );
   } finally {
     client?.release();
-    await pool.end();
   }
 }

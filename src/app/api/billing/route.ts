@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { Pool } from "pg";
+import { getPool } from "@/lib/db/pool";
 import type Stripe from "stripe";
 import { createClient } from "@/lib/supabase/server";
 import { billingStatus, getStripe, loadSubscription, saveSubscription, stripeConfigured } from "@/lib/billing/server";
@@ -19,7 +19,7 @@ export async function GET(request: Request) {
   if (error || !user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
   if (!process.env.DATABASE_URL) return NextResponse.json({ error: "Database configuration unavailable." }, { status: 503 });
 
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 10000 });
+  const pool = getPool();
   try {
     if (stripeConfigured() && new URL(request.url).searchParams.get("sync") === "1") {
       const { row } = await loadSubscription(pool, user.id);
@@ -33,8 +33,6 @@ export async function GET(request: Request) {
   } catch (e) {
     console.error("Loading billing status failed:", e);
     return NextResponse.json({ error: "Couldn't load your plan." }, { status: 500 });
-  } finally {
-    await pool.end();
   }
 }
 

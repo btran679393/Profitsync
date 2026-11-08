@@ -1,5 +1,6 @@
 import { createHmac } from "crypto";
-import { Pool, type PoolClient } from "pg";
+import { getPool } from "@/lib/db/pool";
+import type { PoolClient } from "pg";
 import { NextResponse } from "next/server";
 import { db } from "@/prisma/db";
 import { pickConnection, storeAllowedByPlan, storeForSync } from "@/lib/ebay/activeStore";
@@ -1116,7 +1117,7 @@ export async function POST(request: Request) {
     }
     // The seller's plan: stores beyond its limit can't sync, and Free
     // imports a limited number of orders.
-    const planPool = new Pool({ connectionString: databaseUrl, max: 1, connectionTimeoutMillis: 10000 });
+    const planPool = getPool();
     let planLimits: PlanLimits;
     try {
       if (!(await storeAllowedByPlan(planPool, userId, ebayUserId))) {
@@ -1131,7 +1132,7 @@ export async function POST(request: Request) {
       }
       planLimits = (await getUserPlan(planPool, userId)).limits;
     } finally {
-      await planPool.end();
+      // The shared pool stays open for the next request.
     }
     let accessToken =
       connection.accessToken;
@@ -1321,7 +1322,7 @@ export async function POST(request: Request) {
         (order): order is EbayOrder & { orderId: string } =>
           Boolean(order.orderId) && !existingIds.has(order.orderId)
       );
-      const countPool = new Pool({ connectionString: databaseUrl, max: 1, connectionTimeoutMillis: 10000 });
+      const countPool = getPool();
       try {
         const { allowed, overLimit } = allowedNewOrderIds(newOrders, await ordersPerMonth(countPool, userId), planLimits);
         ordersOverPlanLimit = overLimit;
@@ -1329,7 +1330,7 @@ export async function POST(request: Request) {
           (order) => !order.orderId || existingIds.has(order.orderId) || allowed.has(order.orderId)
         );
       } finally {
-        await countPool.end();
+        // The shared pool stays open for the next request.
       }
     }
     // --------------------------------------------------------
@@ -1403,11 +1404,7 @@ export async function POST(request: Request) {
     // --------------------------------------------------------
     // STEP 11: Connect to PostgreSQL
     // --------------------------------------------------------
-    const pool = new Pool({
-      connectionString: databaseUrl,
-      max: 1,
-      connectionTimeoutMillis: 10000,
-    });
+    const pool = getPool();
     try {
       const client =
         await pool.connect();
@@ -1816,7 +1813,7 @@ export async function POST(request: Request) {
         client.release();
       }
     } finally {
-      await pool.end();
+      // The shared pool stays open for the next request.
     }
     // ========================================================
     // SYNC COMPLETE

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { Pool } from "pg";
+import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { setupNeeded } from "@/lib/setupNeeded";
 
@@ -54,7 +54,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ it
   if (!process.env.DATABASE_URL) {
     return NextResponse.json({ error: "Database configuration unavailable." }, { status: 503 });
   }
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 10000 });
+  const pool = getPool();
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -120,6 +120,5 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ it
     return NextResponse.json({ error: "Couldn't save the cost. Please try again." }, { status: 500 });
   } finally {
     client.release();
-    await pool.end();
   }
 }

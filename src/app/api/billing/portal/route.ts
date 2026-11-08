@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { Pool } from "pg";
+import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { getStripe, loadSubscription, siteOrigin, stripeConfigured } from "@/lib/billing/server";
 
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
   if (!stripeConfigured()) return NextResponse.json({ error: "Billing isn't set up yet." }, { status: 503 });
   if (!process.env.DATABASE_URL) return NextResponse.json({ error: "Database configuration unavailable." }, { status: 503 });
 
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 10000 });
+  const pool = getPool();
   try {
     const { row } = await loadSubscription(pool, user.id);
     if (!row?.stripeCustomerId) {
@@ -32,7 +32,5 @@ export async function POST(request: Request) {
   } catch (e) {
     console.error("Opening billing portal failed:", e);
     return NextResponse.json({ error: "Couldn't open the billing page. Please try again." }, { status: 500 });
-  } finally {
-    await pool.end();
   }
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { Pool } from "pg";
+import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { getStripe, loadSubscription, stripeConfigured } from "@/lib/billing/server";
 
@@ -32,7 +32,7 @@ export async function DELETE(request: Request) {
   }
   if (!process.env.DATABASE_URL) return NextResponse.json({ error: "Database configuration unavailable." }, { status: 503 });
 
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 10000 });
+  const pool = getPool();
   try {
     // 1. Stop any paid plan so they're never charged again.
     if (stripeConfigured()) {
@@ -79,7 +79,5 @@ export async function DELETE(request: Request) {
       { error: "Couldn't delete your account. Please try again, or contact support." },
       { status: 500 }
     );
-  } finally {
-    await pool.end();
   }
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { Pool } from "pg";
+import { getPool } from "@/lib/db/pool";
+import type { Pool } from "pg";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/prisma/db";
 import { fetchSellerProfile, saveSellerProfile } from "@/lib/ebay/sellerProfile";
@@ -197,7 +198,7 @@ export async function POST(request: Request) {
     }
 
     // Stores beyond the seller's plan limit can't sync.
-    const planPool = new Pool({ connectionString: databaseUrl, max: 1, connectionTimeoutMillis: 10000 });
+    const planPool = getPool();
     try {
       if (!(await storeAllowedByPlan(planPool, user.id, connection.ebayUserId))) {
         return NextResponse.json(
@@ -206,7 +207,7 @@ export async function POST(request: Request) {
         );
       }
     } finally {
-      await planPool.end();
+      // The shared pool stays open for the next request.
     }
 
     // STEP 4: The order sync refreshes the access token; ask for that first.
@@ -233,12 +234,7 @@ export async function POST(request: Request) {
     }
 
     // STEP 6: Save listings; mark ones no longer active as ended
-    pool = new Pool({
-      connectionString: databaseUrl,
-      max: 1,
-      connectionTimeoutMillis: 10000,
-      idleTimeoutMillis: 10000,
-    });
+    pool = getPool();
     const client = await pool.connect();
     let ended = 0;
 
@@ -317,6 +313,6 @@ export async function POST(request: Request) {
     console.error("ProfitSync listing synchronization failed:", error);
     return NextResponse.json({ error: "Listing synchronization failed." }, { status: 500 });
   } finally {
-    if (pool) await pool.end();
+    // The shared pool stays open for the next request.
   }
 }

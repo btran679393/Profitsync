@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { Pool } from "pg";
+import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { fetchSellerProfile, isMissingColumn, saveSellerProfile } from "@/lib/ebay/sellerProfile";
 import { activeStoreId } from "@/lib/ebay/activeStore";
@@ -32,7 +32,7 @@ export async function GET() {
   const noCache = { headers: { "Cache-Control": "private, no-store" } };
   if (!process.env.DATABASE_URL) return NextResponse.json(empty, noCache);
 
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 10000 });
+  const pool = getPool();
   try {
     const latestConnection = (columns: string) =>
       pool.query<ConnectionRow>(
@@ -75,7 +75,5 @@ export async function GET() {
   } catch (e) {
     console.error("Loading eBay profile failed:", e);
     return NextResponse.json(empty, noCache);
-  } finally {
-    await pool.end();
   }
 }

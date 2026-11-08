@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { Pool } from "pg";
+import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { existingColumns } from "@/lib/db/optionalColumns";
 import { resolveActiveEbayUserId } from "@/lib/ebay/activeStore";
@@ -23,7 +23,7 @@ export async function GET() {
     return NextResponse.json({ error: "Database configuration unavailable." }, { status: 503 });
   }
 
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 10000 });
+  const pool = getPool();
   try {
     // "shippingCost" is added by docs/sql/2026-11-07_shipping_cost.sql.
     const optional = await existingColumns(pool, "EbayListing", ["shippingCost"]);
@@ -45,7 +45,5 @@ export async function GET() {
   } catch (e) {
     console.error("Failed to retrieve listings:", e);
     return NextResponse.json({ error: "Failed to retrieve listings." }, { status: 500 });
-  } finally {
-    await pool.end();
   }
 }

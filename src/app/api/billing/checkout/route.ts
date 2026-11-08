@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { Pool } from "pg";
+import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { isBillingInterval, isPaidPlan } from "@/lib/billing/plans";
 import { setupNeeded } from "@/lib/setupNeeded";
@@ -43,7 +43,7 @@ export async function POST(request: Request) {
   const plan = body.plan;
   const interval = body.interval;
 
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 10000 });
+  const pool = getPool();
   try {
     const current = await getUserPlan(pool, user.id);
     if (!current.enabled) {
@@ -96,7 +96,5 @@ export async function POST(request: Request) {
   } catch (e) {
     console.error("Starting checkout failed:", e);
     return NextResponse.json({ error: "Couldn't start checkout. Please try again." }, { status: 500 });
-  } finally {
-    await pool.end();
   }
 }

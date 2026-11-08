@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { Pool } from "pg";
+import { getPool } from "@/lib/db/pool";
+import type { Pool } from "pg";
 import type Stripe from "stripe";
 import { getStripe, loadSubscription, saveSubscription } from "@/lib/billing/server";
 
@@ -25,7 +26,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid signature." }, { status: 400 });
   }
 
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 10000 });
+  const pool = getPool();
   try {
     switch (event.type) {
       case "checkout.session.completed": {
@@ -68,8 +69,6 @@ export async function POST(request: Request) {
     console.error("Handling Stripe event failed:", event.type, e);
     // 500 makes Stripe retry later.
     return NextResponse.json({ error: "Couldn't process the event." }, { status: 500 });
-  } finally {
-    await pool.end();
   }
 }
 

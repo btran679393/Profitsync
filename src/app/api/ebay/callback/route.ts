@@ -1,8 +1,8 @@
 
 import { createHmac, timingSafeEqual } from "crypto";
+import { getPool } from "@/lib/db/pool";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { Pool } from "pg";
 import { getUserPlan } from "@/lib/billing/server";
 
 type EbayTokenResponse = {
@@ -316,10 +316,7 @@ export async function GET(request: NextRequest) {
     ).toISOString();
 
     // STEP 9: Save the connection securely.
-    const pool = new Pool({
-      connectionString: databaseUrl,
-      max: 1,
-    });
+    const pool = getPool();
 
     try {
       const client = await pool.connect();
@@ -456,7 +453,7 @@ export async function GET(request: NextRequest) {
         client.release();
       }
     } finally {
-      await pool.end();
+      // The shared pool stays open for the next request.
     }
 
     // STEP 10: Switch the dashboard to the store just connected, and save
@@ -467,7 +464,7 @@ export async function GET(request: NextRequest) {
       console.error("Setting active eBay store failed:", error);
     }
     if (typeof userData.username === "string" && userData.username.trim()) {
-      const namePool = new Pool({ connectionString: databaseUrl, max: 1 });
+      const namePool = getPool();
       try {
         await namePool.query(
           `UPDATE public."ebayConnection" SET "ebayUsername" = $1
@@ -479,7 +476,7 @@ export async function GET(request: NextRequest) {
           console.error("Saving eBay username failed:", error);
         }
       } finally {
-        await namePool.end();
+        // The shared pool stays open for the next request.
       }
     }
 
