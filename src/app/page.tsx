@@ -13,6 +13,8 @@ import { createClient } from "@/lib/supabase/client";
 import { Badge, Button, ConfirmProvider, Notice, PageHeader, SegmentedControl, ToastProvider, useToast } from "@/components/ui";
 import Sidebar from "./shell/Sidebar";
 import Topbar from "./shell/Topbar";
+import DashboardView, { type Attention, type CostSlice } from "./dashboard/DashboardView";
+import type { TrendPoint } from "./dashboard/TrendChart";
 import { SYNC_EVENT, useLastSynced } from "./shell/useShell";
 import ListingsSection, { type ListingRange } from "./ListingsSection";
 import StoreShippingSetting from "./StoreShippingSetting";
@@ -39,11 +41,9 @@ import BillingSection from "./BillingSection";
 import TaxReport, { type TaxOrder } from "./TaxReport";
 import { PLANS, type BillingStatus } from "@/lib/billing/plans";
 
-import { type ApiListing, type Order, type ApiOrder, type SyncResponse, type OrderFilter, type DateRange, type ChartPoint, money, isValidCost, formatOrders, isFullyRefunded, getRefundLoss, isPartiallyRefunded, hasRecordedCost, getShippingCost, getOrderProfit, type View, subscribeToHash, viewFromHash, VIEW_COPY, isOrderInListingRange, normalizeTitle, buildListingRows, getDateRangeStart, isOrderInDateRange, dateRangeLabel, formatOrderDate, localDateKey, startOfLocalDay } from "./dashboard/model";
+import { type ApiListing, type Order, type ApiOrder, type SyncResponse, type OrderFilter, type DateRange, money, isValidCost, formatOrders, isFullyRefunded, getRefundLoss, isPartiallyRefunded, hasRecordedCost, getShippingCost, getOrderProfit, type View, subscribeToHash, viewFromHash, VIEW_COPY, isOrderInListingRange, normalizeTitle, buildListingRows, getDateRangeStart, isOrderInDateRange, dateRangeLabel, formatOrderDate, localDateKey, startOfLocalDay, computeTotals, previousRange } from "./dashboard/model";
 import { Icon } from "./dashboard/Icon";
 import { ListingImage } from "./dashboard/ListingImage";
-import { MetricCard } from "./dashboard/MetricCard";
-import { ProfitChart } from "./dashboard/ProfitChart";
 import { ShippingInput, OrderDetailsPanel } from "./dashboard/OrderParts";
 
 // ============================================================
@@ -1020,37 +1020,21 @@ function Dashboard() {
     [periodOrders]
   );
 
-  const totals = useMemo(() => {
-    const activeOrders = periodOrders.filter((order) => !isFullyRefunded(order));
-    const refundedCount = periodOrders.length - activeOrders.length;
-    const totalRevenue = activeOrders.reduce(
-      (sum, order) => sum + Math.max(0, order.salePrice - order.refundAmount), 0
-    );
-    const totalFees = activeOrders.reduce((sum, order) => sum + order.ebayFees + order.otherFees, 0);
-    const totalLabels = activeOrders.reduce((sum, order) => sum + getShippingCost(order), 0);
-    const totalOtherFees = activeOrders.reduce((sum, order) => sum + order.otherFees, 0);
-    const completedOrders = activeOrders.filter(hasRecordedCost);
-    const totalProductCosts = completedOrders.reduce(
-      (sum, order) => sum + Number(order.savedProductCost), 0
-    );
-    const completedProfit = completedOrders.reduce(
-      (sum, order) => sum + (getOrderProfit(order) ?? 0), 0
-    );
-    const refundLosses = periodOrders.reduce((sum, order) => sum + getRefundLoss(order), 0);
-    const expensesTotal = periodExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
-    const netProfit = completedProfit - refundLosses - expensesTotal;
-    const completedRevenue = completedOrders.reduce(
-      (sum, order) => sum + Math.max(0, order.salePrice - order.refundAmount), 0
-    );
-    const profitMargin = completedRevenue > 0
-      ? (netProfit / completedRevenue) * 100 : 0;
-    const pendingOrders = activeOrders.length - completedOrders.length;
-    return {
-      totalRevenue, totalFees, totalLabels, totalOtherFees, totalProductCosts, netProfit, expensesTotal, refundLosses, profitMargin,
-      completedCount: completedOrders.length, pendingOrders,
-      orderCount: activeOrders.length, refundedCount,
-    };
-  }, [periodOrders, periodExpenses]);
+  const totals = useMemo(() => computeTotals(periodOrders, periodExpenses), [periodOrders, periodExpenses]);
+
+  // The same numbers for the window just before (for "vs previous period").
+  const previousTotals = useMemo(() => {
+    if (!now) return null;
+    const window = previousRange(dateRange, now);
+    if (!window) return null;
+    const inWindow = (date: Date) => date >= window.start && date < window.end;
+    const prevOrders = orders.filter((order) => order.orderDate && inWindow(new Date(order.orderDate)));
+    const prevExpenses = expenseEntries.filter((entry) => {
+      const [y, m, d] = entry.date.split("-").map(Number);
+      return inWindow(new Date(y, m - 1, d));
+    });
+    return computeTotals(prevOrders, prevExpenses);
+  }, [orders, expenseEntries, dateRange, now]);
 
   // ----------------------------------------------------------
   // FILTERED ORDERS
@@ -1175,161 +1159,91 @@ function Dashboard() {
   }, [periodOrders, search, filter]);
 
   // ----------------------------------------------------------
-  // COMPLETION PERCENTAGE
+  // DASHBOARD CHART: running revenue and net profit
   // ----------------------------------------------------------
 
-  const completionPercentage =
-    totals.orderCount > 0
-      ? (totals.completedCount / totals.orderCount) * 100
-      : 0;
-
-  // ----------------------------------------------------------
-  // REAL PROFIT CHART
-  // ----------------------------------------------------------
-
-  const chartData = useMemo(() => {
-    if (!now) {
-      return {
-        points: [] as ChartPoint[],
-        hasData: false,
-      };
-    }
-
-    const completedOrders = periodOrders.filter(
-      (order) =>
-        !isFullyRefunded(order) &&
-        isValidCost(order.savedProductCost) &&
-        order.orderDate &&
-        !Number.isNaN(
-          new Date(order.orderDate).getTime()
-        )
-    );
-
-    if (completedOrders.length === 0) {
-      return {
-        points: [] as ChartPoint[],
-        hasData: false,
-      };
-    }
-
+  const trendPoints = useMemo<TrendPoint[]>(() => {
+    if (!now || periodOrders.length === 0) return [];
     const profitByDay = new Map<string, number>();
+    const revenueByDay = new Map<string, number>();
+    const add = (map: Map<string, number>, key: string, amount: number) => map.set(key, (map.get(key) ?? 0) + amount);
 
-    for (const order of completedOrders) {
-      const profit = getOrderProfit(order);
-
-      if (profit === null || !order.orderDate) {
-        continue;
-      }
-
-      const date = new Date(order.orderDate);
-      const key = localDateKey(date);
-
-      profitByDay.set(
-        key,
-        (profitByDay.get(key) ?? 0) + profit
-      );
-    }
-
-    // Match the Net Profit headline: refund losses and expenses count too,
-    // on the day they happened.
     for (const order of periodOrders) {
-      const loss = getRefundLoss(order);
-      if (loss <= 0 || !order.orderDate) continue;
-      const key = localDateKey(new Date(order.refundedAt ?? order.orderDate));
-      profitByDay.set(key, (profitByDay.get(key) ?? 0) - loss);
-    }
-    for (const expense of periodExpenses) {
-      profitByDay.set(expense.spentOn, (profitByDay.get(expense.spentOn) ?? 0) - Number(expense.amount));
-    }
-
-    const sortedDates = Array.from(
-      profitByDay.keys()
-    ).sort();
-
-    if (sortedDates.length === 0) {
-      return {
-        points: [] as ChartPoint[],
-        hasData: false,
-      };
-    }
-
-    let startDate: Date;
-
-    if (dateRange === "all") {
-      const first = completedOrders
-        .map((order) => new Date(order.orderDate!))
-        .sort(
-          (a, b) => a.getTime() - b.getTime()
-        )[0];
-
-      startDate = startOfLocalDay(first);
-    } else {
-      startDate =
-        getDateRangeStart(dateRange, now) ??
-        startOfLocalDay(now);
-    }
-
-    const endDate = startOfLocalDay(now);
-
-    const days: Date[] = [];
-
-    for (
-      let current = new Date(startDate);
-      current <= endDate;
-      current.setDate(current.getDate() + 1)
-    ) {
-      days.push(new Date(current));
-    }
-
-    if (days.length === 0) {
-      return {
-        points: [] as ChartPoint[],
-        hasData: false,
-      };
-    }
-
-    // Keep the chart readable for longer date ranges.
-    const maxPoints = 45;
-    const bucketSize = Math.max(
-      1,
-      Math.ceil(days.length / maxPoints)
-    );
-
-    const points: ChartPoint[] = [];
-
-    let cumulativeProfit = 0;
-
-    for (
-      let index = 0;
-      index < days.length;
-      index += bucketSize
-    ) {
-      const bucket = days.slice(
-        index,
-        index + bucketSize
-      );
-
-      for (const day of bucket) {
-        cumulativeProfit +=
-          profitByDay.get(localDateKey(day)) ?? 0;
+      if (!order.orderDate || Number.isNaN(new Date(order.orderDate).getTime())) continue;
+      const key = localDateKey(new Date(order.orderDate));
+      if (!isFullyRefunded(order)) add(revenueByDay, key, Math.max(0, order.salePrice - order.refundAmount));
+      if (!isFullyRefunded(order) && isValidCost(order.savedProductCost)) {
+        const profit = getOrderProfit(order);
+        if (profit !== null) add(profitByDay, key, profit);
       }
+      const loss = getRefundLoss(order);
+      if (loss > 0) add(profitByDay, localDateKey(new Date(order.refundedAt ?? order.orderDate)), -loss);
+    }
+    for (const expense of periodExpenses) add(profitByDay, expense.date, -Number(expense.amount));
 
-      const lastDay = bucket[bucket.length - 1];
+    const firstOrder = periodOrders
+      .map((order) => (order.orderDate ? new Date(order.orderDate) : null))
+      .filter((date): date is Date => date !== null && !Number.isNaN(date.getTime()))
+      .sort((a, b) => a.getTime() - b.getTime())[0];
+    const startDate = dateRange === "all" ? startOfLocalDay(firstOrder ?? now) : getDateRangeStart(dateRange, now) ?? startOfLocalDay(now);
+    const endDate = startOfLocalDay(now);
+    const days: Date[] = [];
+    for (let current = new Date(startDate); current <= endDate; current.setDate(current.getDate() + 1)) days.push(new Date(current));
 
+    // Keep it readable for long ranges.
+    const bucketSize = Math.max(1, Math.ceil(days.length / 60));
+    const points: TrendPoint[] = [];
+    let revenue = 0;
+    let profit = 0;
+    for (let index = 0; index < days.length; index += bucketSize) {
+      const bucket = days.slice(index, index + bucketSize);
+      for (const day of bucket) {
+        const key = localDateKey(day);
+        revenue += revenueByDay.get(key) ?? 0;
+        profit += profitByDay.get(key) ?? 0;
+      }
       points.push({
-        label: lastDay.toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-        }),
-        value: Math.round(cumulativeProfit * 100) / 100,
+        label: bucket[bucket.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        revenue: Math.round(revenue * 100) / 100,
+        profit: Math.round(profit * 100) / 100,
       });
     }
-
-    return {
-      points,
-      hasData: true,
-    };
+    return points;
   }, [periodOrders, periodExpenses, dateRange, now]);
+
+  // Top 5 listings by profit in the chosen period.
+  const topListings = useMemo(() => {
+    if (!now) return [];
+    return buildListingRows(periodOrders, listings, orders, now, preferences)
+      .filter((row) => row.netProfit > 0)
+      .sort((a, b) => b.netProfit - a.netProfit)
+      .slice(0, 5);
+  }, [periodOrders, listings, orders, now, preferences]);
+
+  // Where the money went in the chosen period.
+  const costSlices = useMemo<CostSlice[]>(() => {
+    const byCategory = new Map<string, number>();
+    for (const expense of periodExpenses) byCategory.set(expense.category, (byCategory.get(expense.category) ?? 0) + Number(expense.amount));
+    const expenseColors = ["#94a3b8", "#a78bfa", "#f472b6", "#22d3ee", "#facc15"];
+    return [
+      { label: "Product costs", amount: totals.totalProductCosts, color: "var(--ps-accent)" },
+      { label: "eBay selling fees", amount: totals.totalFees - totals.totalOtherFees, color: "#f59e0b" },
+      { label: "Ads & other eBay charges", amount: totals.totalOtherFees, color: "#fb923c" },
+      { label: "Shipping", amount: totals.totalLabels, color: "#38bdf8" },
+      { label: "Refund losses", amount: totals.refundLosses, color: "var(--ps-loss)" },
+      ...[...byCategory].sort((a, b) => b[1] - a[1]).map(([label, amount], i) => ({ label, amount, color: expenseColors[i % expenseColors.length] })),
+    ].filter((slice) => slice.amount > 0.004);
+  }, [totals, periodExpenses]);
+
+  const attention = useMemo<Attention>(() => {
+    const ranked = now ? buildListingRows(orders, listings, orders, now, preferences) : [];
+    return {
+      needsCost: totals.pendingOrders,
+      lowStock: ranked.filter((row) => row.alert === "low").length,
+      stale: ranked.filter((row) => row.alert === "stale").length,
+      reconnect: stores.filter((store) => store.needsReconnect && !store.locked).map((store) => store.name),
+    };
+  }, [orders, listings, now, preferences, totals.pendingOrders, stores]);
 
   // ----------------------------------------------------------
   // SELECTED ORDER
@@ -1528,397 +1442,36 @@ function Dashboard() {
           )}
 
           {view === "dashboard" && (
-          <>
-          {/* =================================================
-              FINANCIAL METRIC CARDS
-          ================================================= */}
-
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <MetricCard
-              title="Total Revenue"
-              value={money(totals.totalRevenue)}
-              description={`${totals.orderCount} active orders; ${totals.refundedCount} refunded excluded`}
-              icon="wallet"
-              accent="blue"
-            />
-
-            <MetricCard
-              title={totals.totalLabels > 0 ? "eBay Fees & Shipping" : "eBay Fees"}
-              value={money(totals.totalFees + totals.totalLabels)}
-              description={totals.totalLabels > 0
-                ? `${money(totals.totalFees)} fees · ${money(totals.totalLabels)} shipping`
-                : totals.totalOtherFees > 0
-                  ? `Includes ${money(totals.totalOtherFees)} in ad & other eBay fees`
-                  : "Fees on non-fully-refunded orders"}
-              icon="dollar"
-              accent="amber"
-            />
-
-            <MetricCard
-              title="Product Costs"
-              value={money(totals.totalProductCosts)}
-              description={`${totals.completedCount} orders with saved costs`}
-              icon="box"
-              accent="purple"
-            />
-
-            <MetricCard
-              title="Net Profit"
-              value={money(totals.netProfit)}
-              description={
-                totals.expensesTotal > 0
-                  ? `After ${money(totals.expensesTotal)} in other expenses`
-                  : `Calculated from ${totals.completedCount} completed orders`
+            <DashboardView
+              loading={loading}
+              hasOrders={orders.length > 0}
+              totals={totals}
+              previous={previousTotals}
+              comparisonLabel={dateRange === "7d" ? "vs prior 7 days" : dateRange === "30d" ? "vs prior 30 days" : "vs prior 90 days"}
+              rangeLabel={dateRangeLabel(dateRange)}
+              trend={trendPoints}
+              topListings={topListings}
+              costs={costSlices}
+              attention={attention}
+              recentOrders={recentOrders}
+              onOpenOrder={(id) => setSelectedOrderId(id)}
+              onGoOrders={(target) => goToOrders(target ?? "all")}
+              onGoListings={() => navigate("listings")}
+              onSync={() => void syncEbayOrders()}
+              goal={
+                monthStats ? (
+                  <MonthlyGoal
+                    goal={monthlyGoal}
+                    profit={monthStats.profit}
+                    sales={monthStats.sales}
+                    dayOfMonth={monthStats.dayOfMonth}
+                    daysInMonth={monthStats.daysInMonth}
+                    monthName={monthStats.monthName}
+                    onSave={saveMonthlyGoal}
+                  />
+                ) : null
               }
-              icon="trending"
-              accent="green"
-              featured
             />
-          </div>
-
-          {monthStats && (
-            <MonthlyGoal
-              goal={monthlyGoal}
-              profit={monthStats.profit}
-              sales={monthStats.sales}
-              dayOfMonth={monthStats.dayOfMonth}
-              daysInMonth={monthStats.daysInMonth}
-              monthName={monthStats.monthName}
-              onSave={saveMonthlyGoal}
-            />
-          )}
-
-          {/* =================================================
-              PROFIT PERFORMANCE
-          ================================================= */}
-
-          <section
-            id="performance"
-            className="mt-6 grid gap-5 xl:grid-cols-3"
-          >
-            {/* Chart */}
-
-            <div className="rounded-2xl border border-white/[0.07] bg-[#151d2d] p-6 xl:col-span-2">
-              <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <h3 className="text-base font-semibold text-white">
-                    Profit Performance
-                  </h3>
-
-                  <p className="mt-1 text-xs text-slate-500">
-                    Cumulative net profit over time
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2 rounded-full border border-emerald-500/15 bg-emerald-500/[0.07] px-3 py-1.5 text-xs font-medium text-emerald-400">
-                  <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                  Actual Order Data
-                </div>
-              </div>
-
-              <div className="mb-6 flex flex-wrap items-end gap-5">
-                <div>
-                  <p className="text-xs text-slate-500">
-                    Calculated Net Profit
-                  </p>
-
-                  <p
-                    className={`mt-2 text-3xl font-bold ${
-                      totals.netProfit >= 0
-                        ? "text-white"
-                        : "text-red-400"
-                    }`}
-                  >
-                    {money(totals.netProfit)}
-                  </p>
-                </div>
-
-                <div className="mb-1 rounded-lg bg-white/[0.05] px-3 py-2 text-xs text-slate-400">
-                  {dateRangeLabel(dateRange)}
-                </div>
-              </div>
-
-              <ProfitChart
-                points={chartData.points}
-                hasData={chartData.hasData}
-              />
-
-              <div className="mt-6 flex items-start gap-2 border-t border-white/[0.07] pt-5">
-                <Icon
-                  name="info"
-                  size={15}
-                  className="mt-0.5 shrink-0 text-slate-500"
-                />
-
-                <p className="text-xs leading-5 text-slate-500">
-                  Chart shows cumulative estimated
-                  profit from orders with saved
-                  product costs. Other unrecorded
-                  expenses may affect actual profit.
-                </p>
-              </div>
-            </div>
-
-            {/* Right-side summary */}
-
-            <div className="flex flex-col gap-4">
-              {/* Refund losses: separate summary card above Profit Margin */}
-              <div className="rounded-2xl border border-rose-500/20 bg-[#151d2d] p-5">
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-white">Refund Losses</h3>
-                  <div className="rounded-xl bg-rose-500/10 p-2 text-rose-400">
-                    <Icon name="alert" size={18} />
-                  </div>
-                </div>
-                <p className="text-3xl font-bold tracking-tight text-rose-400">
-                  {totals.refundLosses > 0 ? `−${money(totals.refundLosses)}` : money(0)}
-                </p>
-                <p className="mt-2 text-xs leading-5 text-slate-500">
-                  {totals.refundedCount} refunded orders · Losses included in net profit
-                </p>
-              </div>
-
-              {/* Profit margin */}
-
-              <div className="rounded-2xl border border-white/[0.07] bg-[#151d2d] p-5">
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-white">
-                    Profit Margin
-                  </h3>
-
-                  <div className="rounded-xl bg-emerald-500/10 p-2.5 text-emerald-400">
-                    <Icon name="trending" size={19} />
-                  </div>
-                </div>
-
-                <p
-                  className={`text-4xl font-bold tracking-tight ${
-                    totals.profitMargin >= 0
-                      ? "text-white"
-                      : "text-red-400"
-                  }`}
-                >
-                  {totals.profitMargin.toFixed(1)}%
-                </p>
-
-                <p className="mt-3 text-xs leading-5 text-slate-500">
-                  Percentage of revenue kept as
-                  profit on completed orders.
-                </p>
-              </div>
-
-              {/* Order completion */}
-
-              <div className="rounded-2xl border border-white/[0.07] bg-[#151d2d] p-5">
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-white">
-                    Order Completion
-                  </h3>
-
-                  <div className="rounded-xl bg-blue-500/10 p-2.5 text-blue-400">
-                    <Icon name="check" size={19} />
-                  </div>
-                </div>
-
-                <div className="flex items-end justify-between">
-                  <div>
-                    <p className="text-3xl font-bold text-white">
-                      {completionPercentage.toFixed(0)}%
-                    </p>
-
-                    <p className="mt-2 text-xs text-slate-500">
-                      Costs recorded
-                    </p>
-                  </div>
-
-                  <span className="text-xs text-slate-400">
-                    {totals.completedCount}/
-                    {totals.orderCount}
-                  </span>
-                </div>
-
-                <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-800">
-                  <div
-                    className="h-full rounded-full bg-blue-500 transition-all duration-300"
-                    style={{
-                      width: `${completionPercentage}%`,
-                    }}
-                  />
-                </div>
-
-                <div className="mt-3 space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="flex items-center gap-2 text-slate-400">
-                      <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                      Completed
-                    </span>
-
-                    <span className="font-semibold text-white">
-                      {totals.completedCount}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="flex items-center gap-2 text-slate-400">
-                      <span className="h-2 w-2 rounded-full bg-amber-400" />
-                      Cost Needed
-                    </span>
-
-                    <span className="font-semibold text-white">
-                      {totals.pendingOrders}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* =================================================
-              NEEDS ATTENTION
-          ================================================= */}
-
-          <section className="mt-6">
-            <div className="rounded-2xl border border-white/[0.07] bg-[#151d2d] p-6">
-              <div className="mb-5 flex items-center justify-between">
-                <div>
-                  <h3 className="text-base font-semibold text-white">
-                    Needs Attention
-                  </h3>
-
-                  <p className="mt-1 text-xs text-slate-500">
-                    Tasks that help improve your
-                    financial accuracy
-                  </p>
-                </div>
-
-                {totals.pendingOrders > 0 ? (
-                  <span className="rounded-full bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-400">
-                    {totals.pendingOrders} Orders
-                  </span>
-                ) : (
-                  <span className="rounded-full bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-400">
-                    All Clear
-                  </span>
-                )}
-              </div>
-
-              {totals.pendingOrders > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => goToOrders("pending")}
-                  className="flex w-full items-center justify-between gap-4 rounded-xl border border-amber-500/10 bg-amber-500/[0.035] p-4 text-left transition hover:border-amber-500/25 hover:bg-amber-500/[0.06]"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-400">
-                      <Icon name="alert" size={21} />
-                    </div>
-
-                    <div>
-                      <p className="text-sm font-semibold text-white">
-                        {totals.pendingOrders}{" "}
-                        {totals.pendingOrders === 1
-                          ? "order is"
-                          : "orders are"}{" "}
-                        missing product costs
-                      </p>
-
-                      <p className="mt-1 text-xs text-slate-400">
-                        Add costs to calculate
-                        accurate estimated profit.
-                      </p>
-                    </div>
-                  </div>
-
-                  <Icon
-                    name="chevron"
-                    size={19}
-                    className="shrink-0 text-slate-400"
-                  />
-                </button>
-              ) : (
-                <div className="flex items-center gap-4 rounded-xl border border-emerald-500/10 bg-emerald-500/[0.035] p-4">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400">
-                    <Icon name="check" size={21} />
-                  </div>
-
-                  <div>
-                    <p className="text-sm font-semibold text-white">
-                      You&apos;re all caught up
-                    </p>
-
-                    <p className="mt-1 text-xs text-slate-400">
-                      Every order in this period has
-                      a saved product cost.
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-          </section>
-
-          {/* =================================================
-              RECENT ORDERS (preview; full table is on Orders)
-          ================================================= */}
-
-          <section className="mt-6 overflow-hidden rounded-2xl border border-white/[0.07] bg-[#151d2d]">
-            <div className="flex items-center justify-between gap-4 border-b border-white/[0.07] px-6 py-5">
-              <div>
-                <h3 className="text-base font-semibold text-white">Recent orders</h3>
-                <p className="mt-1 text-xs text-slate-500">Your latest eBay sales</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => goToOrders()}
-                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold text-blue-400 transition hover:bg-blue-500/10 hover:text-blue-300"
-              >
-                View all orders
-                <Icon name="arrow" size={15} />
-              </button>
-            </div>
-
-            {loading ? (
-              <div className="px-6 py-10 text-center text-sm text-slate-400">Loading recent orders…</div>
-            ) : recentOrders.length === 0 ? (
-              <div className="px-6 py-10 text-center text-sm text-slate-400">
-                No orders yet. Click “Sync eBay Orders” to bring in your sales.
-              </div>
-            ) : (
-              <ul className="divide-y divide-white/[0.05]">
-                {recentOrders.map((order) => {
-                  const refunded = isFullyRefunded(order);
-                  const profit = getOrderProfit(order);
-                  return (
-                    <li key={order.id}>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedOrderId(order.id)}
-                        className="flex w-full items-center gap-4 px-6 py-3.5 text-left transition hover:bg-white/[0.03]"
-                      >
-                        <ListingImage imageUrl={order.imageUrl} item={order.item} />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-white" title={order.item}>{order.item}</p>
-                          <p className="mt-0.5 text-xs text-slate-500">{formatOrderDate(order.orderDate)}</p>
-                        </div>
-                        <div className="shrink-0 text-right">
-                          <p className="text-sm font-semibold text-slate-200">{money(order.salePrice)}</p>
-                          {refunded ? (
-                            <span className="mt-1 inline-block rounded-md bg-rose-500/10 px-2 py-0.5 text-[11px] font-semibold text-rose-400">Refunded</span>
-                          ) : profit === null ? (
-                            <span className="mt-1 inline-block rounded-md bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-400">Needs cost</span>
-                          ) : (
-                            <p className={`mt-0.5 text-xs font-semibold ${profit < 0 ? "text-rose-400" : "text-emerald-400"}`}>
-                              {profit < 0 ? "−" : "+"}{money(Math.abs(profit))} profit
-                            </p>
-                          )}
-                        </div>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
-          </>
           )}
 
           {view === "orders" && (

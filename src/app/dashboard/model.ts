@@ -94,11 +94,6 @@ export type OrderFilter = "all" | "completed" | "pending" | "refunded";
 
 export type DateRange = "7d" | "30d" | "90d" | "all";
 
-export type ChartPoint = {
-  label: string;
-  value: number;
-};
-
 
 // ============================================================
 // UTILITIES
@@ -463,4 +458,64 @@ export function startOfLocalDay(date: Date) {
     date.getMonth(),
     date.getDate()
   );
+}
+
+// ============================================================
+// PERIOD TOTALS (moved from page.tsx unchanged; also used for the
+// "vs previous period" comparison on the dashboard)
+// ============================================================
+
+export function computeTotals(periodOrders: Order[], periodExpenses: Array<{ amount: string | number }>) {
+  const activeOrders = periodOrders.filter((order) => !isFullyRefunded(order));
+  const refundedCount = periodOrders.length - activeOrders.length;
+  const totalRevenue = activeOrders.reduce(
+    (sum, order) => sum + Math.max(0, order.salePrice - order.refundAmount), 0
+  );
+  const totalFees = activeOrders.reduce((sum, order) => sum + order.ebayFees + order.otherFees, 0);
+  const totalLabels = activeOrders.reduce((sum, order) => sum + getShippingCost(order), 0);
+  const totalOtherFees = activeOrders.reduce((sum, order) => sum + order.otherFees, 0);
+  const completedOrders = activeOrders.filter(hasRecordedCost);
+  const totalProductCosts = completedOrders.reduce(
+    (sum, order) => sum + Number(order.savedProductCost), 0
+  );
+  const completedProfit = completedOrders.reduce(
+    (sum, order) => sum + (getOrderProfit(order) ?? 0), 0
+  );
+  const refundLosses = periodOrders.reduce((sum, order) => sum + getRefundLoss(order), 0);
+  const expensesTotal = periodExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
+  const netProfit = completedProfit - refundLosses - expensesTotal;
+  const completedRevenue = completedOrders.reduce(
+    (sum, order) => sum + Math.max(0, order.salePrice - order.refundAmount), 0
+  );
+  const profitMargin = completedRevenue > 0
+    ? (netProfit / completedRevenue) * 100 : 0;
+  const pendingOrders = activeOrders.length - completedOrders.length;
+  return {
+    totalRevenue, totalFees, totalLabels, totalOtherFees, totalProductCosts, netProfit, expensesTotal, refundLosses, profitMargin,
+    completedCount: completedOrders.length, pendingOrders,
+    orderCount: activeOrders.length, refundedCount,
+    // Display only: average profit of the orders that have a cost.
+    completedProfit,
+    avgProfitPerOrder: completedOrders.length > 0 ? completedProfit / completedOrders.length : 0,
+  };
+}
+
+export type Totals = ReturnType<typeof computeTotals>;
+
+// The window just before the chosen range, same length (null for "All time").
+export function previousRange(range: DateRange, now: Date): { start: Date; end: Date } | null {
+  const start = getDateRangeStart(range, now);
+  if (!start) return null;
+  const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
+  const previousStart = new Date(start);
+  previousStart.setDate(previousStart.getDate() - days);
+  return { start: previousStart, end: start };
+}
+
+// Percentage change for a stat card ("↑ 12.3%"), or null when there's
+// nothing sensible to compare against.
+export function percentChange(current: number, previous: number | null | undefined): number | null {
+  if (previous === null || previous === undefined) return null;
+  if (Math.abs(previous) < 0.005) return null;
+  return ((current - previous) / Math.abs(previous)) * 100;
 }

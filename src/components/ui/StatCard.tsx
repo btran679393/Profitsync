@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { cn } from "./cn";
 import { Skeleton } from "./Feedback";
 
-export type Trend = { value: number; label?: string; goodWhenUp?: boolean } | null;
+export type Trend = { value: number; label?: string; goodWhenUp?: boolean; unit?: string } | null;
 
 // A headline number with a label, an optional icon, a short note and how it
 // changed versus the previous period.
@@ -53,7 +53,7 @@ export function StatCard({
               flat ? "text-subtle" : good ? "text-profit" : "text-loss"
             )}
           >
-            {flat ? "→" : trend.value > 0 ? "↑" : "↓"} {Math.abs(trend.value).toFixed(1)}%
+            {flat ? "→" : trend.value > 0 ? "↑" : "↓"} {Math.abs(trend.value).toFixed(1)}{trend.unit ?? "%"}
             {trend.label && <span className="font-normal text-subtle">&nbsp;{trend.label}</span>}
           </span>
         )}
