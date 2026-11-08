@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button } from "@/components/ui";
 
 // One store-wide "what I usually pay to ship an order" setting. Used for any
 // sale that has no shipping of its own (typed, listing default or eBay label).
@@ -38,16 +39,16 @@ export default function StoreShippingSetting({
           setEditing(true);
           setState("idle");
         }}
-        className="group inline-flex items-center gap-2 rounded-xl border border-white/10 bg-[#0b1120] px-3 py-2 text-left text-xs transition hover:border-blue-500/40"
+        className="group inline-flex h-9 items-center gap-2 rounded-lg border border-line-strong bg-surface px-3 text-left text-xs transition-colors hover:bg-surface-2"
         title="Used for every sale that doesn't have its own shipping cost"
       >
-        <span className="text-slate-500">Shipping per order</span>
+        <span className="text-muted">Shipping per order</span>
         {value === null ? (
-          <span className="font-semibold text-blue-400 group-hover:text-blue-300">Set default</span>
+          <span className="font-semibold text-accent-ink">Set default</span>
         ) : (
-          <span className="font-semibold text-white">${value.toFixed(2)}</span>
+          <span className="ps-num font-semibold text-ink">${value.toFixed(2)}</span>
         )}
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-500 group-hover:text-blue-400" aria-hidden="true">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-subtle group-hover:text-accent-ink" aria-hidden="true">
           <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
         </svg>
       </button>
@@ -60,13 +61,13 @@ export default function StoreShippingSetting({
         event.preventDefault();
         void save();
       }}
-      className="inline-flex items-center gap-2 rounded-xl border border-blue-500/40 bg-[#0b1120] px-3 py-1.5 text-xs"
+      className="inline-flex h-9 items-center gap-2 rounded-lg border border-accent/50 bg-surface px-2 text-xs"
     >
-      <label htmlFor="store-shipping" className="text-slate-400">
+      <label htmlFor="store-shipping" className="pl-1 text-muted">
         Shipping per order
       </label>
       <div className="relative">
-        <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-500">$</span>
+        <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-subtle">$</span>
         <input
           id="store-shipping"
           autoFocus
@@ -77,20 +78,16 @@ export default function StoreShippingSetting({
           onKeyDown={(event) => {
             if (event.key === "Escape") setEditing(false);
           }}
-          className={`w-20 rounded-lg border bg-[#151d2d] py-1 pl-5 pr-2 text-white outline-none focus:border-blue-500 ${valid ? "border-white/10" : "border-rose-500/60"}`}
+          className={`ps-num h-7 w-20 rounded-md border bg-surface-2 pl-5 pr-2 text-ink outline-none focus:border-accent ${valid ? "border-line-strong" : "border-loss/60"}`}
         />
       </div>
-      <button
-        type="submit"
-        disabled={!valid || state === "saving"}
-        className="rounded-lg bg-blue-600 px-2.5 py-1 font-semibold text-white transition hover:bg-blue-500 disabled:opacity-50"
-      >
-        {state === "saving" ? "Saving…" : "Save"}
-      </button>
-      <button type="button" onClick={() => setEditing(false)} className="text-slate-500 hover:text-slate-300">
+      <Button type="submit" size="sm" variant="primary" className="h-7" disabled={!valid} loading={state === "saving"}>
+        Save
+      </Button>
+      <Button size="sm" variant="ghost" className="h-7" onClick={() => setEditing(false)}>
         Cancel
-      </button>
-      {state === "error" && <span className="text-rose-400">Couldn&apos;t save</span>}
+      </Button>
+      {state === "error" && <span className="text-loss">Couldn&apos;t save</span>}
     </form>
   );
 }

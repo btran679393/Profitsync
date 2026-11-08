@@ -14,6 +14,7 @@ import { Badge, Button, ConfirmProvider, Notice, PageHeader, SegmentedControl, T
 import Sidebar from "./shell/Sidebar";
 import Topbar from "./shell/Topbar";
 import DashboardView, { type Attention, type CostSlice } from "./dashboard/DashboardView";
+import OrdersView from "./dashboard/OrdersView";
 import type { TrendPoint } from "./dashboard/TrendChart";
 import { SYNC_EVENT, useLastSynced } from "./shell/useShell";
 import ListingsSection, { type ListingRange } from "./ListingsSection";
@@ -41,10 +42,8 @@ import BillingSection from "./BillingSection";
 import TaxReport, { type TaxOrder } from "./TaxReport";
 import { PLANS, type BillingStatus } from "@/lib/billing/plans";
 
-import { type ApiListing, type Order, type ApiOrder, type SyncResponse, type OrderFilter, type DateRange, money, isValidCost, formatOrders, isFullyRefunded, getRefundLoss, isPartiallyRefunded, hasRecordedCost, getShippingCost, getOrderProfit, type View, subscribeToHash, viewFromHash, VIEW_COPY, isOrderInListingRange, normalizeTitle, buildListingRows, getDateRangeStart, isOrderInDateRange, dateRangeLabel, formatOrderDate, localDateKey, startOfLocalDay, computeTotals, previousRange } from "./dashboard/model";
-import { Icon } from "./dashboard/Icon";
-import { ListingImage } from "./dashboard/ListingImage";
-import { ShippingInput, OrderDetailsPanel } from "./dashboard/OrderParts";
+import { type ApiListing, type Order, type ApiOrder, type SyncResponse, type OrderFilter, type DateRange, money, isValidCost, formatOrders, isFullyRefunded, getRefundLoss, isPartiallyRefunded, hasRecordedCost, getShippingCost, getOrderProfit, type View, subscribeToHash, viewFromHash, VIEW_COPY, isOrderInListingRange, normalizeTitle, buildListingRows, getDateRangeStart, isOrderInDateRange, dateRangeLabel, localDateKey, startOfLocalDay, computeTotals, previousRange } from "./dashboard/model";
+import { OrderDetailsPanel } from "./dashboard/OrderParts";
 
 // ============================================================
 // MAIN DASHBOARD
@@ -1398,22 +1397,7 @@ function Dashboard() {
             }
             actions={
               showsDateRange ? (
-                <>
-                  {view === "orders" && (
-                    <>
-                      {!allStores && <StoreShippingSetting value={storeShipping} onSave={saveStoreShipping} />}
-                      <OrderTools
-                        orders={toolOrders}
-                        periodLabel={dateRangeLabel(dateRange)}
-                        shippingEnabled={shippingEnabled}
-                        onImported={loadOrders}
-                        allowed={limits.exports}
-                        onUpgrade={goToPlans}
-                      />
-                    </>
-                  )}
-                  <SegmentedControl label="Date range" value={dateRange} options={dateRangeOptions} onChange={setDateRange} />
-                </>
+                <SegmentedControl label="Date range" value={dateRange} options={dateRangeOptions} onChange={setDateRange} />
               ) : undefined
             }
           />
@@ -1475,427 +1459,40 @@ function Dashboard() {
           )}
 
           {view === "orders" && (
-          <>
-          {/* =================================================
-              ORDER MANAGEMENT
-          ================================================= */}
-
-          <section
-            id="orders"
-            className="mt-7 overflow-hidden rounded-2xl border border-white/[0.07] bg-[#151d2d]"
-          >
-            {/* Table header */}
-
-            <div className="border-b border-white/[0.07] px-6 py-6">
-              <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
-                <div>
-                  <h3 className="text-lg font-semibold text-white">
-                    Order Management
-                  </h3>
-
-                  <p className="mt-1 text-sm text-slate-500">
-                    Review your orders and manage
-                    product costs.
-                  </p>
-                </div>
-
-                <div className="flex flex-col gap-3 sm:flex-row">
-                  {/* Search */}
-
-                  <div className="relative">
-                    <Icon
-                      name="search"
-                      size={18}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"
-                    />
-
-                    <input
-                      type="search"
-                      value={search}
-                      onChange={(event) =>
-                        setSearch(event.target.value)
-                      }
-                      placeholder="Search orders..."
-                      aria-label="Search orders"
-                      className="w-full rounded-xl border border-white/10 bg-[#0b1120] py-2.5 pl-10 pr-4 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-blue-500 sm:w-64"
-                    />
-                  </div>
-
-                  {/* Status filter */}
-
-                  <div className="relative">
-                    <select
-                      value={filter}
-                      onChange={(event) =>
-                        setFilter(
-                          event.target.value as OrderFilter
-                        )
-                      }
-                      aria-label="Filter orders by status"
-                      className="w-full min-w-[10rem] appearance-none rounded-xl border border-white/10 bg-[#0b1120] py-2.5 pl-4 pr-10 text-sm text-slate-300 outline-none focus:border-blue-500"
-                    >
-                      <option value="all">
-                        All Orders
-                      </option>
-
-                      <option value="completed">
-                        Completed
-                      </option>
-
-                      <option value="pending">
-                        Cost Needed
-                      </option>
-                      <option value="refunded">Refunded</option>
-                    </select>
-
-                    <Icon
-                      name="chevron"
-                      size={15}
-                      className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rotate-90 text-slate-500"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Summary badges */}
-
-              <div className="mt-5 flex flex-wrap items-center gap-3">
-                <span className="rounded-lg bg-white/[0.05] px-3 py-1.5 text-xs font-medium text-slate-400">
-                  {filteredOrders.length} orders shown
-                </span>
-
-                <span className="rounded-lg bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-400">
-                  {totals.completedCount} completed
-                </span>
-
-                <span className="rounded-lg bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-400">
-                  {totals.pendingOrders} need costs
-                </span>
-                <span className="rounded-lg bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-400">
-                  {totals.refundedCount} refunded
-                </span>
-              </div>
-            </div>
-
-            {/* =================================================
-                ORDERS TABLE
-            ================================================= */}
-
-            {loading ? (
-              <div className="py-20 text-center text-sm text-slate-400">
-                Loading your eBay orders...
-              </div>
-            ) : (
-              <div className="relative overflow-x-auto">
-                <table className="w-full min-w-[1200px] table-fixed">
-                  <colgroup>
-                    <col className="w-[36%]" />
-                    <col className="w-[11%]" />
-                    <col className="w-[11%]" />
-                    <col className="w-[15%]" />
-                    <col className="w-[11%]" />
-                    <col className="w-[12%]" />
-                    <col className="w-[4%]" />
-                  </colgroup>
-
-                  <thead className="bg-[#111827]">
-                    <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                      <th className="px-6 py-4">
-                        Product
-                      </th>
-
-                      <th className="px-3 py-4">
-                        Sale Price
-                      </th>
-
-                      <th className="px-3 py-4">
-                        Fees · Shipping
-                      </th>
-
-                      <th className="px-3 py-4">
-                        Product Cost
-                      </th>
-
-                      <th className="px-3 py-4">
-                        Profit
-                      </th>
-
-                      <th className="px-3 py-4">
-                        Status
-                      </th>
-
-                      <th className="px-3 py-4">
-                        <span className="sr-only">
-                          Details
-                        </span>
-                      </th>
-                    </tr>
-                  </thead>
-
-                  <tbody className="divide-y divide-white/[0.06]">
-                    {filteredOrders.map((order) => {
-                      const refunded = isFullyRefunded(order);
-                      const partialRefund = isPartiallyRefunded(order);
-                      const hasSavedCost = isValidCost(
-                        order.savedProductCost
-                      );
-
-                      const hasValidDraft = isValidCost(
-                        order.productCost
-                      );
-
-                      const profit =
-                        order.salePrice - order.refundAmount -
-                        order.ebayFees - order.otherFees - getShippingCost(order) - Number(order.productCost);
-
-                      const isSaving =
-                        savingId === order.id;
-
-                      const draftChanged = order.productCost !== order.savedProductCost;
-                      const draftValid = order.productCost.trim() === "" || isValidCost(order.productCost);
-                      const suggestion = !refunded && order.savedProductCost === "" ? suggestedCost(order) : null;
-
-                      return (
-                        <tr
-                          key={order.id}
-                          className="transition hover:bg-white/[0.025]"
-                        >
-                          {/* Product */}
-
-                          <td className="px-6 py-4">
-                            <div className="flex items-center gap-4">
-                              <ListingImage
-                                imageUrl={order.imageUrl}
-                                item={order.item}
-                              />
-
-                              <div className="min-w-0">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setSelectedOrderId(
-                                      order.id
-                                    )
-                                  }
-                                  className="break-words text-left text-sm font-medium leading-6 text-slate-200 transition hover:text-blue-400"
-                                >
-                                  {order.item}
-                                </button>
-
-                                <p className="mt-1 text-[11px] text-blue-300/80">
-                                  Buyer: {order.ebayBuyerId || "Unavailable"}
-                                </p>
-                                <p className="mt-1 text-[11px] text-slate-500">
-                                  {formatOrderDate(
-                                    order.orderDate
-                                  )}
-                                </p>
-                              </div>
-                            </div>
-                          </td>
-
-                          {/* Sale price */}
-
-                          <td className="px-3 py-4 text-sm font-medium text-slate-200">
-                            {refunded ? (
-                              <span className="text-slate-500 line-through">{money(order.salePrice)}</span>
-                            ) : (
-                              <div>{money(Math.max(0, order.salePrice - order.refundAmount))}
-                                {partialRefund && <p className="text-[11px] text-orange-400">Refund: {money(order.refundAmount)}</p>}
-                              </div>
-                            )}
-                          </td>
-
-                          {/* eBay fees */}
-
-                          <td className="px-3 py-4 text-sm text-slate-400">
-                            {money(order.ebayFees)}
-                            {order.otherFees > 0 && (
-                              <p className="mt-0.5 text-[11px] text-slate-500" title="Other eBay charges for this order, e.g. promoted-listing ad fees">
-                                + {money(order.otherFees)} other eBay fees
-                              </p>
-                            )}
-                            {!refunded && (
-                              <ShippingInput
-                                order={order}
-                                enabled={shippingEnabled}
-                                onSave={saveShippingCost}
-                                className="mt-1.5 w-28"
-                              />
-                            )}
-                          </td>
-
-                          {/* Product cost */}
-
-                          <td className="px-3 py-4">
-                            {refunded ? <span className="text-xs text-slate-500">Not required</span> : (
-                                <div className="w-32">
-                                  <div className="relative">
-                                    <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-slate-500">$</span>
-                                    <input
-                                      type="text"
-                                      inputMode="decimal"
-                                      value={order.productCost}
-                                      placeholder="0.00"
-                                      aria-label={`Product cost for ${order.item}`}
-                                      data-cost-input
-                                      data-needs-cost={order.savedProductCost === "" ? "true" : undefined}
-                                      disabled={isSaving || syncing || loggingOut}
-                                      onChange={(event) => updateProductCost(order.id, event.target.value)}
-                                      onBlur={(event) => saveProductCost(order.id, event.target.value)}
-                                      onKeyDown={(event) => {
-                                        if (event.key === "Enter") {
-                                          event.preventDefault();
-                                          focusNextCostInput(event.currentTarget);
-                                        }
-                                        if (event.key === "Escape") {
-                                          updateProductCost(order.id, order.savedProductCost);
-                                        }
-                                      }}
-                                      className={`w-full rounded-lg border bg-[#0b1120] py-2 pl-6 pr-7 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:opacity-50 ${
-                                        draftValid ? (order.savedProductCost === "" ? "border-amber-500/30" : "border-white/10") : "border-red-500/60"
-                                      }`}
-                                    />
-                                    <span className="absolute right-2 top-1/2 -translate-y-1/2" aria-live="polite">
-                                      {isSaving ? (
-                                        <span className="block h-3 w-3 animate-spin rounded-full border-2 border-slate-500 border-t-transparent" aria-label="Saving" />
-                                      ) : recentlySavedId === order.id ? (
-                                        <Icon name="check" size={14} className="text-emerald-400" />
-                                      ) : null}
-                                    </span>
-                                  </div>
-                                  {draftChanged && draftValid && order.productCost.trim() !== "" ? (
-                                    <p className={`mt-1 text-[11px] font-medium ${profit >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                                      = {money(profit)} profit · Enter to save
-                                    </p>
-                                  ) : !draftValid ? (
-                                    <p className="mt-1 text-[11px] text-red-400">Like 8 or 8.50</p>
-                                  ) : suggestion !== null ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const cost = (suggestion * order.quantity).toFixed(2);
-                                        updateProductCost(order.id, cost);
-                                        void saveProductCost(order.id, cost);
-                                      }}
-                                      className="mt-1 text-[11px] font-semibold text-blue-400 transition hover:text-blue-300"
-                                    >
-                                      Use {money(suggestion * order.quantity)}{order.quantity > 1 ? ` (${order.quantity}×)` : ""} · last time
-                                    </button>
-                                  ) : null}
-                                </div>
-                            )}
-                          </td>
-
-                          {/* Profit */}
-
-                          <td className="px-3 py-4">
-                            {refunded ? (
-                              <span className={`text-sm font-semibold ${getRefundLoss(order) > 0 ? "text-red-400" : "text-slate-500"}`}>
-                                {money(-getRefundLoss(order))}
-                              </span>
-                            ) : hasValidDraft ? (
-                              <span
-                                className={`text-sm font-semibold ${
-                                  profit >= 0
-                                    ? "text-emerald-400"
-                                    : "text-red-400"
-                                }`}
-                              >
-                                {money(profit)}
-                              </span>
-                            ) : (
-                              <span className="text-sm text-slate-600">
-                                Pending
-                              </span>
-                            )}
-                          </td>
-
-                          {/* Status */}
-
-                          <td className="px-3 py-4">
-                            {refunded ? (
-                              <span className="inline-flex items-center whitespace-nowrap rounded-full bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-400">Refunded</span>
-                            ) : partialRefund ? (
-                              <span className="inline-flex items-center whitespace-nowrap rounded-full bg-orange-500/10 px-3 py-1.5 text-xs font-medium text-orange-400">Partially Refunded</span>
-                            ) : hasSavedCost ? (
-                              <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-emerald-500/10 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-400">
-                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                                Completed
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-amber-500/10 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-400">
-                                <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-                                Cost Needed
-                              </span>
-                            )}
-                          </td>
-
-                          {/* Details button */}
-
-                          <td className="px-3 py-4">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setSelectedOrderId(order.id)
-                              }
-                              aria-label={`View details for ${order.item}`}
-                              className="rounded-lg p-2 text-slate-500 transition hover:bg-white/5 hover:text-white"
-                            >
-                              <Icon
-                                name="chevron"
-                                size={18}
-                              />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-
-                {/* Empty state */}
-
-                {filteredOrders.length === 0 && (
-                  <div className="py-16 text-center">
-                    <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-white/[0.04] text-slate-500">
-                      <Icon name="search" size={22} />
-                    </div>
-
-                    <p className="text-sm font-medium text-slate-300">
-                      No orders found
-                    </p>
-
-                    <p className="mt-2 text-xs text-slate-500">
-                      {orders.length === 0
-                        ? "Sync your eBay account to import orders."
-                        : "Try changing your date range, search, or status filter."}
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* =================================================
-                TABLE FOOTER
-            ================================================= */}
-
-            {!loading && filteredOrders.length > 0 && (
-              <div className="flex flex-col gap-2 border-t border-white/[0.07] bg-[#111827] px-6 py-4 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-                <span>
-                  Showing {filteredOrders.length} of{" "}
-                  {periodOrders.length} orders in the
-                  selected period
-                </span>
-
-                <span>
-                  Click a product to view details.
-                  Costs save when you leave an input.
-                </span>
-              </div>
-            )}
-          </section>
-          </>
+            <OrdersView
+              orders={filteredOrders}
+              periodOrders={periodOrders}
+              allOrdersCount={orders.length}
+              loading={loading}
+              search={search}
+              onSearch={setSearch}
+              filter={filter}
+              onFilter={setFilter}
+              savingId={savingId}
+              recentlySavedId={recentlySavedId}
+              inputsDisabled={syncing || loggingOut}
+              shippingEnabled={shippingEnabled}
+              onSaveShipping={saveShippingCost}
+              onChangeCost={updateProductCost}
+              onSaveCost={saveProductCost}
+              onEnterCost={focusNextCostInput}
+              suggestedCost={suggestedCost}
+              onOpenOrder={(id) => setSelectedOrderId(id)}
+              onSync={() => void syncEbayOrders()}
+              tools={
+                <>
+                  {!allStores && <StoreShippingSetting value={storeShipping} onSave={saveStoreShipping} />}
+                  <OrderTools
+                    orders={toolOrders}
+                    periodLabel={dateRangeLabel(dateRange)}
+                    shippingEnabled={shippingEnabled}
+                    onImported={loadOrders}
+                    allowed={limits.exports}
+                    onUpgrade={goToPlans}
+                  />
+                </>
+              }
+            />
           )}
 
           {/* =================================================

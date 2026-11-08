@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Badge, Button, Checkbox, Field, Menu, Modal, Notice, Select } from "@/components/ui";
 
 // What these tools need from each order (a subset of the dashboard's Order).
 export type ToolOrder = {
@@ -187,113 +188,86 @@ function ShippingImport({
     }
   }
 
-  const select = "w-full rounded-lg border border-white/10 bg-[#0b1120] px-3 py-2 text-sm text-white outline-none focus:border-blue-500";
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Import shipping costs">
-      <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#151d2d] p-6 shadow-2xl">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-lg font-semibold text-white">Import shipping costs</h3>
-            <p className="mt-1 text-sm text-slate-400">
-              Upload a spreadsheet of your labels (for example Pirate Ship → Reports → export as CSV).
-              Rows are matched to your eBay orders by order number.
-            </p>
-          </div>
-          <button type="button" onClick={onClose} className="text-slate-500 hover:text-white" aria-label="Close">✕</button>
-        </div>
-
-        {!enabled ? (
-          <p className="mt-5 rounded-xl bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
-            Shipping costs need a one-time database update first (docs/sql/2026-11-07_shipping_cost.sql).
-          </p>
-        ) : (
-          <>
-            <label className="mt-5 flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-white/15 bg-white/[0.02] px-4 py-6 text-center text-sm text-slate-400 transition hover:border-blue-500/50">
-              <span className="font-semibold text-blue-400">{fileName || "Choose a CSV file"}</span>
-              <span className="mt-1 text-xs">{rows ? `${Math.max(0, rows.length - 1)} rows found` : "From Pirate Ship, USPS.com, PayPal…"}</span>
-              <input
-                type="file"
-                accept=".csv,text/csv"
-                className="sr-only"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) void readFile(file);
-                }}
-              />
-            </label>
-
-            {rows && headers.length > 0 && (
-              <div className="mt-5 space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <label className="text-xs text-slate-400">
-                    Column with the eBay order number
-                    <select value={orderCol} onChange={(e) => setOrderCol(Number(e.target.value))} className={`mt-1 ${select}`}>
-                      {headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
-                    </select>
-                  </label>
-                  <label className="text-xs text-slate-400">
-                    Column with what the label cost
-                    <select value={costCol} onChange={(e) => setCostCol(Number(e.target.value))} className={`mt-1 ${select}`}>
-                      {headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
-                    </select>
-                  </label>
-                </div>
-
-                <div className="rounded-xl bg-white/[0.03] px-4 py-3 text-sm">
-                  {matches.totals.size > 0 ? (
-                    <p className="text-slate-200">
-                      <span className="font-semibold text-emerald-400">{matches.totals.size} orders matched</span> · {money(total)} in shipping
-                    </p>
-                  ) : (
-                    <p className="text-amber-300">No rows matched your orders. Check the two columns above.</p>
-                  )}
-                  {matches.unmatched > 0 && (
-                    <p className="mt-1 text-xs text-slate-500">
-                      {matches.unmatched} row{matches.unmatched === 1 ? "" : "s"} had an order number that isn&apos;t in this store (skipped).
-                    </p>
-                  )}
-                </div>
-
-                <label className="flex items-center gap-2 text-xs text-slate-400">
-                  <input type="checkbox" checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} className="accent-blue-500" />
-                  Replace shipping costs already entered on those orders
-                </label>
-              </div>
-            )}
-          </>
-        )}
-
-        {message && (
-          <p className={`mt-4 text-sm ${state === "error" ? "text-rose-400" : "text-emerald-400"}`}>{message}</p>
-        )}
-
-        <div className="mt-6 flex justify-end gap-3">
-          <button type="button" onClick={onClose} className="rounded-xl px-4 py-2 text-sm text-slate-400 hover:text-white">
+    <Modal
+      open
+      onClose={onClose}
+      title="Import shipping costs"
+      description="Upload a spreadsheet of your labels (for example Pirate Ship → Reports → export as CSV). Rows are matched to your orders by eBay order number."
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
             {state === "done" ? "Done" : "Cancel"}
-          </button>
+          </Button>
           {enabled && state !== "done" && (
-            <button
-              type="button"
-              onClick={() => void apply()}
-              disabled={matches.totals.size === 0 || state === "saving"}
-              className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-50"
-            >
-              {state === "saving" ? "Importing…" : `Import ${matches.totals.size || ""} shipping cost${matches.totals.size === 1 ? "" : "s"}`}
-            </button>
+            <Button variant="primary" onClick={() => void apply()} disabled={matches.totals.size === 0} loading={state === "saving"}>
+              {`Import ${matches.totals.size || ""} shipping cost${matches.totals.size === 1 ? "" : "s"}`}
+            </Button>
           )}
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      {!enabled ? (
+        <Notice tone="warn">Shipping costs need a one-time database update first (docs/sql/2026-11-07_shipping_cost.sql).</Notice>
+      ) : (
+        <>
+          <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-line-strong bg-surface-2 px-4 py-7 text-center text-sm text-muted transition-colors hover:border-accent/50 focus-within:border-accent">
+            <span className="font-semibold text-accent-ink">{fileName || "Choose a CSV file"}</span>
+            <span className="mt-1 text-xs">{rows ? `${Math.max(0, rows.length - 1)} rows found` : "From Pirate Ship, USPS.com, PayPal…"}</span>
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              className="sr-only"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void readFile(file);
+              }}
+            />
+          </label>
+
+          {rows && headers.length > 0 && (
+            <div className="mt-5 space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Column with the eBay order number">
+                  <Select value={orderCol} onChange={(e) => setOrderCol(Number(e.target.value))}>
+                    {headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
+                  </Select>
+                </Field>
+                <Field label="Column with what the label cost">
+                  <Select value={costCol} onChange={(e) => setCostCol(Number(e.target.value))}>
+                    {headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
+                  </Select>
+                </Field>
+              </div>
+
+              <div className="rounded-xl bg-surface-2 px-4 py-3 text-sm">
+                {matches.totals.size > 0 ? (
+                  <p className="text-ink-2">
+                    <span className="font-semibold text-profit">{matches.totals.size} orders matched</span> · <span className="ps-num">{money(total)}</span> in shipping
+                  </p>
+                ) : (
+                  <p className="text-warn">No rows matched your orders. Check the two columns above.</p>
+                )}
+                {matches.unmatched > 0 && (
+                  <p className="mt-1 text-xs text-subtle">
+                    {matches.unmatched} row{matches.unmatched === 1 ? "" : "s"} had an order number that isn&apos;t in this store (skipped).
+                  </p>
+                )}
+              </div>
+
+              <Checkbox checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} label="Replace shipping costs already entered on those orders" />
+            </div>
+          )}
+        </>
+      )}
+
+      {message && <p className={`mt-4 text-sm ${state === "error" ? "text-loss" : "text-profit"}`}>{message}</p>}
+    </Modal>
   );
 }
 
 export function ProTag() {
-  return (
-    <span className="ml-0.5 rounded-md bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-300">
-      Pro
-    </span>
-  );
+  return <Badge tone="accent">Pro</Badge>;
 }
 
 // The two buttons shown on the Orders page.
@@ -318,25 +292,41 @@ export default function OrderTools({
     () => new Set(orders.map((o) => o.ebayOrderId).filter((id): id is string => Boolean(id))),
     [orders]
   );
-  const button =
-    "inline-flex items-center gap-2 rounded-xl border border-white/10 bg-[#0b1120] px-3 py-2 text-xs font-semibold text-slate-300 transition hover:border-blue-500/40 hover:text-white disabled:opacity-50";
-
   return (
-    <div className="flex flex-wrap gap-2">
-      <button
-        type="button"
-        onClick={() => (allowed ? downloadCsv(orders, periodLabel) : onUpgrade?.())}
-        disabled={allowed && orders.length === 0}
-        className={button}
-        title="Spreadsheet of the orders in this date range, for taxes or your accountant"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" /></svg>
-        Download CSV{!allowed && <ProTag />}
-      </button>
-      <button type="button" onClick={() => (allowed ? setImporting(true) : onUpgrade?.())} className={button} title="Fill in label costs from a Pirate Ship (or similar) spreadsheet">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 21V9" /><path d="m7 14 5-5 5 5" /><path d="M5 3h14" /></svg>
-        Import shipping costs{!allowed && <ProTag />}
-      </button>
+    <>
+      <Menu
+        label="Import and export"
+        trigger={({ toggle, ...aria }) => (
+          <Button
+            size="md"
+            variant="secondary"
+            onClick={toggle}
+            {...aria}
+            iconRight={
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            }
+          >
+            Import / export
+          </Button>
+        )}
+        items={[
+          {
+            label: "Download CSV",
+            hint: `Orders in ${periodLabel.toLowerCase()}, for taxes or your accountant`,
+            badge: allowed ? undefined : <ProTag />,
+            disabled: allowed && orders.length === 0,
+            onSelect: () => (allowed ? downloadCsv(orders, periodLabel) : onUpgrade?.()),
+          },
+          {
+            label: "Import shipping costs",
+            hint: "From a Pirate Ship (or similar) spreadsheet",
+            badge: allowed ? undefined : <ProTag />,
+            onSelect: () => (allowed ? setImporting(true) : onUpgrade?.()),
+          },
+        ]}
+      />
       {importing && (
         <ShippingImport
           knownOrderIds={knownOrderIds}
@@ -345,6 +335,6 @@ export default function OrderTools({
           onImported={onImported}
         />
       )}
-    </div>
+    </>
   );
 }

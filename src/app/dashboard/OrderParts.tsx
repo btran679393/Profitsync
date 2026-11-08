@@ -1,14 +1,42 @@
 "use client";
 
-// Moved out of page.tsx unchanged (redesign phase 1).
 import { useState } from "react";
-import { type Order, money, isValidCost, isFullyRefunded, getRefundLoss, isPartiallyRefunded, getShippingCost, formatOrderDate } from "./model";
+import { Badge, Button, Drawer, Field, MoneyInput, Select, cn } from "@/components/ui";
+import { type Order, money, isValidCost, isFullyRefunded, getRefundLoss, getShippingCost, formatOrderDate } from "./model";
 import { Icon } from "./Icon";
 import { ListingImage } from "./ListingImage";
 
+const smallField =
+  "h-8 w-full rounded-md border bg-surface-2 pl-6 pr-6 text-xs text-ink outline-none transition-colors placeholder:text-subtle focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:opacity-50";
+
+function SavingMark({ state }: { state: "saving" | "saved" | null }) {
+  return (
+    <span className="absolute right-2 top-1/2 -translate-y-1/2" aria-live="polite">
+      {state === "saving" ? (
+        <span className="block h-3 w-3 animate-spin rounded-full border-2 border-subtle border-t-transparent" aria-label="Saving" />
+      ) : state === "saved" ? (
+        <Icon name="check" size={12} className="text-profit" />
+      ) : null}
+    </span>
+  );
+}
+
 // ============================================================
-// ORDER DETAILS PANEL
+// ORDER STATUS BADGE
 // ============================================================
+
+export function OrderStatusBadge({ order }: { order: Order }) {
+  if (isFullyRefunded(order)) return <Badge tone="loss">Refunded</Badge>;
+  return isValidCost(order.savedProductCost) ? (
+    <Badge tone="profit" dot>
+      Complete
+    </Badge>
+  ) : (
+    <Badge tone="warn" dot>
+      Needs cost
+    </Badge>
+  );
+}
 
 // ============================================================
 // SHIPPING COST INPUT (shipping paid outside eBay)
@@ -52,7 +80,7 @@ export function ShippingInput({
 
   const placeholder =
     order.shippingLabelCost > 0
-      ? `${order.shippingLabelCost.toFixed(2)} eBay label`
+      ? `${order.shippingLabelCost.toFixed(2)} label`
       : order.storeShipping > 0
         ? `${order.storeShipping.toFixed(2)} default`
         : "Shipping";
@@ -60,7 +88,7 @@ export function ShippingInput({
   return (
     <div className={className}>
       <div className="relative">
-        <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-500">$</span>
+        <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-subtle">$</span>
         <input
           type="text"
           inputMode="decimal"
@@ -73,6 +101,7 @@ export function ShippingInput({
               : "Run docs/sql/2026-11-07_shipping_cost.sql in Supabase to turn on shipping costs."
           }
           aria-label={`Shipping cost for ${order.item}`}
+          aria-invalid={!valid}
           onChange={(event) => {
             setValue(event.target.value);
             setState("idle");
@@ -82,19 +111,110 @@ export function ShippingInput({
             if (event.key === "Enter") event.currentTarget.blur();
             if (event.key === "Escape") setValue(lastSaved);
           }}
-          className={`w-full rounded-lg border bg-[#0b1120] py-1.5 pl-6 pr-6 text-xs text-white outline-none transition placeholder:text-slate-600 focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-40 ${
-            valid ? "border-white/10" : "border-red-500/60"
-          }`}
+          className={cn("ps-num", smallField, valid ? "border-line-strong" : "border-loss/60")}
         />
-        <span className="absolute right-2 top-1/2 -translate-y-1/2" aria-live="polite">
-          {state === "saving" ? (
-            <span className="block h-3 w-3 animate-spin rounded-full border-2 border-slate-500 border-t-transparent" aria-label="Saving" />
-          ) : state === "saved" ? (
-            <Icon name="check" size={12} className="text-emerald-400" />
-          ) : null}
-        </span>
+        <SavingMark state={state === "saving" ? "saving" : state === "saved" ? "saved" : null} />
       </div>
-      {state === "error" && <p className="mt-1 text-[11px] text-red-400">Couldn&apos;t save shipping</p>}
+      {state === "error" && <p className="mt-1 text-[11px] text-loss">Couldn&apos;t save shipping</p>}
+    </div>
+  );
+}
+
+// ============================================================
+// PRODUCT COST INPUT (in the orders table and on phone cards)
+// ============================================================
+
+export function CostInput({
+  order,
+  saving,
+  saved,
+  disabled,
+  suggestion,
+  onChange,
+  onSave,
+  onEnter,
+}: {
+  order: Order;
+  saving: boolean;
+  saved: boolean;
+  disabled: boolean;
+  suggestion: number | null;
+  onChange: (id: number, value: string) => void;
+  onSave: (id: number, value: string) => Promise<void> | void;
+  onEnter: (input: HTMLInputElement) => void;
+}) {
+  const draftChanged = order.productCost !== order.savedProductCost;
+  const draftValid = order.productCost.trim() === "" || isValidCost(order.productCost);
+  const profit =
+    order.salePrice - order.refundAmount - order.ebayFees - order.otherFees - getShippingCost(order) - Number(order.productCost);
+
+  return (
+    <div className="w-full max-w-36">
+      <div className="relative">
+        <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-subtle">$</span>
+        <input
+          type="text"
+          inputMode="decimal"
+          value={order.productCost}
+          placeholder="0.00"
+          aria-label={`Product cost for ${order.item}`}
+          aria-invalid={!draftValid}
+          data-cost-input
+          data-needs-cost={order.savedProductCost === "" ? "true" : undefined}
+          disabled={disabled}
+          onChange={(event) => onChange(order.id, event.target.value)}
+          onBlur={(event) => void onSave(order.id, event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              onEnter(event.currentTarget);
+            }
+            if (event.key === "Escape") onChange(order.id, order.savedProductCost);
+          }}
+          onClick={(event) => event.stopPropagation()}
+          className={cn(
+            "ps-num",
+            smallField,
+            "h-9 text-sm",
+            !draftValid ? "border-loss/60" : order.savedProductCost === "" ? "border-warn/50" : "border-line-strong"
+          )}
+        />
+        <SavingMark state={saving ? "saving" : saved ? "saved" : null} />
+      </div>
+      {draftChanged && draftValid && order.productCost.trim() !== "" ? (
+        <p className={cn("ps-num mt-1 text-[11px] font-medium", profit >= 0 ? "text-profit" : "text-loss")}>
+          = {money(profit)} profit · Enter to save
+        </p>
+      ) : !draftValid ? (
+        <p className="mt-1 text-[11px] text-loss">Like 8 or 8.50</p>
+      ) : suggestion !== null ? (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            const cost = (suggestion * order.quantity).toFixed(2);
+            onChange(order.id, cost);
+            void onSave(order.id, cost);
+          }}
+          className="mt-1 text-[11px] font-semibold text-accent-ink hover:underline"
+        >
+          Use {money(suggestion * order.quantity)}
+          {order.quantity > 1 ? ` (${order.quantity}×)` : ""} · last time
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+// ============================================================
+// ORDER DETAILS PANEL
+// ============================================================
+
+function Line({ label, value, tone, children }: { label: React.ReactNode; value?: React.ReactNode; tone?: "loss" | "warn"; children?: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-2.5">
+      <span className="text-sm text-muted">{label}</span>
+      {children ?? <span className={cn("ps-num text-sm font-medium", tone === "loss" ? "text-loss" : tone === "warn" ? "text-warn" : "text-ink")}>{value}</span>}
     </div>
   );
 }
@@ -129,8 +249,7 @@ export function OrderDetailsPanel({
   const [refundSaving, setRefundSaving] = useState(false);
   const [refundError, setRefundError] = useState("");
   const validMoney = (v: string) => isValidCost(v);
-  const refundValid = validMoney(shippingLoss) && validMoney(feeLoss) &&
-    (refundOutcome !== "SHIPPED_LOST" || validMoney(lostProductCost));
+  const refundValid = validMoney(shippingLoss) && validMoney(feeLoss) && (refundOutcome !== "SHIPPED_LOST" || validMoney(lostProductCost));
   async function saveRefundDetails() {
     if (!refundValid || refundSaving) return;
     setRefundSaving(true);
@@ -149,321 +268,166 @@ export function OrderDetailsPanel({
     }
   }
   const refunded = isFullyRefunded(order);
-  const partialRefund = isPartiallyRefunded(order);
-  const hasSavedCost = isValidCost(
-    order.savedProductCost
-  );
-
   const validDraft = isValidCost(order.productCost);
 
-  const calculatedProfit = !refunded && validDraft
-    ? order.salePrice - order.refundAmount -
-      order.ebayFees - order.otherFees - getShippingCost(order) - Number(order.productCost)
-    : null;
-
-  const profitMargin =
-    calculatedProfit !== null && order.salePrice > 0
-      ? (calculatedProfit / order.salePrice) * 100
+  const calculatedProfit =
+    !refunded && validDraft
+      ? order.salePrice - order.refundAmount - order.ebayFees - order.otherFees - getShippingCost(order) - Number(order.productCost)
       : null;
 
+  const profitMargin = calculatedProfit !== null && order.salePrice > 0 ? (calculatedProfit / order.salePrice) * 100 : null;
+
   const hasChanges =
-    validDraft &&
-    (order.savedProductCost === "" ||
-      Number(order.savedProductCost) !==
-        Number(order.productCost));
+    validDraft && (order.savedProductCost === "" || Number(order.savedProductCost) !== Number(order.productCost));
 
   const disabled = saving || syncing || loggingOut || refunded;
+  const refundLoss = getRefundLoss(order);
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <button
-        type="button"
-        aria-label="Close order details"
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-        onClick={onClose}
-      />
-
-      <div className="relative z-10 flex h-full w-full max-w-lg flex-col border-l border-white/10 bg-[#101827] shadow-2xl">
-        <div className="flex items-center justify-between border-b border-white/10 px-6 py-5">
-          <div>
-            <h2 className="text-lg font-bold text-white">
-              Order Details
-            </h2>
-
-            <p className="mt-1 text-xs text-slate-500">
-              Review financial details
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close order details"
-            className="rounded-lg border border-white/10 p-2 text-slate-400 transition hover:bg-white/5 hover:text-white"
-          >
-            <Icon name="close" size={19} />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-6 py-6">
-          <div className="flex items-start gap-4">
-            <ListingImage
-              imageUrl={order.imageUrl}
-              item={order.item}
-              size="large"
-            />
-
-            <div className="min-w-0">
-              <h3 className="text-sm font-semibold leading-6 text-white">
-                {order.item}
-              </h3>
-
-              <p className="mt-2 break-all text-xs text-slate-500">
-                {order.ebayOrderId
-                  ? `Order #${order.ebayOrderId}`
-                  : "Order ID unavailable"}
-              </p>
-
-              <p className="mt-1 text-xs text-slate-400">
-                Buyer: {order.ebayBuyerId || "Unavailable"}
-              </p>
-
-              <p className="mt-1 text-xs text-slate-500">
-                {formatOrderDate(order.orderDate)}
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-7">
-            {refunded ? (
-              <span className="inline-flex items-center gap-2 rounded-full bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-400">
-                Refunded — No Product Cost Needed
-              </span>
-            ) : partialRefund ? (
-              <span className="inline-flex items-center gap-2 rounded-full bg-orange-500/10 px-3 py-1.5 text-xs font-medium text-orange-400">
-                Partially Refunded
-              </span>
-            ) : hasSavedCost ? (
-              <span className="inline-flex items-center gap-2 rounded-full bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-400">
-                <Icon name="check" size={14} />
-                Product Cost Recorded
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-2 rounded-full bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-400">
-                <Icon name="alert" size={14} />
-                Product Cost Needed
-              </span>
-            )}
-          </div>
-
-          {refunded && (
-            <div className="mt-6 rounded-2xl border border-rose-500/20 bg-[#151d2d] p-5">
-              <h4 className="text-sm font-semibold text-white">Refund Loss Tracking</h4>
-              <p className="mt-2 text-xs text-slate-400">Choose what happened to the product. These expenses reduce your overall net profit.</p>
-              <label className="mt-4 block text-xs text-slate-300" htmlFor="refund-outcome">Product outcome</label>
-              <select id="refund-outcome" value={refundOutcome} onChange={e => setRefundOutcome(e.target.value)}
-                className="mt-2 w-full rounded-xl border border-white/10 bg-[#0b1120] p-3 text-sm text-white">
-                <option value="NOT_SHIPPED">Not shipped / Still in inventory</option>
-                <option value="SHIPPED_LOST">Shipped &amp; lost / Not returned</option>
-                <option value="RETURNED">Product returned / Recovered</option>
-              </select>
-              {refundOutcome === "SHIPPED_LOST" && (
-                <label className="mt-4 block text-xs text-slate-300">Lost product cost ($)
-                  <input type="number" min="0" step="0.01" value={lostProductCost} onChange={e => setLostProductCost(e.target.value)}
-                    placeholder="Cost of the lost product" className="mt-2 w-full rounded-xl border border-white/10 bg-[#0b1120] p-3 text-sm text-white" />
-                </label>
-              )}
-              <label className="mt-4 block text-xs text-slate-300">Unrecovered shipping expenses ($)
-                <input type="number" min="0" step="0.01" value={shippingLoss} onChange={e => setShippingLoss(e.target.value)}
-                  className="mt-2 w-full rounded-xl border border-white/10 bg-[#0b1120] p-3 text-sm text-white" />
-              </label>
-              <label className="mt-4 block text-xs text-slate-300">eBay fees actually retained ($)
-                <input type="number" min="0" step="0.01" value={feeLoss} onChange={e => setFeeLoss(e.target.value)}
-                  className="mt-2 w-full rounded-xl border border-white/10 bg-[#0b1120] p-3 text-sm text-white" />
-              </label>
-              <p className="mt-4 text-sm font-semibold text-rose-400">Estimated refund loss: {money((refundOutcome === "SHIPPED_LOST" ? Number(lostProductCost || 0) : 0) + Number(shippingLoss || 0) + Number(feeLoss || 0))}</p>
-              <p className="mt-1 text-xs text-slate-500">Only enter fees eBay did not credit back. Avoid counting refunded fees twice.</p>
-              {refundError && <p role="alert" className="mt-3 text-xs text-red-400">{refundError}</p>}
-              <button type="button" disabled={!refundValid || refundSaving || syncing || loggingOut}
-                onClick={() => void saveRefundDetails()}
-                className="mt-4 w-full rounded-xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">
-                {refundSaving ? "Saving refund..." : "Save Refund Outcome"}
-              </button>
-            </div>
-          )}
-
-          <div className="mt-8 rounded-2xl border border-white/[0.07] bg-[#151d2d] p-5">
-            <h4 className="mb-6 text-sm font-semibold text-white">
-              Financial Breakdown
-            </h4>
-
-            <div className="space-y-5">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">
-                  Sale Price
-                </span>
-
-                <span className="text-sm font-semibold text-white">
-                  {money(order.salePrice)}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">
-                  eBay Fees
-                </span>
-
-                <span className="text-sm font-semibold text-red-400">
-                  −{money(order.ebayFees)}
-                </span>
-              </div>
-
-              {order.otherFees > 0 && (
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-slate-400">Other eBay Charges</span>
-                  <span className="text-sm font-semibold text-red-400">−{money(order.otherFees)}</span>
-                </div>
-              )}
-
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-sm text-slate-400">
-                  Shipping
-                  {order.savedShippingCost === "" && order.shippingLabelCost > 0 && (
-                    <span className="ml-1 text-xs text-slate-500">(eBay label)</span>
-                  )}
-                  {order.savedShippingCost === "" && order.shippingLabelCost === 0 && order.storeShipping > 0 && (
-                    <span className="ml-1 text-xs text-slate-500">(store default)</span>
-                  )}
-                </span>
-                <ShippingInput
-                  order={order}
-                  enabled={shippingEnabled}
-                  onSave={onSaveShipping}
-                  className="w-36"
-                />
-              </div>
-
-              {order.refundAmount > 0 && (
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-slate-400">Refund Issued</span>
-                  <span className="text-sm font-semibold text-orange-400">−{money(order.refundAmount)}</span>
-                </div>
-              )}
-              {!refunded && <div className="border-t border-white/[0.07] pt-5">
-                <label
-                  htmlFor="detail-product-cost"
-                  className="mb-3 block text-sm font-semibold text-slate-300"
-                >
-                  Product Cost ($)
-                </label>
-
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500">
-                    $
-                  </span>
-
-                  <input
-                    id="detail-product-cost"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={order.productCost}
-                    placeholder="Enter product cost"
-                    disabled={disabled}
-                    onChange={(event) =>
-                      onChangeCost(
-                        order.id,
-                        event.target.value
-                      )
-                    }
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-
-                        if (hasChanges) {
-                          void onSaveCost(
-                            order.id,
-                            order.productCost
-                          );
-                        }
-                      }
-                    }}
-                    className="w-full rounded-xl border border-white/10 bg-[#0b1120] py-3 pl-9 pr-4 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-blue-500 disabled:opacity-50"
-                  />
-                </div>
-
-                <p className="mt-2 text-xs leading-5 text-slate-500">
-                  Enter what you paid for this product.
-                  ProfitSync calculates your profit
-                  automatically.
-                </p>
-              </div>}
-            </div>
-          </div>
-
-          <div className="mt-5 rounded-2xl border border-emerald-500/15 bg-emerald-500/[0.05] p-5">
-            <p className="text-sm text-slate-400">
-              Calculated Net Profit
-            </p>
-
-            <p
-              className={`mt-3 text-3xl font-bold ${
-                refunded
-                  ? (getRefundLoss(order) > 0 ? "text-red-400" : "text-slate-500")
-                  : calculatedProfit === null
-                  ? "text-slate-500"
-                  : calculatedProfit >= 0
-                    ? "text-emerald-400"
-                    : "text-red-400"
-              }`}
-            >
-              {refunded ? (getRefundLoss(order) > 0 ? money(-getRefundLoss(order)) : money(0)) : calculatedProfit === null
-                ? "Pending"
-                : money(calculatedProfit)}
-            </p>
-
-            <p className="mt-2 text-xs text-slate-500">
-              {refunded ? "Refunded sale excluded from revenue. Recorded refund losses are deducted from net profit." : profitMargin === null
-                ? "Add a product cost to calculate margin."
-                : `Profit Margin: ${profitMargin.toFixed(1)}%`}
-            </p>
-          </div>
-
-          <div className="mt-5 flex items-start gap-3 rounded-xl border border-white/[0.07] bg-white/[0.025] p-4">
-            <Icon
-              name="info"
-              size={18}
-              className="mt-0.5 shrink-0 text-blue-400"
-            />
-
-            <p className="text-xs leading-5 text-slate-400">
-              Profit estimates subtract refunds, recorded eBay fees,
-              and product costs. Refunded sales are excluded from dashboard reporting.
-              Shipping expenses and nonrefundable fees may still affect actual profit.
-            </p>
-          </div>
-        </div>
-
-        <div className="border-t border-white/10 bg-[#101827] p-6">
-          <button
-            type="button"
+    <Drawer
+      open
+      onClose={onClose}
+      title="Order details"
+      description={order.ebayOrderId ? `Order #${order.ebayOrderId}` : "Order ID unavailable"}
+      footer={
+        !refunded ? (
+          <Button
+            variant="primary"
+            size="lg"
+            className="w-full"
             disabled={!hasChanges || disabled}
-            onClick={() =>
-              onSaveCost(order.id, order.productCost)
-            }
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
+            loading={saving}
+            onClick={() => void onSaveCost(order.id, order.productCost)}
+            icon={<Icon name="save" size={16} />}
           >
-            <Icon name="save" size={17} />
-
-            {saving
-              ? "Saving..."
-              : refunded ? "No Cost Needed (Refunded)"
-              : hasChanges
-                ? "Save Product Cost"
-                : "No Unsaved Changes"}
-          </button>
+            {hasChanges ? "Save product cost" : "No unsaved changes"}
+          </Button>
+        ) : undefined
+      }
+    >
+      <div className="flex items-start gap-4">
+        <ListingImage imageUrl={order.imageUrl} item={order.item} size="large" />
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold leading-6 text-ink">{order.item}</h3>
+          <p className="mt-1 text-xs text-muted">Buyer: {order.ebayBuyerId || "Unavailable"}</p>
+          <p className="mt-0.5 text-xs text-subtle">{formatOrderDate(order.orderDate)}</p>
+          <div className="mt-2">
+            <OrderStatusBadge order={order} />
+          </div>
         </div>
       </div>
-    </div>
+
+      {refunded && (
+        <section className="mt-6 rounded-xl border border-loss/25 bg-loss-soft p-4">
+          <h4 className="text-sm font-semibold text-ink">What happened to this refund?</h4>
+          <p className="mt-1 text-xs leading-5 text-muted">Any loss you record here comes off your net profit.</p>
+          <div className="mt-4 space-y-3">
+            <Field label="Product outcome">
+              <Select value={refundOutcome} onChange={(e) => setRefundOutcome(e.target.value)}>
+                <option value="NOT_SHIPPED">Not shipped / still in inventory</option>
+                <option value="SHIPPED_LOST">Shipped &amp; lost / not returned</option>
+                <option value="RETURNED">Product returned / recovered</option>
+              </Select>
+            </Field>
+            {refundOutcome === "SHIPPED_LOST" && (
+              <Field label="Lost product cost">
+                <MoneyInput value={lostProductCost} onChange={(e) => setLostProductCost(e.target.value)} placeholder="Cost of the lost product" aria-invalid={!validMoney(lostProductCost)} />
+              </Field>
+            )}
+            <Field label="Shipping you didn't get back">
+              <MoneyInput value={shippingLoss} onChange={(e) => setShippingLoss(e.target.value)} aria-invalid={!validMoney(shippingLoss)} />
+            </Field>
+            <Field label="eBay fees eBay kept" hint="Only fees eBay didn't credit back, so nothing counts twice.">
+              <MoneyInput value={feeLoss} onChange={(e) => setFeeLoss(e.target.value)} aria-invalid={!validMoney(feeLoss)} />
+            </Field>
+          </div>
+          <p className="ps-num mt-4 text-sm font-semibold text-loss">
+            Estimated refund loss:{" "}
+            {money((refundOutcome === "SHIPPED_LOST" ? Number(lostProductCost || 0) : 0) + Number(shippingLoss || 0) + Number(feeLoss || 0))}
+          </p>
+          {refundError && <p role="alert" className="mt-2 text-xs text-loss">{refundError}</p>}
+          <Button
+            variant="danger"
+            className="mt-4 w-full"
+            disabled={!refundValid || syncing || loggingOut}
+            loading={refundSaving}
+            onClick={() => void saveRefundDetails()}
+          >
+            Save refund outcome
+          </Button>
+        </section>
+      )}
+
+      <section className="mt-6">
+        <h4 className="text-xs font-semibold uppercase tracking-wider text-subtle">Breakdown</h4>
+        <div className="mt-1 divide-y divide-line">
+          <Line label="Sale price" value={money(order.salePrice)} />
+          <Line label="eBay fees" value={`−${money(order.ebayFees)}`} tone="loss" />
+          {order.otherFees > 0 && <Line label="Other eBay charges" value={`−${money(order.otherFees)}`} tone="loss" />}
+          <Line
+            label={
+              <>
+                Shipping
+                {order.savedShippingCost === "" && order.shippingLabelCost > 0 && <span className="ml-1 text-xs text-subtle">(eBay label)</span>}
+                {order.savedShippingCost === "" && order.shippingLabelCost === 0 && order.storeShipping > 0 && (
+                  <span className="ml-1 text-xs text-subtle">(store default)</span>
+                )}
+              </>
+            }
+          >
+            <ShippingInput order={order} enabled={shippingEnabled} onSave={onSaveShipping} className="w-32" />
+          </Line>
+          {order.refundAmount > 0 && <Line label="Refund issued" value={`−${money(order.refundAmount)}`} tone="warn" />}
+          {!refunded && (
+            <div className="py-3">
+              <Field label="Product cost" hint="What you paid for this item. Profit updates as you type.">
+                <MoneyInput
+                  id="detail-product-cost"
+                  value={order.productCost}
+                  placeholder="Enter product cost"
+                  disabled={disabled}
+                  data-autofocus={order.savedProductCost === "" ? true : undefined}
+                  onChange={(event) => onChangeCost(order.id, event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      if (hasChanges) void onSaveCost(order.id, order.productCost);
+                    }
+                  }}
+                  className="h-10"
+                />
+              </Field>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="mt-4 rounded-xl border border-line bg-surface-2 p-4">
+        <p className="text-xs font-medium text-muted">Net profit</p>
+        <p
+          className={cn(
+            "ps-num mt-1 text-2xl font-semibold tracking-tight",
+            refunded
+              ? refundLoss > 0
+                ? "text-loss"
+                : "text-subtle"
+              : calculatedProfit === null
+                ? "text-subtle"
+                : calculatedProfit >= 0
+                  ? "text-profit"
+                  : "text-loss"
+          )}
+        >
+          {refunded ? (refundLoss > 0 ? money(-refundLoss) : money(0)) : calculatedProfit === null ? "Pending" : money(calculatedProfit)}
+        </p>
+        <p className="mt-1 text-xs text-subtle">
+          {refunded
+            ? "Refunded sales aren't counted as revenue. Recorded refund losses come off net profit."
+            : profitMargin === null
+              ? "Add a product cost to see the margin."
+              : `Margin ${profitMargin.toFixed(1)}%`}
+        </p>
+      </section>
+    </Drawer>
   );
 }
