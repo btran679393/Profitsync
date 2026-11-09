@@ -19,6 +19,7 @@ import SetupChecklist, { type SetupStep } from "./dashboard/SetupChecklist";
 import HelpGuide from "./HelpGuide";
 import type { TrendPoint } from "./dashboard/TrendChart";
 import { SYNC_EVENT, useLastSynced } from "./shell/useShell";
+import { describeProgress, readSyncResponse } from "@/lib/ebay/readSync";
 import ListingsSection, { LISTING_RANGES, type ListingRange } from "./ListingsSection";
 import StoreShippingSetting from "./StoreShippingSetting";
 import StoreSwitcher, { type EbayStore } from "./StoreSwitcher";
@@ -77,6 +78,8 @@ function Dashboard() {
   const syncInFlightRef = useRef(false);
 
   const [syncing, setSyncing] = useState(false);
+  // "Bringing in your orders… 1,200 so far" while a sync runs.
+  const [syncProgress, setSyncProgress] = useState<string | null>(null);
   // Success and error messages appear as toasts (bottom right).
   const toast = useToast();
   const confirm = useConfirm();
@@ -728,7 +731,15 @@ function Dashboard() {
       await loadListings();
       if (!quiet) toast.success("Listings refreshed", data.message ?? undefined);
     } catch (error) {
-      toast.error("Listings didn't refresh", error instanceof Error ? error.message : "Couldn't load your eBay listings.");
+      const reason = error instanceof Error ? error.message : "Couldn't load your eBay listings.";
+      if (/reconnect/i.test(reason)) {
+        toast.error("eBay needs you to sign in again", "Your eBay connection has expired. Reconnecting keeps all your data.", {
+          label: "Reconnect eBay",
+          href: "/api/ebay/auth",
+        });
+      } else {
+        toast.error("Listings didn't refresh", reason);
+      }
     } finally {
       setListingsSyncing(false);
     }
@@ -903,18 +914,32 @@ function Dashboard() {
       const targets: Array<EbayStore | null> = allStores ? stores.filter((s) => !s.locked) : [activeStore];
       const results: SyncResponse[] = [];
       for (const target of targets) {
+        const prefix = targets.length > 1 && target ? `${target.name}: ` : "";
         const response = await fetch(
           target ? `/api/ebay/sync?store=${encodeURIComponent(target.id)}` : "/api/ebay/sync",
-          { method: "POST", cache: "no-store" }
+          // Ask for live progress ("Bringing in your orders… 1,200 so far").
+          { method: "POST", cache: "no-store", headers: { Accept: "application/x-ndjson" } }
         );
-        const result: SyncResponse & { busy?: boolean } = await response.json();
+        const { status, body: result } = await readSyncResponse<SyncResponse & { busy?: boolean; reconnect?: boolean }>(
+          response,
+          (progress) => setSyncProgress(prefix + describeProgress(progress))
+        );
         // Another tab or an auto-sync is already on it: nothing went wrong.
-        if (response.status === 409 && result.busy) {
+        if (status === 409 && result.busy) {
           toast.info("Already syncing", result.message);
           return;
         }
-        if (!response.ok || !result.success) {
+        if (status >= 400 || !result.success) {
           const reason = result.message || result.error || "Failed to sync eBay orders.";
+          // eBay wants the seller to sign in again: offer the button right here.
+          if (result.reconnect || /reconnect/i.test(reason)) {
+            toast.error(
+              "eBay needs you to sign in again",
+              `${target?.name ?? "Your store"}'s eBay connection has expired. Reconnecting takes a few seconds and keeps all your data.`,
+              { label: "Reconnect eBay", href: "/api/ebay/auth" }
+            );
+            return;
+          }
           throw new Error(target ? `${target.name}: ${reason}` : reason);
         }
         results.push(result);
@@ -966,6 +991,7 @@ function Dashboard() {
       );
     } finally {
       setSyncing(false);
+      setSyncProgress(null);
       syncInFlightRef.current = false;
     }
   }
@@ -1447,6 +1473,7 @@ function Dashboard() {
           syncDisabled={syncing || loading || loggingOut || savingId !== null}
           onSync={() => void syncEbayOrders()}
           lastSyncedAt={lastSyncedAt}
+          progressText={syncProgress}
           now={currentTime}
           switcher={
             <StoreSwitcher
@@ -1546,6 +1573,12 @@ function Dashboard() {
               ) : undefined
             }
           />
+
+          {syncProgress && (view === "dashboard" || view === "orders") && (
+            <Notice className="mb-6" title="Syncing with eBay">
+              <span className="ps-num">{syncProgress}</span>
+            </Notice>
+          )}
 
           {ordersProgress && view !== "settings" && view !== "help" && view !== "billing" && (
             <Notice className="mb-6" title="Loading your order history">

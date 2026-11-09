@@ -4,11 +4,13 @@ import { createContext, useCallback, useContext, useMemo, useRef, useState, type
 import { cn } from "./cn";
 
 type ToastTone = "success" | "error" | "info";
-type ToastItem = { id: number; tone: ToastTone; title: string; description?: string };
+// An optional button in the toast, e.g. "Reconnect".
+export type ToastAction = { label: string; href?: string; onClick?: () => void };
+type ToastItem = { id: number; tone: ToastTone; title: string; description?: string; action?: ToastAction };
 type ToastApi = {
-  success: (title: string, description?: string) => void;
-  error: (title: string, description?: string) => void;
-  info: (title: string, description?: string) => void;
+  success: (title: string, description?: string, action?: ToastAction) => void;
+  error: (title: string, description?: string, action?: ToastAction) => void;
+  info: (title: string, description?: string, action?: ToastAction) => void;
 };
 
 const ToastContext = createContext<ToastApi>({ success: () => {}, error: () => {}, info: () => {} });
@@ -38,19 +40,20 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const dismiss = useCallback((id: number) => setItems((list) => list.filter((t) => t.id !== id)), []);
 
   const push = useCallback(
-    (tone: ToastTone, title: string, description?: string) => {
+    (tone: ToastTone, title: string, description?: string, action?: ToastAction) => {
       const id = nextId.current++;
-      setItems((list) => [...list.slice(-3), { id, tone, title, description }]);
-      window.setTimeout(() => dismiss(id), tone === "error" ? 9000 : 4500);
+      setItems((list) => [...list.slice(-3), { id, tone, title, description, action }]);
+      // Toasts with a button stay longer so there's time to use it.
+      window.setTimeout(() => dismiss(id), action ? 20000 : tone === "error" ? 9000 : 4500);
     },
     [dismiss]
   );
 
   const api = useMemo<ToastApi>(
     () => ({
-      success: (title, description) => push("success", title, description),
-      error: (title, description) => push("error", title, description),
-      info: (title, description) => push("info", title, description),
+      success: (title, description, action) => push("success", title, description, action),
+      error: (title, description, action) => push("error", title, description, action),
+      info: (title, description, action) => push("info", title, description, action),
     }),
     [push]
   );
@@ -88,6 +91,26 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-ink">{toast.title}</p>
               {toast.description && <p className="mt-0.5 text-xs leading-5 text-muted">{toast.description}</p>}
+              {toast.action &&
+                (toast.action.href ? (
+                  <a
+                    href={toast.action.href}
+                    className="mt-2 inline-flex h-8 items-center rounded-lg bg-accent px-3 text-xs font-semibold text-on-accent hover:bg-accent-hover"
+                  >
+                    {toast.action.label}
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      toast.action?.onClick?.();
+                      dismiss(toast.id);
+                    }}
+                    className="mt-2 inline-flex h-8 items-center rounded-lg bg-accent px-3 text-xs font-semibold text-on-accent hover:bg-accent-hover"
+                  >
+                    {toast.action.label}
+                  </button>
+                ))}
             </div>
             <button
               type="button"

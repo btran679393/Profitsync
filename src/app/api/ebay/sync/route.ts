@@ -481,7 +481,8 @@ async function verifyActiveConnection(
 // ============================================================
 async function getHistoricalOrders(
   ebayApiBase: string,
-  accessToken: string
+  accessToken: string,
+  onPage: (found: number) => void = () => {}
 ): Promise<EbayOrder[]> {
   const now = new Date();
   const historyStart = new Date(
@@ -542,6 +543,7 @@ async function getHistoricalOrders(
       }
     }
     offset += pageOrders.length;
+    onPage(ebayOrders.length);
     console.log("ProfitSync order history page:", {
       page: page + 1,
       retrieved: pageOrders.length,
@@ -1049,14 +1051,60 @@ export async function POST(request: Request) {
       { status: 409 }
     );
   }
-  try {
-    return await syncOrders(request);
-  } finally {
-    await lock.release();
+  // Without a streaming request, answer once at the end (as before).
+  if (!request.headers.get("accept")?.includes("application/x-ndjson")) {
+    try {
+      return await syncOrders(request);
+    } finally {
+      await lock.release();
+    }
   }
+
+  // Streaming: send short progress lines while the sync runs, then the
+  // result, so a long first sync can show "Bringing in your orders…
+  // 1,200 so far" instead of a spinner.
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (line: object) => {
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify(line) + "\n"));
+        } catch {
+          // The browser went away; the sync still finishes.
+        }
+      };
+      try {
+        const response = await syncOrders(request, (progress) => send({ type: "progress", ...progress }));
+        send({ type: "result", status: response.status, body: await response.json() });
+      } catch (error) {
+        console.error("Streaming sync failed:", error);
+        send({ type: "result", status: 500, body: { error: "Something went wrong syncing eBay orders." } });
+      } finally {
+        await lock.release();
+        try {
+          controller.close();
+        } catch {
+          // Already closed.
+        }
+      }
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Accel-Buffering": "no",
+    },
+  });
 }
 
-async function syncOrders(request: Request) {
+// What the seller sees while a sync runs.
+type SyncProgress =
+  | { stage: "orders"; found: number }
+  | { stage: "fees" }
+  | { stage: "saving"; done: number; total: number };
+
+async function syncOrders(request: Request, onProgress: (progress: SyncProgress) => void = () => {}) {
   try {
     // --------------------------------------------------------
     // STEP 1: Authenticate ProfitSync user
@@ -1191,6 +1239,7 @@ async function syncOrders(request: Request) {
               "eBay refresh token expired.",
             message:
               "Please reconnect your eBay account.",
+            reconnect: true,
           },
           { status: 401 }
         );
@@ -1258,6 +1307,7 @@ async function syncOrders(request: Request) {
               "Unable to refresh eBay access token.",
             message:
               "Please reconnect your eBay account.",
+            reconnect: true,
           },
           { status: 401 }
         );
@@ -1280,11 +1330,14 @@ async function syncOrders(request: Request) {
     // --------------------------------------------------------
     // STEP 6: Retrieve historical eBay orders
     // --------------------------------------------------------
+    onProgress({ stage: "orders", found: 0 });
     let ebayOrders =
       await getHistoricalOrders(
         ebayApiBase,
-        accessToken
+        accessToken,
+        (found) => onProgress({ stage: "orders", found })
       );
+    onProgress({ stage: "fees" });
     console.log(
       "ProfitSync historical orders found:",
       ebayOrders.length
@@ -1453,7 +1506,10 @@ async function syncOrders(request: Request) {
         // ====================================================
         // IMPORT NEW ORDERS
         // ====================================================
+        let processed = 0;
         for (const ebayOrder of ebayOrders) {
+          processed++;
+          if (processed % 50 === 0) onProgress({ stage: "saving", done: processed, total: ebayOrders.length });
           if (
             !ebayOrder.orderId ||
             existingIds.has(ebayOrder.orderId)

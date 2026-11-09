@@ -17,6 +17,7 @@ export default function Topbar({
   lastSyncedAt,
   now,
   hasStore,
+  progressText = null,
 }: {
   onOpenMenu: () => void;
   switcher: ReactNode;
@@ -26,8 +27,10 @@ export default function Topbar({
   lastSyncedAt: number | null;
   now: Date | null;
   hasStore: boolean;
+  // Live sync progress, e.g. "Bringing in your orders… 1,200 so far".
+  progressText?: string | null;
 }) {
-  const status = syncing ? "Syncing…" : lastSyncedAt && now ? `Synced ${timeAgo(lastSyncedAt, now.getTime())}` : null;
+  const status = syncing ? progressText ?? "Syncing…" : lastSyncedAt && now ? `Synced ${timeAgo(lastSyncedAt, now.getTime())}` : null;
 
   return (
     <div className="sticky top-0 z-30 border-b border-line bg-bg/85 backdrop-blur-md">
