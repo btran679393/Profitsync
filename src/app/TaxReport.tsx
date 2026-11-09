@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { ExpenseEntry } from "./ExpensesSection";
-import { buttonClasses } from "@/components/ui";
+import { Button, LoadingRegion, Notice, SegmentedControl, Skeleton, buttonClasses } from "@/components/ui";
 
 // What the report needs from each order (worked out by the dashboard with
 // the same rules as everywhere else in ProfitSync).
@@ -16,7 +16,13 @@ export type TaxOrder = {
   productCost: number | null;
   // What a refund cost you (lost item, return shipping, fees kept by eBay).
   refundLoss: number;
+  // A refunded order whose outcome (item back, lost…) hasn't been set yet.
+  refundUnreviewed?: boolean;
+  // Which store it's from (shown in warnings when covering several stores).
+  storeName?: string | null;
 };
+
+type Warning = { key: string; text: string; fix?: { label: string; onClick: () => void } };
 
 const money = (value: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
@@ -40,6 +46,11 @@ export default function TaxReport({
   storeLabel,
   allowed,
   onUpgrade,
+  loading = false,
+  scope = null,
+  onScopeChange,
+  currentStoreName = "This store",
+  onFix,
 }: {
   orders: TaxOrder[];
   expenses: ExpenseEntry[];
@@ -47,6 +58,13 @@ export default function TaxReport({
   // False on the Free plan: the report is shown blurred with an upgrade box.
   allowed: boolean;
   onUpgrade: () => void;
+  loading?: boolean;
+  // With several stores: whole business or just the store being viewed.
+  scope?: "business" | "store" | null;
+  onScopeChange?: (scope: "business" | "store") => void;
+  currentStoreName?: string;
+  // Buttons on the "before you file" warnings.
+  onFix?: { costs?: () => void; shipping?: () => void; refunds?: () => void };
 }) {
   const years = useMemo(() => {
     const found = new Set<number>([new Date().getFullYear()]);
@@ -77,6 +95,17 @@ export default function TaxReport({
     const otherFees = sum(kept, (o) => o.otherFees);
     const shipping = sum(kept, (o) => o.shipping);
     const refundLosses = sum(refunded, (o) => o.refundLoss);
+    const noShipping = kept.filter((o) => o.shipping <= 0).length;
+    const unreviewed = refunded.filter((o) => o.refundUnreviewed).length;
+    // " in vintagekitcorner" when covering several stores, so the seller
+    // knows which store to open.
+    const where = (list: TaxOrder[]) => {
+      if (scope !== "business") return "";
+      const names = [...new Set(list.map((o) => o.storeName).filter(Boolean))];
+      return names.length > 0 && names.length <= 3 ? ` in ${names.join(", ")}` : "";
+    };
+    const missingCostWhere = where(kept.filter((o) => o.productCost === null));
+    const unreviewedWhere = where(refunded.filter((o) => o.refundUnreviewed));
 
     const byCategory = new Map<string, number>();
     for (const expense of expenses) {
@@ -91,6 +120,12 @@ export default function TaxReport({
       orderCount: inYear.length,
       refundCount: refunded.length,
       missingCost,
+      missingCostWhere,
+      unreviewedWhere,
+      noShipping,
+      keptCount: kept.length,
+      unreviewed,
+      expenseCount: byCategory.size,
       income: [
         { label: "Gross sales", amount: grossSales },
         { label: "Refunds and returns", amount: refunds, negative: true },
@@ -108,7 +143,7 @@ export default function TaxReport({
       totalCosts: ebayFees + otherFees + shipping + refundLosses + expenseTotal,
       netProfit,
     };
-  }, [orders, expenses, year]);
+  }, [orders, expenses, year, scope]);
 
   function downloadCsv() {
     const rows: Array<[string, string | number]> = [
@@ -132,6 +167,43 @@ export default function TaxReport({
     URL.revokeObjectURL(url);
   }
 
+  // Things that would make the numbers wrong, with a way to fix each.
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  const warnings: Warning[] = [];
+  if (report.missingCost > 0) {
+    warnings.push({
+      key: "costs",
+      text: `${plural(report.missingCost, "order", "orders")}${report.missingCostWhere} ${report.missingCost === 1 ? "has" : "have"} no product cost, so your profit looks higher than it is.`,
+      fix: onFix?.costs && { label: "Add costs", onClick: onFix.costs },
+    });
+  }
+  if (report.keptCount > 0 && report.noShipping === report.keptCount) {
+    warnings.push({
+      key: "shipping",
+      text: "No shipping costs recorded. If you paid for postage, add it so it counts as a business cost.",
+      fix: onFix?.shipping && { label: "Add shipping", onClick: onFix.shipping },
+    });
+  } else if (report.noShipping > 0) {
+    warnings.push({
+      key: "shipping",
+      text: `${plural(report.noShipping, "order has", "orders have")} no shipping cost. Fine if the buyer's postage was free to you; otherwise add it.`,
+      fix: onFix?.shipping && { label: "Review shipping", onClick: onFix.shipping },
+    });
+  }
+  if (report.unreviewed > 0) {
+    warnings.push({
+      key: "refunds",
+      text: `${plural(report.unreviewed, "refund", "refunds")}${report.unreviewedWhere} ${report.unreviewed === 1 ? "hasn't" : "haven't"} been reviewed, so any loss on ${report.unreviewed === 1 ? "it" : "them"} isn't counted yet.`,
+      fix: onFix?.refunds && { label: "Review refunds", onClick: onFix.refunds },
+    });
+  }
+  if (report.orderCount > 0 && report.expenseCount === 0) {
+    warnings.push({
+      key: "expenses",
+      text: `No business expenses recorded for ${year}. Supplies, software and mileage can lower your tax.`,
+    });
+  }
+
   const row = (line: Line, sign: "+" | "-") => (
     <div
       key={line.label}
@@ -152,6 +224,17 @@ export default function TaxReport({
       <div className="no-print flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted">A profit and loss summary for the year, to give your accountant or use when you file.</p>
         <div className="flex flex-wrap items-center gap-2">
+          {scope && onScopeChange && (
+            <SegmentedControl
+              label="Which stores"
+              value={scope}
+              onChange={onScopeChange}
+              options={[
+                { value: "business", label: "All stores" },
+                { value: "store", label: currentStoreName },
+              ]}
+            />
+          )}
           <select
             value={year}
             onChange={(e) => setYear(Number(e.target.value))}
@@ -177,6 +260,33 @@ export default function TaxReport({
         </div>
       </div>
 
+      {allowed && !loading && warnings.length > 0 && (
+        <Notice tone="warn" title="Before you file" className="no-print">
+          <ul className="mt-1 space-y-2">
+            {warnings.map((w) => (
+              <li key={w.key} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                <span>{w.text}</span>
+                {w.fix && (
+                  <Button variant="secondary" size="sm" onClick={w.fix.onClick}>
+                    {w.fix.label}
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Notice>
+      )}
+
+      {loading ? (
+        <LoadingRegion label="Loading all your stores">
+          <div className="rounded-xl border border-line bg-surface p-6">
+            <p className="mb-4 text-sm text-muted">Adding up all your stores…</p>
+            <div className="space-y-3">
+              {[0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-6 w-full" />)}
+            </div>
+          </div>
+        </LoadingRegion>
+      ) : (
       <div className="relative">
         <section
           id="tax-report"
@@ -244,6 +354,7 @@ export default function TaxReport({
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

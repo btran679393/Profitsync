@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "eslint",
     "postinstall": "prisma skills sync || exit 0",
-    "contract:emit": "prisma contract emit"
+    "contract:emit": "prisma contract emit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@prisma/client": "^7.10.0",
@@ -33,6 +34,7 @@
     "eslint-config-next": "16.3.4",
     "prisma": "^8.0.0-rc.10",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "3.2.4"
   }
 }

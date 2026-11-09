@@ -55,14 +55,16 @@ async function canRepeat(pool: Pool) {
 }
 
 // GET: expenses for the store being viewed, plus business-wide ones.
-export async function GET() {
+// ?scope=business: every expense on the account (for the tax summary).
+export async function GET(request: Request) {
   const user = await signedInUser();
   if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
   if (!process.env.DATABASE_URL) return NextResponse.json({ enabled: false, expenses: [] });
 
   const pool = newPool();
   try {
-    const store = await resolveActiveEbayUserId(pool, user);
+    const wholeBusiness = new URL(request.url).searchParams.get("scope") === "business";
+    const store = wholeBusiness ? null : await resolveActiveEbayUserId(pool, user);
     const repeat = await canRepeat(pool);
     const extra = repeat ? `, "repeatMonthly", to_char("endedOn", 'YYYY-MM-DD') AS "endedOn"` : "";
     const result = await pool.query(

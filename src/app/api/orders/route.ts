@@ -3,7 +3,7 @@ import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { existingColumns } from "@/lib/db/optionalColumns";
 import { resolveActiveEbayUserId } from "@/lib/ebay/activeStore";
-import { getUserPlan } from "@/lib/billing/server";
+import { connectedStoreIds, getUserPlan, lockedStoreIds } from "@/lib/billing/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -33,8 +33,19 @@ export async function GET(request: Request) {
   try {
     const optional = await existingColumns(pool, "order", OPTIONAL_COLUMNS);
     const extra = OPTIONAL_COLUMNS.filter((c) => optional.has(c)).map((c) => ` "${c}",`).join("");
-    // Only the store the seller is viewing (all orders if none is connected).
-    const store = await resolveActiveEbayUserId(pool, user);
+    // Only the store the seller is viewing (all orders if none is connected),
+    // or, with ?scope=business (the tax summary), every store the plan
+    // includes.
+    let stores: string[] | null;
+    if (params.get("scope") === "business") {
+      const { limits: planLimits } = await getUserPlan(pool, user.id);
+      const all = await connectedStoreIds(pool, user.id);
+      const locked = lockedStoreIds(all, planLimits);
+      stores = locked.size > 0 ? all.filter((id) => !locked.has(id)) : null;
+    } else {
+      const store = await resolveActiveEbayUserId(pool, user);
+      stores = store ? [store] : null;
+    }
     // Free plan: only recent history, and only the month's allowance of
     // orders (the earliest ones each month), even if more were saved earlier.
     const { limits } = await getUserPlan(pool, user.id);
@@ -60,13 +71,13 @@ export async function GET(request: Request) {
           )
           SELECT ${columns}
           FROM ranked
-          WHERE ($2::text IS NULL OR "ebayUserId" = $2)
+          WHERE ($2::text[] IS NULL OR "ebayUserId" = ANY($2::text[]))
             AND "orderDate" >= now() - make_interval(days => $3::int)
             AND "monthRank" <= $4::int
           ORDER BY "orderDate" DESC, id DESC
           LIMIT $5 OFFSET $6
           `,
-          [user.id, store, limits.historyDays, limits.monthlyOrders, limit, offset]
+          [user.id, stores, limits.historyDays, limits.monthlyOrders, limit, offset]
         )
       : // Paid plans (or billing off): a plain lookup that uses the
         // userId/store/date indexes.
@@ -74,11 +85,11 @@ export async function GET(request: Request) {
           `
           SELECT ${columns}
           FROM public."order"
-          WHERE "userId" = $1 AND ($2::text IS NULL OR "ebayUserId" = $2)
+          WHERE "userId" = $1 AND ($2::text[] IS NULL OR "ebayUserId" = ANY($2::text[]))
           ORDER BY "orderDate" DESC, id DESC
           LIMIT $3 OFFSET $4
           `,
-          [user.id, store, limit, offset]
+          [user.id, stores, limit, offset]
         );
 
     const total = result.rows.length > 0 ? Number(result.rows[0].totalRows) : offset;

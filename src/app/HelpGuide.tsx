@@ -184,6 +184,10 @@ export default function HelpGuide({
             <li>
               <B>Import / export</B> downloads your orders as a spreadsheet, or fills in shipping costs from a Pirate Ship (or similar) export.
             </li>
+            <li>
+              <B>Import / export → Check against eBay</B> compares a month with eBay&apos;s own payment records and points out any order whose
+              sale, fees or refund don&apos;t match. Nothing is changed; a sync usually fixes what it finds.
+            </li>
           </ul>
         </Section>
 
@@ -217,6 +221,11 @@ export default function HelpGuide({
           <p>
             A clear profit and loss summary for the whole year. Print it, save it as a PDF or download a
             spreadsheet for your accountant. It&apos;s a guide, not tax advice: check it with a tax professional before you file.
+          </p>
+          <p>
+            With several stores, it covers <B>all of them</B> by default, since you file one return; you can switch to one store. A{" "}
+            <B>Before you file</B> box lists anything missing, like orders without a product cost or no shipping recorded, with a button to
+            fix each.
           </p>
         </Section>
 

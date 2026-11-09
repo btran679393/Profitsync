@@ -67,7 +67,7 @@ export function Notice({
       role={tone === "loss" ? "alert" : "status"}
       className={cn("flex flex-col gap-3 rounded-xl border px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between", tones[tone], className)}
     >
-      <div className="min-w-0 text-ink-2">
+      <div className="min-w-0 flex-1 text-ink-2">
         {title && <p className="font-semibold text-ink">{title}</p>}
         {children}
       </div>

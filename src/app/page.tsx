@@ -53,6 +53,22 @@ import { Icon } from "./dashboard/Icon";
 // MAIN DASHBOARD
 // ============================================================
 
+// One entry per expense, or per month for a repeating one, up to today.
+function expandExpenses(expenses: Expense[]): ExpenseEntry[] {
+  const today = todayKey();
+  return expenses
+    .flatMap((expense) =>
+      expense.repeatMonthly
+        ? repeatDates(expense.spentOn, expense.endedOn ?? null, today).map((date) => ({
+            ...expense,
+            key: `${expense.id}-${date}`,
+            date,
+          }))
+        : [{ ...expense, key: String(expense.id), date: expense.spentOn }]
+    )
+    .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
+}
+
 // The page: shared toast and confirm-dialog providers around the dashboard.
 export default function Home() {
   return (
@@ -492,18 +508,7 @@ function Dashboard() {
   const [expensesCanRepeat, setExpensesCanRepeat] = useState(false);
 
   // One entry per expense, or per month for a repeating one, up to today.
-  const expenseEntries = useMemo<ExpenseEntry[]>(() => {
-    const today = todayKey();
-    return expenses.flatMap((expense) =>
-      expense.repeatMonthly
-        ? repeatDates(expense.spentOn, expense.endedOn ?? null, today).map((date) => ({
-            ...expense,
-            key: `${expense.id}-${date}`,
-            date,
-          }))
-        : [{ ...expense, key: String(expense.id), date: expense.spentOn }]
-    ).sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
-  }, [expenses]);
+  const expenseEntries = useMemo<ExpenseEntry[]>(() => expandExpenses(expenses), [expenses]);
 
   // Every category used, for the category list on the Expenses page.
   const expenseCategories = useMemo(() => [...new Set(expenses.map((e) => e.category))], [expenses]);
@@ -1085,9 +1090,58 @@ function Dashboard() {
 
   // Orders in the chosen date range, flattened for the CSV download.
   // Every loaded order, for the yearly tax summary.
+  // Taxes cover the whole business by default when there are several
+  // stores (one tax return), or just the store being viewed.
+  const [taxScope, setTaxScope] = useState<"business" | "store">("business");
+  const [businessData, setBusinessData] = useState<{ orders: Order[]; expenses: Expense[] } | null>(null);
+  const [businessLoading, setBusinessLoading] = useState(false);
+  const combineStores = stores.filter((s) => !s.locked).length > 1 && !allStores;
+  const useBusiness = combineStores && taxScope === "business";
+
+  useEffect(() => {
+    if (view !== "taxes" || !useBusiness) return;
+    let cancelled = false;
+    void (async () => {
+      setBusinessLoading(true);
+      try {
+        const all: ApiOrder[] = [];
+        for (let offset = 0; ; offset += ORDERS_PAGE) {
+          const response = await fetch(`/api/orders?scope=business&limit=${ORDERS_PAGE}&offset=${offset}`, { cache: "no-store" });
+          if (!response.ok) throw new Error("Couldn't load your orders.");
+          const page: ApiOrder[] = await response.json();
+          all.push(...page);
+          if (page.length < ORDERS_PAGE) break;
+        }
+        const expenseResponse = await fetch("/api/expenses?scope=business", { cache: "no-store" });
+        const expenseData: { expenses?: Expense[] } = expenseResponse.ok ? await expenseResponse.json() : {};
+        if (cancelled) return;
+        const withShipping = formatOrders(all).map((order) => {
+          const fromStore = order.ebayUserId ? shippingDefaults.byStore[order.ebayUserId] : undefined;
+          return { ...order, storeShipping: fromStore ?? shippingDefaults.legacy ?? 0 };
+        });
+        setBusinessData({ orders: withShipping, expenses: expenseData.expenses ?? [] });
+      } catch (error) {
+        if (!cancelled) toast.error("Couldn't load all your stores", error instanceof Error ? error.message : undefined);
+      } finally {
+        if (!cancelled) setBusinessLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Reload when returning to Taxes or when orders change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, useBusiness, rawOrders, shippingDefaults]);
+
+  const taxSourceOrders = useBusiness && businessData ? businessData.orders : orders;
+  const taxExpenses = useMemo(
+    () => (useBusiness && businessData ? expandExpenses(businessData.expenses) : expenseEntries),
+    [useBusiness, businessData, expenseEntries]
+  );
+
   const taxOrders = useMemo<TaxOrder[]>(
     () =>
-      orders.map((order) => ({
+      taxSourceOrders.map((order) => ({
         orderDate: order.orderDate,
         refunded: isFullyRefunded(order),
         salePrice: order.salePrice,
@@ -1096,8 +1150,11 @@ function Dashboard() {
         shipping: getShippingCost(order),
         productCost: hasRecordedCost(order) ? Number(order.savedProductCost) : null,
         refundLoss: getRefundLoss(order),
+        // For the report's "before you file" warnings.
+        refundUnreviewed: isFullyRefunded(order) && !order.refundOutcome,
+        storeName: stores.find((s) => s.id === order.ebayUserId)?.name ?? null,
       })),
-    [orders]
+    [taxSourceOrders, stores]
   );
 
   const toolOrders = useMemo<ToolOrder[]>(
@@ -1713,10 +1770,29 @@ function Dashboard() {
           {view === "taxes" && (
             <TaxReport
               orders={taxOrders}
-              expenses={expenseEntries}
-              storeLabel={allStores ? "All stores" : activeStore?.name ?? "Your store"}
+              expenses={taxExpenses}
+              storeLabel={
+                allStores || useBusiness
+                  ? `All stores (${stores.filter((s) => !s.locked).length})`
+                  : activeStore?.name ?? "Your store"
+              }
               allowed={limits.exports}
               onUpgrade={goToPlans}
+              loading={useBusiness && (businessLoading || !businessData)}
+              scope={combineStores ? taxScope : null}
+              onScopeChange={setTaxScope}
+              currentStoreName={activeStore?.name ?? "This store"}
+              onFix={{
+                costs: () => {
+                  setDateRange("all");
+                  goToOrders("pending");
+                },
+                shipping: () => goToOrders(),
+                refunds: () => {
+                  setDateRange("all");
+                  goToOrders("refunded");
+                },
+              }}
             />
           )}
 
