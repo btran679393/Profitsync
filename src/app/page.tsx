@@ -1699,6 +1699,7 @@ function Dashboard() {
                     onImported={loadOrders}
                     allowed={limits.exports}
                     onUpgrade={goToPlans}
+                    onSync={() => void syncEbayOrders()}
                   />
                 </>
               }

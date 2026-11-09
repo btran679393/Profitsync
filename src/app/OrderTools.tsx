@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Badge, Button, Checkbox, Field, Menu, Modal, Notice, Select } from "@/components/ui";
+import ReconcileDialog from "./ReconcileDialog";
 
 // What these tools need from each order (a subset of the dashboard's Order).
 export type ToolOrder = {
@@ -278,6 +279,7 @@ export default function OrderTools({
   onImported,
   allowed = true,
   onUpgrade,
+  onSync,
 }: {
   orders: ToolOrder[];
   periodLabel: string;
@@ -286,7 +288,10 @@ export default function OrderTools({
   // False on the Free plan: the buttons show a Pro tag and open the plans page.
   allowed?: boolean;
   onUpgrade?: () => void;
+  // Lets "Check against eBay" offer a sync when something doesn't match.
+  onSync?: () => void;
 }) {
+  const [checking, setChecking] = useState(false);
   const [importing, setImporting] = useState(false);
   const knownOrderIds = useMemo(
     () => new Set(orders.map((o) => o.ebayOrderId).filter((id): id is string => Boolean(id))),
@@ -313,6 +318,11 @@ export default function OrderTools({
         )}
         items={[
           {
+            label: "Check against eBay",
+            hint: "Compare a month with eBay's own payment records",
+            onSelect: () => setChecking(true),
+          },
+          {
             label: "Download CSV",
             hint: `Orders in ${periodLabel.toLowerCase()}, for taxes or your accountant`,
             badge: allowed ? undefined : <ProTag />,
@@ -327,6 +337,7 @@ export default function OrderTools({
           },
         ]}
       />
+      <ReconcileDialog open={checking} onClose={() => setChecking(false)} onSync={onSync} />
       {importing && (
         <ShippingImport
           knownOrderIds={knownOrderIds}
