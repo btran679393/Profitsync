@@ -106,10 +106,22 @@ export function ShippingInput({
             setValue(event.target.value);
             setState("idle");
           }}
-          onBlur={() => void save()}
+          onBlur={(event) => {
+            // Leaving with Escape means "undo", not "save".
+            if (event.currentTarget.dataset.cancel) {
+              delete event.currentTarget.dataset.cancel;
+              return;
+            }
+            void save();
+          }}
           onKeyDown={(event) => {
             if (event.key === "Enter") event.currentTarget.blur();
-            if (event.key === "Escape") setValue(lastSaved);
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setValue(lastSaved);
+              event.currentTarget.dataset.cancel = "1";
+              event.currentTarget.blur();
+            }
           }}
           className={cn("ps-num", smallField, valid ? "border-line-strong" : "border-loss/60")}
         />
@@ -163,13 +175,25 @@ export function CostInput({
           data-needs-cost={order.savedProductCost === "" ? "true" : undefined}
           disabled={disabled}
           onChange={(event) => onChange(order.id, event.target.value)}
-          onBlur={(event) => void onSave(order.id, event.target.value)}
+          onBlur={(event) => {
+            // Leaving with Escape means "undo", not "save".
+            if (event.currentTarget.dataset.cancel) {
+              delete event.currentTarget.dataset.cancel;
+              return;
+            }
+            void onSave(order.id, event.target.value);
+          }}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault();
               onEnter(event.currentTarget);
             }
-            if (event.key === "Escape") onChange(order.id, order.savedProductCost);
+            if (event.key === "Escape") {
+              event.preventDefault();
+              onChange(order.id, order.savedProductCost);
+              event.currentTarget.dataset.cancel = "1";
+              event.currentTarget.blur();
+            }
           }}
           onClick={(event) => event.stopPropagation()}
           className={cn(

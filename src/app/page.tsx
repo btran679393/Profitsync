@@ -250,6 +250,24 @@ function Dashboard() {
     }
   }
 
+  // Keyboard: Escape leaves the box you're typing in; pressed again with
+  // nothing selected, it goes back to the Dashboard. Open panels, menus,
+  // dialogs and the phone menu handle Escape themselves first.
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key !== "Escape" || event.defaultPrevented || sidebarOpen) return;
+      if (document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) return;
+      const field = (event.target as HTMLElement | null)?.closest<HTMLElement>("input, textarea, select, [contenteditable='true']");
+      if (field) {
+        field.blur();
+        return;
+      }
+      if (view !== "dashboard") navigate("dashboard");
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [view, sidebarOpen]);
+
   // Each view starts at the top; "Performance" jumps to its chart.
   useEffect(() => {
     if (hash === "#performance") {
@@ -303,20 +321,42 @@ function Dashboard() {
   // LOAD ORDERS
   // ----------------------------------------------------------
 
+  // Orders load 2,000 at a time, newest first: the first page shows straight
+  // away and older ones fill in behind it, so even very large accounts open
+  // quickly and no single response gets too big.
+  const ORDERS_PAGE = 2000;
+  const loadGeneration = useRef(0);
+  const [ordersProgress, setOrdersProgress] = useState<{ loaded: number; total: number } | null>(null);
+
   const loadOrders = useCallback(async () => {
-    const response = await fetch("/api/orders", {
-      cache: "no-store",
-    });
+    const generation = ++loadGeneration.current;
+    const all: ApiOrder[] = [];
+    let total = 0;
+    for (let offset = 0; ; offset += ORDERS_PAGE) {
+      const response = await fetch(`/api/orders?limit=${ORDERS_PAGE}&offset=${offset}`, {
+        cache: "no-store",
+      });
 
-    if (!response.ok) {
-      throw new Error("Failed to load orders.");
+      if (!response.ok) {
+        if (generation === loadGeneration.current) setOrdersProgress(null);
+        throw new Error("Failed to load orders.");
+      }
+
+      const page: ApiOrder[] = await response.json();
+      // A newer reload started meanwhile: let that one finish instead.
+      if (generation !== loadGeneration.current) return;
+
+      all.push(...page);
+      total = Number(response.headers.get("X-Total-Count") ?? all.length) || all.length;
+      setOrders(formatOrders(all));
+      if (offset === 0) {
+        setShippingEnabled(response.headers.get("X-Shipping-Cost-Enabled") === "1");
+        setLoadError("");
+      }
+      const done = page.length < ORDERS_PAGE || all.length >= total;
+      setOrdersProgress(done ? null : { loaded: all.length, total });
+      if (done) break;
     }
-
-    const data: ApiOrder[] = await response.json();
-
-    setOrders(formatOrders(data));
-    setShippingEnabled(response.headers.get("X-Shipping-Cost-Enabled") === "1");
-    setLoadError("");
   }, []);
 
   // Save what shipping cost for one order (blank clears it).
@@ -1506,6 +1546,15 @@ function Dashboard() {
               ) : undefined
             }
           />
+
+          {ordersProgress && view !== "settings" && view !== "help" && view !== "billing" && (
+            <Notice className="mb-6" title="Loading your order history">
+              <span className="ps-num">
+                {ordersProgress.loaded.toLocaleString()} of {ordersProgress.total.toLocaleString()}
+              </span>{" "}
+              orders so far. Totals update as older orders come in.
+            </Notice>
+          )}
 
           {loadError && (
             <Notice tone="loss" className="mb-6">

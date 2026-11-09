@@ -27,7 +27,7 @@ function yearOf(date: string | null) {
   return Number.isFinite(year) ? year : null;
 }
 
-type Line = { label: string; amount: number; hint?: string; strong?: boolean; negative?: boolean };
+type Line = { label: string; amount: number; strong?: boolean; negative?: boolean };
 
 function csvCell(value: string | number) {
   const text = String(value);
@@ -92,18 +92,18 @@ export default function TaxReport({
       refundCount: refunded.length,
       missingCost,
       income: [
-        { label: "Gross sales", amount: grossSales, hint: "Schedule C, line 1" },
-        { label: "Refunds and returns", amount: refunds, hint: "Line 2", negative: true },
+        { label: "Gross sales", amount: grossSales },
+        { label: "Refunds and returns", amount: refunds, negative: true },
         { label: "Net sales", amount: netSales, strong: true },
-        { label: "Cost of goods sold (product costs)", amount: cogs, hint: "Line 4", negative: true },
+        { label: "Cost of goods sold (product costs)", amount: cogs, negative: true },
         { label: "Gross profit", amount: grossProfit, strong: true },
       ] as Line[],
       costs: [
-        { label: "eBay selling fees", amount: ebayFees, hint: "Line 10 (commissions and fees)" },
-        { label: "Other eBay charges (e.g. promoted listings)", amount: otherFees, hint: "Line 8 (advertising)" },
-        { label: "Shipping and postage", amount: shipping, hint: "Part V (other expenses)" },
-        { label: "Losses on refunded orders", amount: refundLosses, hint: "Part V (other expenses)" },
-        ...[...byCategory].sort((a, b) => b[1] - a[1]).map(([label, amount]) => ({ label, amount, hint: "Your expenses" })),
+        { label: "eBay selling fees", amount: ebayFees },
+        { label: "Other eBay charges (e.g. promoted listings)", amount: otherFees },
+        { label: "Shipping and postage", amount: shipping },
+        { label: "Losses on refunded orders", amount: refundLosses },
+        ...[...byCategory].sort((a, b) => b[1] - a[1]).map(([label, amount]) => ({ label, amount })),
       ] as Line[],
       totalCosts: ebayFees + otherFees + shipping + refundLosses + expenseTotal,
       netProfit,
@@ -139,7 +139,6 @@ export default function TaxReport({
     >
       <span className="min-w-0">
         <span className={`block text-sm print:text-black ${line.strong ? "font-semibold text-ink" : "text-ink-2"}`}>{line.label}</span>
-        {line.hint && <span className="block text-[11px] text-subtle print:text-gray-500">{line.hint}</span>}
       </span>
       <span className={`shrink-0 text-sm tabular-nums print:text-black ${line.strong ? "font-semibold text-ink" : "text-ink"}`}>
         {(sign === "-" || line.negative) && line.amount > 0 ? "−" : ""}
@@ -220,8 +219,7 @@ export default function TaxReport({
               </p>
             )}
             <p>
-              Sales are what buyers paid, not counting sales tax that eBay collects and pays for you. Line numbers refer to
-              the US Schedule C and are only a guide. This summary isn&apos;t tax advice: check it with a tax professional
+              Sales are what buyers paid, not counting sales tax that eBay collects and pays for you. This summary isn&apos;t tax advice: check it with a tax professional
               before you file.
             </p>
           </div>

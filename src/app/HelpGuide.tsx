@@ -215,7 +215,7 @@ export default function HelpGuide({
 
         <Section id="guide-taxes" title="Taxes">
           <p>
-            A full-year profit and loss summary, laid out the way the US Schedule C asks for it. Print it, save it as a PDF or download a
+            A clear profit and loss summary for the whole year. Print it, save it as a PDF or download a
             spreadsheet for your accountant. It&apos;s a guide, not tax advice: check it with a tax professional before you file.
           </p>
         </Section>
@@ -258,6 +258,10 @@ export default function HelpGuide({
               eBay sign-ins expire after about 18 months. Use Reconnect in the store menu; your data stays where it is.
             </Q>
             <Q q="Are shipping labels I buy on eBay counted?">Yes, automatically, on the order they belong to.</Q>
+            <Q q="Are there keyboard shortcuts?">
+              <B>Enter</B> saves a product cost and moves to the next order. <B>Escape</B> undoes what you were typing and leaves the box;
+              press it again to go back to the Dashboard. Escape also closes panels, menus and pop-ups.
+            </Q>
             <Q q="Who can see my data?">Only you. Each account&apos;s data is kept separate, and you can delete it all from Settings.</Q>
           </div>
         </Section>
