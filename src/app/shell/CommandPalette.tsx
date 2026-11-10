@@ -141,6 +141,7 @@ function PaletteBody({
           aria-activedescendant={entries[current] ? `${listId}-${current}` : undefined}
           aria-label="Search pages, actions and orders"
           className="h-14 min-w-0 flex-1 bg-transparent text-[15px] text-ink outline-none placeholder:text-subtle"
+          style={{ outline: "none" }}
         />
         <kbd className="hidden rounded border border-line-strong px-1.5 py-0.5 text-[11px] text-subtle sm:inline">Esc</kbd>
       </div>

@@ -58,11 +58,11 @@ export default function Topbar({
             onClick={onSearch}
             aria-label="Quick jump"
             aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"}
-            className="ml-1 flex h-9 items-center gap-2 rounded-lg border border-line bg-surface-2/60 px-2.5 text-sm text-subtle transition hover:border-line-strong hover:text-ink sm:w-56 lg:ml-0"
+            className="ml-1 flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-lg border border-line bg-surface-2/60 px-2.5 text-sm text-subtle transition hover:border-line-strong hover:text-ink md:w-60 lg:ml-0"
           >
             <Icon name="search" size={16} />
-            <span className="hidden sm:inline">Search or jump to…</span>
-            <kbd className="ml-auto hidden rounded border border-line-strong px-1.5 text-[11px] font-medium sm:inline">{isMac ? "⌘K" : "Ctrl K"}</kbd>
+            <span className="hidden md:inline">Search or jump to…</span>
+            <kbd className="ml-auto hidden rounded border border-line-strong px-1.5 text-[11px] font-medium md:inline">{isMac ? "⌘K" : "Ctrl K"}</kbd>
           </button>
         )}
 

@@ -309,7 +309,7 @@ function Dashboard() {
       const target = event.target as HTMLElement | null;
       if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
       if (document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) return;
-      if (event.key === "?") {
+      if (event.key === "?" || (event.key === "/" && event.shiftKey)) {
         event.preventDefault();
         setShortcutsOpen(true);
         return;
