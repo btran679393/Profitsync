@@ -16,6 +16,7 @@ import Topbar from "./shell/Topbar";
 import DashboardView, { type Attention, type CostSlice } from "./dashboard/DashboardView";
 import OrdersView from "./dashboard/OrdersView";
 import SetupChecklist, { type SetupStep } from "./dashboard/SetupChecklist";
+import WhatsNew from "./dashboard/WhatsNew";
 import HelpGuide from "./HelpGuide";
 import type { TrendPoint } from "./dashboard/TrendChart";
 import { SYNC_EVENT, useLastSynced } from "./shell/useShell";
@@ -47,6 +48,8 @@ import { PLANS, type BillingStatus } from "@/lib/billing/plans";
 
 import { type ApiListing, type Order, type ApiOrder, type SyncResponse, type OrderFilter, type DateRange, money, isValidCost, formatOrders, isFullyRefunded, getRefundLoss, isPartiallyRefunded, hasRecordedCost, getShippingCost, getOrderProfit, type View, subscribeToHash, viewFromHash, VIEW_COPY, isOrderInListingRange, normalizeTitle, buildListingRows, getDateRangeStart, isOrderInDateRange, dateRangeLabel, localDateKey, startOfLocalDay, computeTotals, previousRange } from "./dashboard/model";
 import { OrderDetailsPanel } from "./dashboard/OrderParts";
+import CommandPalette, { type PaletteAction } from "./shell/CommandPalette";
+import ShortcutsDialog from "./shell/ShortcutsDialog";
 import { Icon } from "./dashboard/Icon";
 
 // ============================================================
@@ -286,6 +289,46 @@ function Dashboard() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [view, sidebarOpen]);
+
+  // Keyboard: Ctrl/⌘+K opens quick jump, "?" lists shortcuts, and G then a
+  // letter goes to a page (G O = Orders). Not while typing in a box.
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const goPressedAt = useRef(0);
+  useEffect(() => {
+    const G_KEYS: Record<string, View> = {
+      d: "dashboard", o: "orders", l: "listings", e: "expenses", t: "taxes", b: "billing", s: "settings", h: "help",
+    };
+    function onKey(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPaletteOpen((open) => !open);
+        return;
+      }
+      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+      if (document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) return;
+      if (event.key === "?") {
+        event.preventDefault();
+        setShortcutsOpen(true);
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (goPressedAt.current && Date.now() - goPressedAt.current < 1500) {
+        goPressedAt.current = 0;
+        const page = G_KEYS[key];
+        if (page) {
+          event.preventDefault();
+          navigate(page);
+        }
+        return;
+      }
+      if (key === "g") goPressedAt.current = Date.now();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  });
 
   // Each view starts at the top; "Performance" jumps to its chart.
   useEffect(() => {
@@ -627,6 +670,21 @@ function Dashboard() {
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [hasUnsavedCosts]);
+
+  // A "Before you file" button: open the right store's orders (switching
+  // store first when the problem orders are all in another one).
+  async function openOrdersFromTaxes(filter: OrderFilter, storeId?: string) {
+    if (storeId && storeId !== activeStoreId) {
+      try {
+        await switchStore(storeId);
+      } catch (error) {
+        toast.error("Couldn't switch stores", error instanceof Error ? error.message : undefined);
+        return;
+      }
+    }
+    setDateRange("all");
+    goToOrders(filter);
+  }
 
   // Switch the whole dashboard to another connected store.
   async function switchStore(id: string) {
@@ -1153,6 +1211,7 @@ function Dashboard() {
         // For the report's "before you file" warnings.
         refundUnreviewed: isFullyRefunded(order) && !order.refundOutcome,
         storeName: stores.find((s) => s.id === order.ebayUserId)?.name ?? null,
+        storeId: order.ebayUserId,
       })),
     [taxSourceOrders, stores]
   );
@@ -1467,6 +1526,24 @@ function Dashboard() {
   // SELECTED ORDER
   // ----------------------------------------------------------
 
+  // Things the quick-jump box can do besides opening pages and orders.
+  const paletteActions: PaletteAction[] = [
+    ...(stores.length > 0 && !syncing
+      ? [{ id: "sync", label: "Sync with eBay now", icon: "refresh" as const, run: () => void syncEbayOrders() }]
+      : []),
+    {
+      id: "theme",
+      label: "Switch light / dark mode",
+      icon: "gear" as const,
+      run: () => {
+        const dark = document.documentElement.dataset.theme !== "light";
+        void savePreferences({ theme: dark ? "light" : "dark" }).catch(() => toast.error("Couldn't save that. Please try again."));
+      },
+    },
+    { id: "pending", label: "Orders that need a cost", icon: "orders" as const, run: () => goToOrders("pending") },
+    { id: "shortcuts", label: "Keyboard shortcuts", hint: "?", icon: "info" as const, run: () => setShortcutsOpen(true) },
+  ];
+
   const selectedOrder =
     selectedOrderId === null
       ? null
@@ -1532,6 +1609,7 @@ function Dashboard() {
           lastSyncedAt={lastSyncedAt}
           progressText={syncProgress}
           now={currentTime}
+          onSearch={() => setPaletteOpen(true)}
           switcher={
             <StoreSwitcher
               stores={stores}
@@ -1680,6 +1758,10 @@ function Dashboard() {
             />
           )}
 
+          {view === "dashboard" && !showSetup && orders.length > 0 && (
+            <WhatsNew onShortcuts={() => setShortcutsOpen(true)} onGo={(target) => (target === "orders" ? goToOrders() : navigate(target))} />
+          )}
+
           {view === "help" && (
             <HelpGuide
               onGo={(target) => (target === "orders" ? goToOrders() : navigate(target))}
@@ -1783,15 +1865,9 @@ function Dashboard() {
               onScopeChange={setTaxScope}
               currentStoreName={activeStore?.name ?? "This store"}
               onFix={{
-                costs: () => {
-                  setDateRange("all");
-                  goToOrders("pending");
-                },
+                costs: (storeId) => void openOrdersFromTaxes("pending", storeId),
                 shipping: () => goToOrders(),
-                refunds: () => {
-                  setDateRange("all");
-                  goToOrders("refunded");
-                },
+                refunds: (storeId) => void openOrdersFromTaxes("refunded", storeId),
               }}
             />
           )}
@@ -1876,6 +1952,16 @@ function Dashboard() {
       {/* =====================================================
           ORDER DETAILS PANEL
       ===================================================== */}
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        orders={orders}
+        actions={paletteActions}
+        onNavigate={navigate}
+        onOpenOrder={setSelectedOrderId}
+      />
+      <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
 
       {selectedOrder && (
         <OrderDetailsPanel

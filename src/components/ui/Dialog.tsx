@@ -100,6 +100,30 @@ type DialogProps = {
 };
 
 // Centered dialog.
+// A bare dialog near the top of the screen with no header (the quick-jump
+// search box). Same focus, Escape and stacking rules as Modal.
+export function CommandDialog({ open, onClose, label, children }: { open: boolean; onClose: () => void; label: string; children: ReactNode }) {
+  const panelRef = useDialogBehaviour(open, onClose);
+  if (!open) return null;
+  return (
+    <Portal>
+      <div className="fixed inset-0 z-[60] flex items-start justify-center px-3 pt-[12vh] sm:px-4">
+        <div className="absolute inset-0 bg-overlay backdrop-blur-[2px]" onClick={onClose} aria-hidden="true" />
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={label}
+          tabIndex={-1}
+          className="animate-ps-in relative flex max-h-[70vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-line bg-elevated shadow-pop outline-none"
+        >
+          {children}
+        </div>
+      </div>
+    </Portal>
+  );
+}
+
 export function Modal({ open, onClose, title, description, children, footer, size = "md" }: DialogProps) {
   const panelRef = useDialogBehaviour(open, onClose);
   const titleId = useId();

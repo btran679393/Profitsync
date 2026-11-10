@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { buttonClasses } from "@/components/ui";
 import { SITE_NAME } from "@/lib/site";
+import HeaderActions from "./HeaderActions";
 
 // Header, footer and page frame for the public website pages
 // (home, pricing, contact, terms, refunds, privacy).
@@ -32,12 +32,7 @@ export function SiteHeader() {
           <Link href="/contact" className="hidden rounded-lg px-3 py-2 text-sm text-muted hover:text-ink sm:inline-block">
             Contact
           </Link>
-          <Link href="/login" className="rounded-lg px-3 py-2 text-sm font-medium text-ink-2 hover:text-ink">
-            Sign in
-          </Link>
-          <Link href="/login?mode=signup" className={buttonClasses("primary", "sm")}>
-            Start free
-          </Link>
+          <HeaderActions />
         </nav>
       </div>
     </header>

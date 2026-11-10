@@ -15,6 +15,7 @@ const SECTIONS: ReadonlyArray<readonly [string, string]> = [
   ["guide-expenses", "Expenses"],
   ["guide-taxes", "Taxes"],
   ["guide-stores", "Several stores"],
+  ["guide-keys", "Keyboard shortcuts"],
   ["guide-settings", "Plans and settings"],
   ["guide-faq", "Questions"],
 ];
@@ -239,6 +240,22 @@ export default function HelpGuide({
               <B>All stores</B> combines them into one set of numbers.
             </li>
             <li>Removing a store deletes its data from ProfitSync only. Nothing changes on eBay, and you can add it again later.</li>
+          </ul>
+        </Section>
+
+        <Section id="guide-keys" title="Keyboard shortcuts">
+          <ul className="list-disc space-y-1.5 pl-5">
+            <li>
+              <B>Ctrl K</B> (<B>⌘K</B> on a Mac), or the search box at the top, jumps to any page, finds an order by item, order number or
+              buyer, and runs actions like Sync.
+            </li>
+            <li>
+              Press <B>G</B> then a letter to go to a page: <B>G O</B> Orders, <B>G L</B> Listings, <B>G E</B> Expenses, <B>G T</B> Taxes,{" "}
+              <B>G D</B> Dashboard.
+            </li>
+            <li>
+              Press <B>?</B> to see every shortcut.
+            </li>
           </ul>
         </Section>
 

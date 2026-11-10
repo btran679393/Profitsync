@@ -222,27 +222,40 @@ export default function ExpensesSection({
     }
   }
 
+  // One-off expenses delete straight away with an Undo button; a monthly
+  // one still asks first, since "Stop" is usually what people want.
   async function remove(expense: ExpenseEntry) {
-    const ok = await confirm(
-      expense.repeatMonthly
-        ? {
-            title: `Delete the monthly ${expense.category.toLowerCase()} expense?`,
-            description: 'This removes it from every month it counted in. To keep past months and only stop it from now on, choose "Stop" instead.',
-            confirmLabel: "Delete",
-            danger: true,
-          }
-        : {
-            title: `Delete this ${money(Number(expense.amount))} expense?`,
-            description: `${expense.category}${expense.note ? ` · ${expense.note}` : ""}`,
-            confirmLabel: "Delete",
-            danger: true,
-          }
-    );
-    if (!ok) return;
+    if (expense.repeatMonthly) {
+      const ok = await confirm({
+        title: `Delete the monthly ${expense.category.toLowerCase()} expense?`,
+        description: 'This removes it from every month it counted in. To keep past months and only stop it from now on, choose "Stop" instead.',
+        confirmLabel: "Delete",
+        danger: true,
+      });
+      if (!ok) return;
+    }
     setBusyId(expense.id);
     try {
       await onDelete(expense.id);
-      toast.success("Expense deleted");
+      if (expense.repeatMonthly) {
+        toast.success("Expense deleted");
+      } else {
+        toast.success("Expense deleted", `${expense.category} · ${money(Number(expense.amount))}`, {
+          label: "Undo",
+          onClick: () => {
+            onAdd({
+              spentOn: expense.spentOn,
+              category: expense.category,
+              amount: Number(expense.amount).toFixed(2),
+              note: expense.note ?? "",
+              wholeBusiness: expense.ebayUserId === null,
+              repeatMonthly: false,
+            })
+              .then(() => toast.success("Expense restored"))
+              .catch((e) => toast.error("Couldn't restore the expense", e instanceof Error ? e.message : undefined));
+          },
+        });
+      }
     } catch (e) {
       toast.error("Couldn't delete the expense", e instanceof Error ? e.message : undefined);
     } finally {

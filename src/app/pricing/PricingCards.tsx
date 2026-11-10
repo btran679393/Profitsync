@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { PLANS, yearlySavingsCents, type BillingInterval, type PaidPlanId, type PlanId } from "@/lib/billing/plans";
+import { useSignedIn } from "@/components/site/useSignedIn";
 
 const dollars = (cents: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
@@ -13,6 +14,8 @@ const ORDER: PlanId[] = ["free", "pro", "ultimate"];
 // sign-up; paying happens later from Plan & billing inside the app.
 export default function PricingCards() {
   const [interval, setBillingInterval] = useState<BillingInterval>("year");
+  // Signed-in sellers choose a plan in Plan & billing, not on the sign-up page.
+  const signedIn = useSignedIn();
 
   return (
     <>
@@ -75,14 +78,20 @@ export default function PricingCards() {
                 ))}
               </ul>
               <Link
-                href="/login?mode=signup"
+                href={signedIn ? (id === "free" ? "/" : "/#billing") : "/login?mode=signup"}
                 className={`mt-7 block rounded-xl py-2.5 text-center text-sm font-semibold transition ${
                   featured
                     ? "bg-accent text-on-accent shadow-lg shadow-accent/20 hover:bg-accent-hover"
                     : "border border-line-strong text-ink hover:border-accent/40 hover:text-ink"
                 }`}
               >
-                {id === "free" ? "Start free" : `Start with ${plan.name}`}
+                {signedIn
+                  ? id === "free"
+                    ? "Open ProfitSync"
+                    : `Choose ${plan.name}`
+                  : id === "free"
+                    ? "Start free"
+                    : `Start with ${plan.name}`}
               </Link>
             </section>
           );

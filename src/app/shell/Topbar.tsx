@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { Button, Tooltip } from "@/components/ui";
 import { Icon } from "../dashboard/Icon";
 import { Logo } from "./Sidebar";
+import { useIsMac } from "./useIsMac";
 import { timeAgo } from "./useShell";
 
 // The bar across the top of every page: menu button (phones), the store
@@ -18,6 +19,7 @@ export default function Topbar({
   now,
   hasStore,
   progressText = null,
+  onSearch,
 }: {
   onOpenMenu: () => void;
   switcher: ReactNode;
@@ -29,7 +31,10 @@ export default function Topbar({
   hasStore: boolean;
   // Live sync progress, e.g. "Bringing in your orders… 1,200 so far".
   progressText?: string | null;
+  // Opens the Ctrl+K quick-jump box.
+  onSearch?: () => void;
 }) {
+  const isMac = useIsMac();
   const status = syncing ? progressText ?? "Syncing…" : lastSyncedAt && now ? `Synced ${timeAgo(lastSyncedAt, now.getTime())}` : null;
 
   return (
@@ -46,6 +51,20 @@ export default function Topbar({
         <span className="lg:hidden">
           <Logo compact />
         </span>
+
+        {onSearch && (
+          <button
+            type="button"
+            onClick={onSearch}
+            aria-label="Quick jump"
+            aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"}
+            className="ml-1 flex h-9 items-center gap-2 rounded-lg border border-line bg-surface-2/60 px-2.5 text-sm text-subtle transition hover:border-line-strong hover:text-ink sm:w-56 lg:ml-0"
+          >
+            <Icon name="search" size={16} />
+            <span className="hidden sm:inline">Search or jump to…</span>
+            <kbd className="ml-auto hidden rounded border border-line-strong px-1.5 text-[11px] font-medium sm:inline">{isMac ? "⌘K" : "Ctrl K"}</kbd>
+          </button>
+        )}
 
         <div className="ml-auto flex min-w-0 items-center gap-2">
           {switcher}

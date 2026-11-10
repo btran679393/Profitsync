@@ -95,23 +95,23 @@ function Logo() {
           <path d="M15 6h6v6" />
         </svg>
       </div>
-      <span className="text-lg font-bold tracking-tight text-slate-900">ProfitSync</span>
+      <span className="text-lg font-bold tracking-tight text-ink">ProfitSync</span>
     </div>
   );
 }
 
 const INPUT =
-  "h-12 w-full rounded-xl border border-slate-200 bg-white pl-11 pr-4 text-[15px] text-slate-900 shadow-sm shadow-slate-900/[0.03] outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10";
+  "h-12 w-full rounded-xl border border-line-strong bg-surface-2 pl-11 pr-4 text-[15px] text-ink shadow-sm outline-none transition placeholder:text-subtle hover:border-accent/40 focus:border-accent focus:ring-4 focus:ring-accent/20";
 
 function Field({ label, icon, aside, children }: { label: string; icon: "mail" | "lock"; aside?: ReactNode; children: ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1.5 flex items-center justify-between text-sm font-medium text-slate-700">
+      <span className="mb-1.5 flex items-center justify-between text-sm font-medium text-ink-2">
         {label}
         {aside}
       </span>
       <span className="relative block">
-        <Icon name={icon} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+        <Icon name={icon} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-subtle" />
         {children}
       </span>
     </label>
@@ -129,11 +129,11 @@ function passwordStrength(pw: string) {
 }
 
 const STRENGTH = [
-  { label: "Too short", bar: "bg-rose-400", text: "text-rose-600" },
-  { label: "Weak", bar: "bg-orange-400", text: "text-orange-600" },
-  { label: "Fair", bar: "bg-amber-400", text: "text-amber-600" },
-  { label: "Good", bar: "bg-lime-500", text: "text-lime-700" },
-  { label: "Strong", bar: "bg-emerald-500", text: "text-emerald-700" },
+  { label: "Too short", bar: "bg-rose-400", text: "text-loss" },
+  { label: "Weak", bar: "bg-orange-400", text: "text-warn" },
+  { label: "Fair", bar: "bg-amber-400", text: "text-warn" },
+  { label: "Good", bar: "bg-lime-500", text: "text-profit" },
+  { label: "Strong", bar: "bg-emerald-500", text: "text-profit" },
 ];
 
 // Turn Supabase / OAuth error codes and messages into something a seller can act on.
@@ -283,18 +283,28 @@ export default function LoginPage() {
 
   const copy = COPY[mode];
   const strength = passwordStrength(password);
+  // The browser tab names the form that's showing.
+  // Next.js writes the page's own title shortly after loading, so set it
+  // again a moment later too.
+  useEffect(() => {
+    const title = `${mode === "signup" ? "Create account" : mode === "forgot" ? "Reset password" : "Sign in"} · ProfitSync`;
+    document.title = title;
+    const again = window.setTimeout(() => (document.title = title), 600);
+    return () => window.clearTimeout(again);
+  }, [mode]);
+
   const passwordsMatch = confirmPassword.length > 0 && confirmPassword === password;
   const providers = enabledProviders ?? [];
 
   return (
-    <main className="ps-motion min-h-screen bg-white font-sans text-slate-900 lg:flex">
+    <main className="ps-motion min-h-screen bg-bg font-sans text-ink lg:flex">
       <BrandPanel />
 
       {/* FORM PANEL */}
       <section className="relative flex min-h-screen flex-1 flex-col overflow-hidden">
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 top-0 h-80 bg-[radial-gradient(ellipse_at_top,rgba(59,130,246,0.08),transparent_70%)]"
+          className="pointer-events-none absolute inset-x-0 top-0 h-80 bg-[radial-gradient(ellipse_at_top,rgba(99,102,241,0.12),transparent_70%)]"
         />
 
         {/* Top bar */}
@@ -302,12 +312,12 @@ export default function LoginPage() {
           <div className="lg:invisible">
             <Logo />
           </div>
-          <p className="hidden text-sm text-slate-500 sm:block">
+          <p className="hidden text-sm text-muted sm:block">
             {mode === "signup" ? "Already have an account?" : "New to ProfitSync?"}{" "}
             <button
               type="button"
               onClick={() => switchMode(mode === "signup" ? "signin" : "signup")}
-              className="font-semibold text-indigo-600 transition hover:text-indigo-700"
+              className="font-semibold text-accent-ink transition hover:text-ink"
             >
               {mode === "signup" ? "Sign in" : "Create account"}
             </button>
@@ -318,18 +328,18 @@ export default function LoginPage() {
           <div className="w-full max-w-[400px]">
             {/* Heading */}
             <div key={mode} className="ps-fade-up">
-              <h2 className="text-[28px] font-bold leading-tight tracking-tight text-slate-900 sm:text-3xl">
+              <h2 className="text-[28px] font-bold leading-tight tracking-tight text-ink sm:text-3xl">
                 {copy.title}
               </h2>
-              <p className="mt-2 text-[15px] leading-6 text-slate-500">{copy.subtitle}</p>
+              <p className="mt-2 text-[15px] leading-6 text-muted">{copy.subtitle}</p>
             </div>
 
             {/* Sign in / Create account switch */}
             {mode !== "forgot" && (
-              <div className="ps-fade-up relative mt-7 grid grid-cols-2 rounded-xl bg-slate-100 p-1 text-sm font-semibold" style={{ animationDelay: "60ms" }}>
+              <div className="ps-fade-up relative mt-7 grid grid-cols-2 rounded-xl bg-surface-2 p-1 text-sm font-semibold" style={{ animationDelay: "60ms" }}>
                 <span
                   aria-hidden="true"
-                  className={`absolute inset-y-1 left-1 w-[calc(50%-4px)] rounded-lg bg-white shadow-sm ring-1 ring-slate-900/5 transition-transform duration-300 ease-out ${mode === "signup" ? "translate-x-full" : ""}`}
+                  className={`absolute inset-y-1 left-1 w-[calc(50%-4px)] rounded-lg bg-elevated shadow-sm ring-1 ring-line transition-transform duration-300 ease-out ${mode === "signup" ? "translate-x-full" : ""}`}
                 />
                 {(["signin", "signup"] as const).map((tab) => (
                   <button
@@ -337,7 +347,7 @@ export default function LoginPage() {
                     type="button"
                     onClick={() => switchMode(tab)}
                     aria-pressed={mode === tab}
-                    className={`relative z-10 rounded-lg py-2.5 transition-colors ${mode === tab ? "text-slate-900" : "text-slate-500 hover:text-slate-700"}`}
+                    className={`relative z-10 rounded-lg py-2.5 transition-colors ${mode === tab ? "text-ink" : "text-muted hover:text-ink"}`}
                   >
                     {tab === "signin" ? "Sign in" : "Create account"}
                   </button>
@@ -350,29 +360,29 @@ export default function LoginPage() {
               <div className="ps-fade-up mt-6" style={{ animationDelay: "120ms" }}>
                 <div className="space-y-2.5">
                   {enabledProviders === null
-                    ? [0, 1, 2].map((i) => <div key={i} className="h-12 animate-pulse rounded-xl bg-slate-100" />)
+                    ? [0, 1, 2].map((i) => <div key={i} className="h-12 animate-pulse rounded-xl bg-surface-2" />)
                     : SOCIAL_PROVIDERS.filter(([p]) => providers.includes(p)).map(([provider, label]) => (
                         <button
                           key={provider}
                           type="button"
                           disabled={Boolean(loading)}
                           onClick={() => socialSignIn(provider)}
-                          className="group relative flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white text-[15px] font-semibold text-slate-700 shadow-sm shadow-slate-900/[0.03] transition hover:-translate-y-px hover:border-slate-300 hover:bg-slate-50 hover:shadow-md active:translate-y-0 disabled:pointer-events-none disabled:opacity-60"
+                          className="group relative flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-line-strong bg-surface text-[15px] font-semibold text-ink-2 shadow-sm transition hover:-translate-y-px hover:border-accent/40 hover:bg-surface-2 hover:shadow-md active:translate-y-0 disabled:pointer-events-none disabled:opacity-60"
                         >
-                          {loading === provider ? <Spinner className="text-slate-500" /> : <ProviderLogo provider={provider} />}
+                          {loading === provider ? <Spinner className="text-muted" /> : <ProviderLogo provider={provider} />}
                           {loading === provider ? "Connecting…" : `Continue with ${label}`}
                         </button>
                       ))}
                 </div>
                 {providers.includes("azure") && (
-                  <p className="mt-2.5 text-center text-xs text-slate-400">
+                  <p className="mt-2.5 text-center text-xs text-subtle">
                     Microsoft works with Outlook, Hotmail and work or school accounts.
                   </p>
                 )}
-                <div className="my-6 flex items-center gap-3 text-xs font-medium uppercase tracking-wider text-slate-400">
-                  <span className="h-px flex-1 bg-slate-200" />
+                <div className="my-6 flex items-center gap-3 text-xs font-medium uppercase tracking-wider text-subtle">
+                  <span className="h-px flex-1 bg-line-strong" />
                   or with email
-                  <span className="h-px flex-1 bg-slate-200" />
+                  <span className="h-px flex-1 bg-line-strong" />
                 </div>
               </div>
             )}
@@ -402,7 +412,7 @@ export default function LoginPage() {
                     icon="lock"
                     aside={
                       mode === "signin" && (
-                        <button type="button" onClick={() => switchMode("forgot")} className="text-sm font-semibold text-indigo-600 transition hover:text-indigo-700">
+                        <button type="button" onClick={() => switchMode("forgot")} className="text-sm font-semibold text-accent-ink transition hover:text-ink">
                           Forgot password?
                         </button>
                       )
@@ -422,7 +432,7 @@ export default function LoginPage() {
                       type="button"
                       onClick={() => setShowPassword((s) => !s)}
                       aria-label={showPassword ? "Hide password" : "Show password"}
-                      className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                      className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-subtle transition hover:bg-surface-2 hover:text-ink"
                     >
                       <Icon name={showPassword ? "eyeOff" : "eye"} />
                     </button>
@@ -434,11 +444,11 @@ export default function LoginPage() {
                         {[1, 2, 3, 4].map((n) => (
                           <span
                             key={n}
-                            className={`h-1.5 flex-1 rounded-full transition-colors duration-300 ${strength >= n ? STRENGTH[strength].bar : "bg-slate-200"}`}
+                            className={`h-1.5 flex-1 rounded-full transition-colors duration-300 ${strength >= n ? STRENGTH[strength].bar : "bg-line-strong"}`}
                           />
                         ))}
                       </div>
-                      <p className="mt-1.5 text-xs text-slate-500">
+                      <p className="mt-1.5 text-xs text-muted">
                         Password strength: <span className={`font-semibold ${STRENGTH[strength].text}`}>{STRENGTH[strength].label}</span>
                         {strength < 3 && " · try 10+ characters with numbers and symbols"}
                       </p>
@@ -452,7 +462,7 @@ export default function LoginPage() {
                   label="Confirm password"
                   icon="lock"
                   aside={passwordsMatch && (
-                    <span className="flex items-center gap-1 text-xs font-semibold text-emerald-600">
+                    <span className="flex items-center gap-1 text-xs font-semibold text-profit">
                       <Icon name="check" className="h-4 w-4" /> Matches
                     </span>
                   )}
@@ -488,7 +498,7 @@ export default function LoginPage() {
               </button>
 
               {mode === "forgot" && (
-                <button type="button" onClick={() => switchMode("signin")} className="w-full text-sm font-semibold text-indigo-600 transition hover:text-indigo-700">
+                <button type="button" onClick={() => switchMode("signin")} className="w-full text-sm font-semibold text-accent-ink transition hover:text-ink">
                   ← Back to sign in
                 </button>
               )}
@@ -496,26 +506,26 @@ export default function LoginPage() {
 
             {/* Messages */}
             {error && (
-              <div role="alert" className="ps-fade-up mt-5 flex gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              <div role="alert" className="ps-fade-up mt-5 flex gap-3 rounded-xl border border-loss/30 bg-loss-soft px-4 py-3 text-sm text-loss">
                 <Icon name="alert" className="mt-0.5 shrink-0" />
                 <span>{error}</span>
               </div>
             )}
             {notice && (
-              <div role="status" className="ps-fade-up mt-5 flex gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+              <div role="status" className="ps-fade-up mt-5 flex gap-3 rounded-xl border border-profit/30 bg-profit-soft px-4 py-3 text-sm text-profit">
                 <Icon name="check" className="mt-0.5 shrink-0" />
                 <span>{notice}</span>
               </div>
             )}
 
             {mode === "signup" && (
-              <p className="mt-5 text-center text-xs leading-5 text-slate-500">
+              <p className="mt-5 text-center text-xs leading-5 text-muted">
                 By creating an account you agree to our{" "}
-                <Link href="/terms" className="font-medium text-slate-700 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-500">
+                <Link href="/terms" className="font-medium text-ink-2 underline decoration-line-strong underline-offset-2 hover:decoration-muted">
                   Terms of Service
                 </Link>{" "}
                 and{" "}
-                <Link href="/privacy" className="font-medium text-slate-700 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-500">
+                <Link href="/privacy" className="font-medium text-ink-2 underline decoration-line-strong underline-offset-2 hover:decoration-muted">
                   Privacy Policy
                 </Link>
                 .
@@ -525,13 +535,13 @@ export default function LoginPage() {
         </div>
 
         {/* Footer */}
-        <footer className="relative z-10 flex flex-col items-center justify-between gap-2 px-6 py-6 text-xs text-slate-400 sm:flex-row sm:px-10">
+        <footer className="relative z-10 flex flex-col items-center justify-between gap-2 px-6 py-6 text-xs text-subtle sm:flex-row sm:px-10">
           <p>© {new Date().getFullYear()} ProfitSync</p>
           <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
-            <Link href="/pricing" className="transition hover:text-slate-600">Pricing</Link>
-            <Link href="/contact" className="transition hover:text-slate-600">Contact</Link>
-            <Link href="/terms" className="transition hover:text-slate-600">Terms</Link>
-            <Link href="/privacy" className="transition hover:text-slate-600">Privacy</Link>
+            <Link href="/pricing" className="transition hover:text-ink">Pricing</Link>
+            <Link href="/contact" className="transition hover:text-ink">Contact</Link>
+            <Link href="/terms" className="transition hover:text-ink">Terms</Link>
+            <Link href="/privacy" className="transition hover:text-ink">Privacy</Link>
             <span className="flex items-center gap-1.5">
               <Icon name="shield" className="h-3.5 w-3.5" />
               Secured by Supabase

@@ -95,11 +95,11 @@ export async function updateSession(request: NextRequest) {
       );
     }
 
-    const loginUrl = request.nextUrl.clone();
-    loginUrl.pathname = "/login";
-    loginUrl.search = "";
-
-    return NextResponse.redirect(loginUrl);
+    // The app itself lives at "/" (handled above), so any other address a
+    // signed-out visitor asks for isn't a real private page: let it through
+    // so they see the friendly "page not found" page, not the login screen.
+    // If a new private page is ever added, send it to /login here.
+    return response;
   }
 
   // Signed-in users don't need to see the login page.

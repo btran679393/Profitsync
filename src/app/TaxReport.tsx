@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { ExpenseEntry } from "./ExpensesSection";
-import { Button, LoadingRegion, Notice, SegmentedControl, Skeleton, buttonClasses } from "@/components/ui";
+import { Button, LoadingRegion, Notice, SegmentedControl, Select, Skeleton } from "@/components/ui";
 
 // What the report needs from each order (worked out by the dashboard with
 // the same rules as everywhere else in ProfitSync).
@@ -20,6 +20,7 @@ export type TaxOrder = {
   refundUnreviewed?: boolean;
   // Which store it's from (shown in warnings when covering several stores).
   storeName?: string | null;
+  storeId?: string | null;
 };
 
 type Warning = { key: string; text: string; fix?: { label: string; onClick: () => void } };
@@ -64,7 +65,8 @@ export default function TaxReport({
   onScopeChange?: (scope: "business" | "store") => void;
   currentStoreName?: string;
   // Buttons on the "before you file" warnings.
-  onFix?: { costs?: () => void; shipping?: () => void; refunds?: () => void };
+  // costs / refunds get the store to open when every such order is in one store.
+  onFix?: { costs?: (storeId?: string) => void; shipping?: () => void; refunds?: (storeId?: string) => void };
 }) {
   const years = useMemo(() => {
     const found = new Set<number>([new Date().getFullYear()]);
@@ -106,6 +108,13 @@ export default function TaxReport({
     };
     const missingCostWhere = where(kept.filter((o) => o.productCost === null));
     const unreviewedWhere = where(refunded.filter((o) => o.refundUnreviewed));
+    // The one store those orders are in (so the fix button can open it).
+    const onlyStore = (list: TaxOrder[]) => {
+      const ids = [...new Set(list.map((o) => o.storeId).filter((id): id is string => Boolean(id)))];
+      return ids.length === 1 ? ids[0] : undefined;
+    };
+    const missingCostStore = onlyStore(kept.filter((o) => o.productCost === null));
+    const unreviewedStore = onlyStore(refunded.filter((o) => o.refundUnreviewed));
 
     const byCategory = new Map<string, number>();
     for (const expense of expenses) {
@@ -122,6 +131,8 @@ export default function TaxReport({
       missingCost,
       missingCostWhere,
       unreviewedWhere,
+      missingCostStore,
+      unreviewedStore,
       noShipping,
       keptCount: kept.length,
       unreviewed,
@@ -174,7 +185,7 @@ export default function TaxReport({
     warnings.push({
       key: "costs",
       text: `${plural(report.missingCost, "order", "orders")}${report.missingCostWhere} ${report.missingCost === 1 ? "has" : "have"} no product cost, so your profit looks higher than it is.`,
-      fix: onFix?.costs && { label: "Add costs", onClick: onFix.costs },
+      fix: onFix?.costs && { label: "Add costs", onClick: () => onFix.costs?.(report.missingCostStore) },
     });
   }
   if (report.keptCount > 0 && report.noShipping === report.keptCount) {
@@ -194,7 +205,7 @@ export default function TaxReport({
     warnings.push({
       key: "refunds",
       text: `${plural(report.unreviewed, "refund", "refunds")}${report.unreviewedWhere} ${report.unreviewed === 1 ? "hasn't" : "haven't"} been reviewed, so any loss on ${report.unreviewed === 1 ? "it" : "them"} isn't counted yet.`,
-      fix: onFix?.refunds && { label: "Review refunds", onClick: onFix.refunds },
+      fix: onFix?.refunds && { label: "Review refunds", onClick: () => onFix.refunds?.(report.unreviewedStore) },
     });
   }
   if (report.orderCount > 0 && report.expenseCount === 0) {
@@ -212,7 +223,9 @@ export default function TaxReport({
       <span className="min-w-0">
         <span className={`block text-sm print:text-black ${line.strong ? "font-semibold text-ink" : "text-ink-2"}`}>{line.label}</span>
       </span>
-      <span className={`shrink-0 text-sm tabular-nums print:text-black ${line.strong ? "font-semibold text-ink" : "text-ink"}`}>
+      <span
+        className={`shrink-0 text-sm tabular-nums print:text-black ${line.strong ? "font-semibold text-ink" : line.amount === 0 ? "text-subtle" : "text-ink"}`}
+      >
         {(sign === "-" || line.negative) && line.amount > 0 ? "−" : ""}
         {money(line.amount)}
       </span>
@@ -235,28 +248,17 @@ export default function TaxReport({
               ]}
             />
           )}
-          <select
-            value={year}
-            onChange={(e) => setYear(Number(e.target.value))}
-            aria-label="Tax year"
-            className="h-9 rounded-lg border border-line-strong bg-surface-2 px-3 text-sm text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
-          >
-            {years.map((y) => <option key={y} value={y}>{y}</option>)}
-          </select>
-          <button
-            type="button"
-            onClick={() => (allowed ? downloadCsv() : onUpgrade())}
-            className={buttonClasses("secondary", "md")}
-          >
+          <span className="w-28">
+            <Select value={year} onChange={(e) => setYear(Number(e.target.value))} aria-label="Tax year">
+              {years.map((y) => <option key={y} value={y}>{y}</option>)}
+            </Select>
+          </span>
+          <Button variant="secondary" onClick={() => (allowed ? downloadCsv() : onUpgrade())}>
             Download CSV
-          </button>
-          <button
-            type="button"
-            onClick={() => (allowed ? window.print() : onUpgrade())}
-            className={buttonClasses("primary", "md")}
-          >
+          </Button>
+          <Button variant="primary" onClick={() => (allowed ? window.print() : onUpgrade())}>
             Print or save as PDF
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -322,8 +324,9 @@ export default function TaxReport({
           </div>
 
           <div className="space-y-1 px-6 py-4 text-[11px] leading-5 text-subtle print:px-0 print:text-gray-600">
+            {/* On screen this is in "Before you file"; keep it on the printout. */}
             {report.missingCost > 0 && (
-              <p className="text-warn print:text-black">
+              <p className="hidden print:block print:text-black">
                 {report.missingCost} order{report.missingCost === 1 ? " has" : "s have"} no product cost yet, so cost of goods
                 sold may be too low. Add them on the Orders or Listings page.
               </p>
@@ -343,13 +346,9 @@ export default function TaxReport({
                 See your full-year numbers, print them or save as PDF, and download a spreadsheet for your accountant with
                 Pro or Ultimate.
               </p>
-              <button
-                type="button"
-                onClick={onUpgrade}
-                className={buttonClasses("primary", "md", "mt-4 w-full")}
-              >
+              <Button variant="primary" onClick={onUpgrade} className="mt-4 w-full">
                 See plans
-              </button>
+              </Button>
             </div>
           </div>
         )}
