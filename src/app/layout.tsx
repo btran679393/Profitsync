@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { THEME_BOOT_SCRIPT } from "@/lib/preferences";
+import { SITE_DESCRIPTION, SITE_NAME, siteUrl } from "@/lib/site";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,9 +15,26 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Page titles read "Pricing · ProfitSync"; the link-preview picture comes
+// from opengraph-image.tsx.
 export const metadata: Metadata = {
-  title: "ProfitSync",
-  description: "Track your eBay sales, expenses, and profits.",
+  metadataBase: new URL(siteUrl()),
+  title: { default: SITE_NAME, template: `%s · ${SITE_NAME}` },
+  description: SITE_DESCRIPTION,
+  applicationName: SITE_NAME,
+  openGraph: {
+    type: "website",
+    siteName: SITE_NAME,
+    title: "ProfitSync · Know your real eBay profit",
+    description: SITE_DESCRIPTION,
+    url: "/",
+    locale: "en_US",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "ProfitSync · Know your real eBay profit",
+    description: SITE_DESCRIPTION,
+  },
 };
 
 export default function RootLayout({

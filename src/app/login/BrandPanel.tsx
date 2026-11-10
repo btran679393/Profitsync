@@ -112,7 +112,8 @@ function LiveToasts() {
   );
 }
 
-function PreviewCard() {
+// Also shown on the public home page.
+export function PreviewCard() {
   const revenue = useCountUp(REVENUE, 600);
   const profit = useCountUp(PROFIT, 800);
   const margin = useCountUp(32.4, 800);

@@ -2,6 +2,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextRequest, NextResponse } from "next/server";
 
+// The public website pages anyone can open without signing in.
+const PUBLIC_SITE_PAGES = new Set(["/welcome", "/pricing", "/contact", "/terms", "/refunds", "/privacy"]);
+
 export async function updateSession(request: NextRequest) {
   // Pages that finish a sign-in (social login callback, password-reset link)
   // must not touch the session first. If the browser still has an old, expired
@@ -57,11 +60,24 @@ export async function updateSession(request: NextRequest) {
   // before they have a session (the page exchanges the link's code itself).
   const isPublicPage =
     pathname === "/login" ||
-    pathname === "/privacy" ||
-    pathname === "/privacy/" ||
-    pathname === "/pricing" ||
+    PUBLIC_SITE_PAGES.has(pathname.replace(/\/+$/, "") || "/") ||
     pathname === "/reset-password" ||
-    pathname.startsWith("/auth/callback");
+    pathname.startsWith("/auth/callback") ||
+    // Link-preview image, robots.txt and sitemap for search engines.
+    pathname.startsWith("/opengraph-image") ||
+    pathname.startsWith("/twitter-image") ||
+    pathname.startsWith("/apple-icon") ||
+    pathname.startsWith("/icon") ||
+    pathname === "/robots.txt" ||
+    pathname === "/sitemap.xml";
+
+  // Visitors who aren't signed in see the home page at "/" instead of
+  // being sent to the login page.
+  if (!isAuthenticated && pathname === "/") {
+    const welcome = NextResponse.rewrite(new URL("/welcome", request.url));
+    response.cookies.getAll().forEach((cookie) => welcome.cookies.set(cookie));
+    return welcome;
+  }
 
   // eBay must be able to deliver account-deletion notifications, and Stripe
   // payment events. Both check their own signatures.

@@ -188,6 +188,8 @@ export default function LoginPage() {
     const urlError = params.get("error_description") || params.get("error");
     const showError = window.setTimeout(() => {
       if (urlError) setError(friendlyAuthError(urlError));
+      // "Start free" links open the sign-up form.
+      if (params.get("mode") === "signup") setMode("signup");
     }, 0);
 
     // Only show buttons for providers that are enabled in the Supabase dashboard,
@@ -508,7 +510,11 @@ export default function LoginPage() {
 
             {mode === "signup" && (
               <p className="mt-5 text-center text-xs leading-5 text-slate-500">
-                By creating an account you agree to how we handle your data in our{" "}
+                By creating an account you agree to our{" "}
+                <Link href="/terms" className="font-medium text-slate-700 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-500">
+                  Terms of Service
+                </Link>{" "}
+                and{" "}
                 <Link href="/privacy" className="font-medium text-slate-700 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-500">
                   Privacy Policy
                 </Link>
@@ -521,8 +527,10 @@ export default function LoginPage() {
         {/* Footer */}
         <footer className="relative z-10 flex flex-col items-center justify-between gap-2 px-6 py-6 text-xs text-slate-400 sm:flex-row sm:px-10">
           <p>© {new Date().getFullYear()} ProfitSync</p>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
             <Link href="/pricing" className="transition hover:text-slate-600">Pricing</Link>
+            <Link href="/contact" className="transition hover:text-slate-600">Contact</Link>
+            <Link href="/terms" className="transition hover:text-slate-600">Terms</Link>
             <Link href="/privacy" className="transition hover:text-slate-600">Privacy</Link>
             <span className="flex items-center gap-1.5">
               <Icon name="shield" className="h-3.5 w-3.5" />

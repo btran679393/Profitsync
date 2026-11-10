@@ -75,7 +75,7 @@ export default function PricingCards() {
                 ))}
               </ul>
               <Link
-                href="/login"
+                href="/login?mode=signup"
                 className={`mt-7 block rounded-xl py-2.5 text-center text-sm font-semibold transition ${
                   featured
                     ? "bg-accent text-on-accent shadow-lg shadow-accent/20 hover:bg-accent-hover"

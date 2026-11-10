@@ -1862,9 +1862,12 @@ function Dashboard() {
               © {new Date().getFullYear()} ProfitSync
             </span>
 
-            <span>
-              Built for smarter eBay selling.
-            </span>
+            <nav aria-label="Footer" className="flex flex-wrap gap-x-4 gap-y-1">
+              <a href="/contact" className="hover:text-ink">Contact</a>
+              <a href="/terms" className="hover:text-ink">Terms</a>
+              <a href="/refunds" className="hover:text-ink">Refunds</a>
+              <a href="/privacy" className="hover:text-ink">Privacy</a>
+            </nav>
           </footer>
         </div>
       </main>
