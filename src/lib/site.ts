@@ -7,7 +7,7 @@ export const SITE_DESCRIPTION =
   "See your real eBay profit after fees, shipping, product costs and refunds. Multiple stores, expenses and a tax-ready yearly summary.";
 
 // Where customers write for help, billing questions and data requests.
-export const SUPPORT_EMAIL = "brandontran391@gmail.com";
+export const SUPPORT_EMAIL = "profitsync.app@gmail.com";
 
 // When the Terms, Refund policy and Privacy policy last changed.
 export const LEGAL_UPDATED = "November 9, 2026";
