@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db/pool";
 import type { Pool } from "pg";
 import type Stripe from "stripe";
-import { getStripe, loadSubscription, saveSubscription } from "@/lib/billing/server";
+import { getStripe, loadSubscription, saveSubscription, stripeConfigured, stripeWebhookSecret } from "@/lib/billing/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,8 +10,8 @@ export const dynamic = "force-dynamic";
 // Stripe tells ProfitSync about payments and plan changes here. Every event
 // is checked against STRIPE_WEBHOOK_SECRET, so nobody else can fake one.
 export async function POST(request: Request) {
-  const secret = process.env.STRIPE_WEBHOOK_SECRET;
-  if (!secret || !process.env.STRIPE_SECRET_KEY || !process.env.DATABASE_URL) {
+  const secret = stripeWebhookSecret();
+  if (!secret || !stripeConfigured() || !process.env.DATABASE_URL) {
     return NextResponse.json({ error: "Billing webhook isn't configured." }, { status: 503 });
   }
 

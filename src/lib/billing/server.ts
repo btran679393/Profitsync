@@ -24,12 +24,20 @@ type Db = Pool | PoolClient;
 // Billing is "on" once the Stripe secret key is set. Until then every
 // account keeps unlimited access, exactly like before billing existed.
 export function stripeConfigured() {
-  return Boolean(process.env.STRIPE_SECRET_KEY);
+  return Boolean(stripeSecretKey());
+}
+
+// Keys pasted into Vercel sometimes pick up a stray space or line break.
+export function stripeSecretKey() {
+  return process.env.STRIPE_SECRET_KEY?.trim() ?? "";
+}
+export function stripeWebhookSecret() {
+  return process.env.STRIPE_WEBHOOK_SECRET?.trim() ?? "";
 }
 
 let stripeClient: Stripe | null = null;
 export function getStripe(): Stripe {
-  const key = process.env.STRIPE_SECRET_KEY;
+  const key = stripeSecretKey();
   if (!key) throw new Error("STRIPE_SECRET_KEY is not set.");
   stripeClient ??= new Stripe(key, { appInfo: { name: "ProfitSync" } });
   return stripeClient;
