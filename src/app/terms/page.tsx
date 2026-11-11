@@ -135,13 +135,21 @@ export default function TermsPage() {
         in the 12 months before the claim. Nothing in these terms limits liability that cannot be limited by law.
       </p>
 
-      <h2>15. Changes to these terms</h2>
+      <h2>15. Governing law</h2>
+      <p>
+        These terms are governed by the laws of the State of Oregon, USA, without regard to its conflict-of-law rules. If a
+        dispute comes up, please contact us first; most problems can be sorted out quickly by email. Any legal claim must be
+        brought in the state or federal courts located in Marion County, Oregon, unless the law where you live gives you the
+        right to bring it elsewhere.
+      </p>
+
+      <h2>16. Changes to these terms</h2>
       <p>
         We may update these terms as ProfitSync changes. We&apos;ll update the date at the top, and for important changes we&apos;ll
         tell you by email or in the app before they take effect. If you keep using ProfitSync after that, you accept the new terms.
       </p>
 
-      <h2>16. Contact</h2>
+      <h2>17. Contact</h2>
       <p>
         Questions about these terms? Email <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> or visit our{" "}
         <Link href="/contact">contact page</Link>.

@@ -318,9 +318,14 @@ export default function BillingSection({
         })}
       </div>
 
-      <p className="text-center text-xs text-subtle">
-        Prices in US dollars. Cancel any time and keep your plan until the end of the period you paid for. Payments
-        are handled securely by Stripe; ProfitSync never sees your card number.
+      <p className="text-center text-xs leading-5 text-subtle">
+        Prices in US dollars. <strong className="font-medium text-muted">Paid plans renew automatically</strong> each month or
+        year at the price shown until you cancel. Cancel any time here in Plan &amp; billing and keep your plan until the end
+        of the period you paid for. By choosing a paid plan you agree to the{" "}
+        <a href="/terms" target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-ink">Terms of Service</a>{" "}
+        and{" "}
+        <a href="/refunds" target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-ink">Refund policy</a>.
+        Payments are handled securely by Stripe; ProfitSync never sees your card number.
       </p>
     </div>
   );

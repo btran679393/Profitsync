@@ -10,7 +10,7 @@ export const SITE_DESCRIPTION =
 export const SUPPORT_EMAIL = "profitsync.app@gmail.com";
 
 // When the Terms, Refund policy and Privacy policy last changed.
-export const LEGAL_UPDATED = "November 9, 2026";
+export const LEGAL_UPDATED = "November 10, 2026";
 
 // The site's main address, for link previews, the sitemap and robots.txt.
 export function siteUrl(): string {
