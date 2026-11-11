@@ -8,6 +8,14 @@ import { allowedNewOrderIds, getUserPlan, ordersPerMonth } from "@/lib/billing/s
 import type { PlanLimits } from "@/lib/billing/plans";
 import { createClient } from "@/lib/supabase/server";
 import { tryAcquireSyncLock } from "@/lib/db/syncLock";
+import {
+  ORDER_HISTORY_DAYS,
+  financeCovers,
+  financeFilter,
+  orderNeedsUpdate,
+  planSyncWindow,
+  type SyncWindow,
+} from "@/lib/ebay/syncWindow";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 // Big stores take a while on their first sync (Vercel's limit for all plans).
@@ -118,6 +126,10 @@ type ExistingOrder = {
   ebayBuyerId: string | null;
   ebayFees: unknown;
   imageUrl: string | null;
+  salePrice: unknown;
+  refundAmount: unknown;
+  status: string | null;
+  orderDate: unknown;
 };
 type PreparedOrder = {
   orderId: string;
@@ -157,7 +169,6 @@ function getListingInfo(order: EbayOrder): ListingInfo {
 // ============================================================
 // CONFIGURATION
 // ============================================================
-const ORDER_HISTORY_DAYS = 365;
 const ORDERS_PAGE_SIZE = 200;
 const MAX_ORDER_PAGES = 100;
 const FINANCES_PAGE_SIZE = 100;
@@ -479,18 +490,14 @@ async function verifyActiveConnection(
 // ============================================================
 // HISTORICAL ORDER RETRIEVAL
 // ============================================================
+// A full sync asks for the past year of orders; a quick sync only for
+// orders created or changed since the last sync (see syncWindow.ts).
 async function getHistoricalOrders(
   ebayApiBase: string,
   accessToken: string,
+  orderFilter: string,
   onPage: (found: number) => void = () => {}
 ): Promise<EbayOrder[]> {
-  const now = new Date();
-  const historyStart = new Date(
-    now.getTime() -
-      ORDER_HISTORY_DAYS * 24 * 60 * 60 * 1000
-  );
-  const creationDateFilter =
-    `creationdate:[${historyStart.toISOString()}..${now.toISOString()}]`;
   const ebayOrders: EbayOrder[] = [];
   const seenOrderIds = new Set<string>();
   let offset = 0;
@@ -501,7 +508,7 @@ async function getHistoricalOrders(
     page++
   ) {
     const params = new URLSearchParams({
-      filter: creationDateFilter,
+      filter: orderFilter,
       limit: String(ORDERS_PAGE_SIZE),
       offset: String(offset),
     });
@@ -582,6 +589,7 @@ async function getFinancialTransactions(
   ebayFinancesBase: string,
   accessToken: string,
   transactionType: "SALE" | "REFUND" | "SHIPPING_LABEL" | "NON_SALE_CHARGE",
+  window: SyncWindow,
   options: { requireOrderId?: boolean } = {}
 ): Promise<EbayTransaction[]> {
   const transactions: EbayTransaction[] = [];
@@ -594,7 +602,8 @@ async function getFinancialTransactions(
     page++
   ) {
     const params = new URLSearchParams({
-      filter: `transactionType:{${transactionType}}`,
+      // Only the sync window: with no date, eBay returns five years.
+      filter: financeFilter(transactionType, window),
       limit: String(FINANCES_PAGE_SIZE),
       offset: String(offset),
     });
@@ -668,7 +677,8 @@ async function getFinancialTransactions(
 }
 async function getFinancialData(
   ebayFinancesBase: string,
-  accessToken: string
+  accessToken: string,
+  window: SyncWindow
 ): Promise<FinancialData> {
   const feesByOrder = new Map<string, number>();
   const refundsByOrder = new Map<string, RefundInfo>();
@@ -678,7 +688,8 @@ async function getFinancialData(
   const sales = await getFinancialTransactions(
     ebayFinancesBase,
     accessToken,
-    "SALE"
+    "SALE",
+    window
   );
   for (const transaction of sales) {
     if (!transaction.orderId) {
@@ -703,7 +714,8 @@ async function getFinancialData(
   const refunds = await getFinancialTransactions(
     ebayFinancesBase,
     accessToken,
-    "REFUND"
+    "REFUND",
+    window
   );
   for (const transaction of refunds) {
     if (!transaction.orderId) {
@@ -766,7 +778,8 @@ async function getFinancialData(
     const labels = await getFinancialTransactions(
       ebayFinancesBase,
       accessToken,
-      "SHIPPING_LABEL"
+      "SHIPPING_LABEL",
+      window
     );
     labelTransactions = labels.length;
     for (const transaction of labels) {
@@ -798,6 +811,7 @@ async function getFinancialData(
       ebayFinancesBase,
       accessToken,
       "NON_SALE_CHARGE",
+      window,
       { requireOrderId: false }
     );
     otherChargeTransactions = charges.length;
@@ -845,6 +859,58 @@ async function getFinancialData(
 // ============================================================
 // DATABASE HELPERS
 // ============================================================
+// When this store last synced (for quick syncs). Needs
+// docs/sql/2026-11-11_quick_sync.sql; until it runs, every sync is full.
+type SyncState = {
+  supported: boolean;
+  lastSyncAt: string | null;
+  lastFullSyncAt: string | null;
+};
+type Queryable = Pick<PoolClient, "query">;
+async function readSyncState(pool: Queryable, connectionId: string | number): Promise<SyncState> {
+  try {
+    const result = await pool.query<{ lastSyncAt: Date | null; lastFullSyncAt: Date | null }>(
+      `SELECT "lastOrderSyncAt" AS "lastSyncAt", "lastFullOrderSyncAt" AS "lastFullSyncAt"
+       FROM public."ebayConnection" WHERE id = $1`,
+      [connectionId]
+    );
+    const row = result.rows[0];
+    return {
+      supported: true,
+      lastSyncAt: row?.lastSyncAt ? new Date(row.lastSyncAt).toISOString() : null,
+      lastFullSyncAt: row?.lastFullSyncAt ? new Date(row.lastFullSyncAt).toISOString() : null,
+    };
+  } catch (error) {
+    if ((error as { code?: string }).code !== "42703") throw error;
+    return { supported: false, lastSyncAt: null, lastFullSyncAt: null };
+  }
+}
+// Remember this sync. `fullHistory` false means the next sync must be full
+// (e.g. orders were held back by the plan and may be imported after an
+// upgrade).
+async function saveSyncState(
+  pool: Queryable,
+  connectionId: string | number,
+  window: SyncWindow,
+  fullHistory: boolean
+): Promise<void> {
+  const at = window.until.toISOString();
+  try {
+    await pool.query(
+      `UPDATE public."ebayConnection"
+       SET "lastOrderSyncAt" = $2::timestamptz,
+           "lastFullOrderSyncAt" = CASE
+             WHEN NOT $4::boolean THEN NULL
+             WHEN $3::boolean THEN $2::timestamptz
+             ELSE "lastFullOrderSyncAt"
+           END
+       WHERE id = $1`,
+      [connectionId, at, window.mode === "full", fullHistory]
+    );
+  } catch (error) {
+    if ((error as { code?: string }).code !== "42703") throw error;
+  }
+}
 async function insertOrder(
   client: PoolClient,
   order: PreparedOrder,
@@ -1328,18 +1394,35 @@ async function syncOrders(request: Request, onProgress: (progress: SyncProgress)
       });
     }
     // --------------------------------------------------------
-    // STEP 6: Retrieve historical eBay orders
+    // STEP 6: Full or quick sync? (see syncWindow.ts)
+    // --------------------------------------------------------
+    const syncState = await readSyncState(getPool(), connection.id);
+    const forceFull = new URL(request.url).searchParams.get("full") === "1";
+    const window = planSyncWindow({
+      now: new Date(),
+      lastSyncAt: syncState.lastSyncAt,
+      lastFullSyncAt: syncState.lastFullSyncAt,
+      forceFull,
+    });
+    console.log("ProfitSync sync mode:", {
+      mode: window.mode,
+      reason: window.reason,
+      syncStateSaved: syncState.supported,
+    });
+    // --------------------------------------------------------
+    // STEP 6b: Retrieve eBay orders
     // --------------------------------------------------------
     onProgress({ stage: "orders", found: 0 });
     let ebayOrders =
       await getHistoricalOrders(
         ebayApiBase,
         accessToken,
+        window.orderFilter,
         (found) => onProgress({ stage: "orders", found })
       );
     onProgress({ stage: "fees" });
     console.log(
-      "ProfitSync historical orders found:",
+      "ProfitSync eBay orders found:",
       ebayOrders.length
     );
     // --------------------------------------------------------
@@ -1348,7 +1431,8 @@ async function syncOrders(request: Request, onProgress: (progress: SyncProgress)
     const financialData =
       await getFinancialData(
         ebayFinancesBase,
-        accessToken
+        accessToken,
+        window
       );
     const {
       feesByOrder,
@@ -1401,6 +1485,14 @@ async function syncOrders(request: Request, onProgress: (progress: SyncProgress)
     // on Free, the monthly allowance). Orders already imported
     // keep updating as usual.
     // --------------------------------------------------------
+    // A quick sync can return an old order that eBay changed recently:
+    // new orders still only come from the past year, as with a full sync.
+    const historyCutoff = window.until.getTime() - ORDER_HISTORY_DAYS * 24 * 60 * 60 * 1000;
+    ebayOrders = ebayOrders.filter((order) => {
+      if (!order.orderId || existingIds.has(order.orderId) || !order.creationDate) return true;
+      const created = new Date(order.creationDate).getTime();
+      return Number.isNaN(created) || created >= historyCutoff;
+    });
     let ordersOverPlanLimit = 0;
     if (planLimits.monthlyOrders !== null || planLimits.historyDays < ORDER_HISTORY_DAYS) {
       const newOrders = ebayOrders.filter(
@@ -1681,23 +1773,36 @@ async function syncOrders(request: Request, onProgress: (progress: SyncProgress)
           if (!order.ebayOrderId) {
             continue;
           }
-          const feeCents =
-            feesByOrder.get(
-              order.ebayOrderId
-            );
+          // eBay money records are only complete for orders created inside
+          // the downloaded window; older orders keep their saved amounts.
+          const financeComplete = financeCovers(order.orderDate, window.financeStart);
+          const feeCents = financeComplete
+            ? feesByOrder.get(order.ebayOrderId)
+            : undefined;
           const imageUrl =
             imagesByOrder.get(
               order.ebayOrderId
             ) ?? null;
           const refund =
             buyerRefundsByOrder.get(order.ebayOrderId) ??
-            refundsByOrder.get(order.ebayOrderId);
+            (financeComplete ? refundsByOrder.get(order.ebayOrderId) : undefined);
           if (
             feeCents === undefined &&
             !imageUrl &&
             !refund
           ) {
-            feesUnavailable++;
+            if (financeComplete) feesUnavailable++;
+            continue;
+          }
+          // Nothing new for this order: skip the database round trip.
+          if (
+            !orderNeedsUpdate(order, {
+              feeCents,
+              imageUrl,
+              refundCents: refund?.amountCents,
+              buyerRefundConfirmed: buyerRefundsByOrder.has(order.ebayOrderId),
+            })
+          ) {
             continue;
           }
           if (!order.ebayBuyerId) {
@@ -1840,8 +1945,10 @@ async function syncOrders(request: Request, onProgress: (progress: SyncProgress)
                   AND o."ebayUserId" = $4
                   AND o.environment = $5
                   AND o."shippingLabelCost" IS DISTINCT FROM v.cost
+                  -- Only orders whose label records were all downloaded.
+                  AND o."orderDate" >= $6::timestamptz
               `,
-              [orderIds, costs, userId, ebayUserId, environment]
+              [orderIds, costs, userId, ebayUserId, environment, window.financeStart.toISOString()]
             );
             labelCostsUpdated = result.rowCount ?? 0;
           } catch (error) {
@@ -1869,8 +1976,9 @@ async function syncOrders(request: Request, onProgress: (progress: SyncProgress)
                   AND o."ebayUserId" = $4
                   AND o.environment = $5
                   AND o."otherFees" IS DISTINCT FROM v.amount
+                  AND o."orderDate" >= $6::timestamptz
               `,
-              [orderIds, amounts, userId, ebayUserId, environment]
+              [orderIds, amounts, userId, ebayUserId, environment, window.financeStart.toISOString()]
             );
             otherFeesUpdated = result.rowCount ?? 0;
           } catch (error) {
@@ -1915,9 +2023,22 @@ async function syncOrders(request: Request, onProgress: (progress: SyncProgress)
     // ========================================================
     // SYNC COMPLETE
     // ========================================================
+    // Plans with a shorter history or a monthly cap may hold orders back;
+    // keep syncing in full so an upgrade brings them in.
+    await saveSyncState(
+      getPool(),
+      connection.id,
+      window,
+      planLimits.historyDays >= ORDER_HISTORY_DAYS && ordersOverPlanLimit === 0
+    );
+    const windowText =
+      window.mode === "full"
+        ? `from the past ${ORDER_HISTORY_DAYS} days`
+        : "created or changed since your last sync";
     return NextResponse.json({
       success: true,
       environment,
+      mode: window.mode,
       historyDays: ORDER_HISTORY_DAYS,
       found: ebayOrders.length,
       imported,
@@ -1945,7 +2066,7 @@ async function syncOrders(request: Request, onProgress: (progress: SyncProgress)
         refundsByOrder.size,
       message:
         `Found ${ebayOrders.length} eBay orders ` +
-        `from the past ${ORDER_HISTORY_DAYS} days. ` +
+        `${windowText}. ` +
         `Imported ${imported} new orders. ` +
         `Updated fees on ${feesUpdated} existing orders. ` +
         `Added ${imagesImported + imagesUpdated} listing images. ` +

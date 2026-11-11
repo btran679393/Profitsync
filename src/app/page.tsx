@@ -964,7 +964,9 @@ function Dashboard() {
   // SYNC EBAY
   // ----------------------------------------------------------
 
-  async function syncEbayOrders() {
+  // Most syncs only bring in orders created or changed since the last one;
+  // `full` re-checks the whole year with eBay.
+  async function syncEbayOrders({ full = false }: { full?: boolean } = {}) {
     if (syncing || syncInFlightRef.current || savingRef.current || loggingOut) {
       return;
     }
@@ -978,8 +980,12 @@ function Dashboard() {
       const results: SyncResponse[] = [];
       for (const target of targets) {
         const prefix = targets.length > 1 && target ? `${target.name}: ` : "";
+        const params = new URLSearchParams();
+        if (target) params.set("store", target.id);
+        if (full) params.set("full", "1");
+        const query = params.toString();
         const response = await fetch(
-          target ? `/api/ebay/sync?store=${encodeURIComponent(target.id)}` : "/api/ebay/sync",
+          query ? `/api/ebay/sync?${query}` : "/api/ebay/sync",
           // Ask for live progress ("Bringing in your orders… 1,200 so far").
           { method: "POST", cache: "no-store", headers: { Accept: "application/x-ndjson" } }
         );
@@ -1033,8 +1039,10 @@ function Dashboard() {
           `${(data.refundsUpdated ?? 0) + (data.refundedImported ?? 0)} refund${(data.refundsUpdated ?? 0) + (data.refundedImported ?? 0) === 1 ? "" : "s"} updated`,
       ].filter(Boolean);
       const overLimit = results.reduce((sum, r) => sum + (r.ordersOverPlanLimit ?? 0), 0);
+      // A quick sync only looks at what changed, so its count is small.
+      const quick = results.every((r) => r.mode === "quick");
       toast.success(
-        `Synced ${found} order${found === 1 ? "" : "s"}`,
+        quick ? "Synced with eBay" : `Synced ${found} order${found === 1 ? "" : "s"}`,
         changes.length ? changes.join(" · ") : "Everything is up to date."
       );
       if (overLimit > 0) {
@@ -1529,7 +1537,10 @@ function Dashboard() {
   // Things the quick-jump box can do besides opening pages and orders.
   const paletteActions: PaletteAction[] = [
     ...(stores.length > 0 && !syncing
-      ? [{ id: "sync", label: "Sync with eBay now", icon: "refresh" as const, run: () => void syncEbayOrders() }]
+      ? [
+          { id: "sync", label: "Sync with eBay now", icon: "refresh" as const, run: () => void syncEbayOrders() },
+          { id: "full-sync", label: "Re-check the whole year with eBay", icon: "refresh" as const, run: () => void syncEbayOrders({ full: true }) },
+        ]
       : []),
     {
       id: "theme",
@@ -1838,7 +1849,7 @@ function Dashboard() {
                     onImported={loadOrders}
                     allowed={limits.exports}
                     onUpgrade={goToPlans}
-                    onSync={() => void syncEbayOrders()}
+                    onSync={() => void syncEbayOrders({ full: true })}
                   />
                 </>
               }

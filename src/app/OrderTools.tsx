@@ -288,7 +288,8 @@ export default function OrderTools({
   // False on the Free plan: the buttons show a Pro tag and open the plans page.
   allowed?: boolean;
   onUpgrade?: () => void;
-  // Lets "Check against eBay" offer a sync when something doesn't match.
+  // A full re-check of the past year with eBay. Offered here and by
+  // "Check against eBay" when something doesn't match.
   onSync?: () => void;
 }) {
   const [checking, setChecking] = useState(false);
@@ -322,6 +323,15 @@ export default function OrderTools({
             hint: "Compare a month with eBay's own payment records",
             onSelect: () => setChecking(true),
           },
+          ...(onSync
+            ? [
+                {
+                  label: "Re-check the whole year",
+                  hint: "Brings in the past 12 months from eBay again. Takes longer than a normal sync.",
+                  onSelect: onSync,
+                },
+              ]
+            : []),
           {
             label: "Download CSV",
             hint: `Orders in ${periodLabel.toLowerCase()}, for taxes or your accountant`,
