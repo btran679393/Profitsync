@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Badge, Button, Drawer, Field, MoneyInput, Select, cn, useConfirm } from "@/components/ui";
-import { type Order, money, isValidCost, isFullyRefunded, getRefundLoss, getShippingCost, formatOrderDate } from "./model";
+import { type Order, money, isValidCost, isFullyRefunded, isPartiallyRefunded, getRefundLoss, getShippingCost, formatOrderDate } from "./model";
 import { Icon } from "./Icon";
 import { ListingImage } from "./ListingImage";
 
@@ -27,6 +27,14 @@ function SavingMark({ state }: { state: "saving" | "saved" | null }) {
 
 export function OrderStatusBadge({ order }: { order: Order }) {
   if (isFullyRefunded(order)) return <Badge tone="loss">Refunded</Badge>;
+  // Partly refunded and the cost is in: the sale counts, less the refund.
+  if (isPartiallyRefunded(order) && isValidCost(order.savedProductCost)) {
+    return (
+      <Badge tone="warn" dot>
+        Partly refunded
+      </Badge>
+    );
+  }
   return isValidCost(order.savedProductCost) ? (
     <Badge tone="profit" dot>
       Complete

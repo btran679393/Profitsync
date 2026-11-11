@@ -135,3 +135,32 @@ describe("labels", () => {
     expect(periodLabel(2025, today)).toBe("January 1 – December 31, 2025");
   });
 });
+
+describe("partial refunds on the statement", () => {
+  it("keep the sale and take off only the refund", () => {
+    const r = buildTaxReport(
+      [order({ refundAmount: 15 }), order({ orderDate: "2025-04-01T00:00:00.000Z", refunded: true, salePrice: 80, refundLoss: 5 })],
+      [],
+      2025
+    );
+    expect(r.grossSales).toBe(180);
+    expect(r.refunds).toBe(95);
+    expect(r.netSales).toBe(85);
+    // The partly refunded order still counts its costs; the full refund doesn't.
+    expect(r.cogs).toBe(40);
+    expect(r.ebayFees).toBe(13.25);
+    expect(r.partialRefundCount).toBe(1);
+    expect(r.refundCount).toBe(1);
+    expect(r.netProfit).toBe(Math.round((85 - 40 - 13.25 - 2 - 8 - 5) * 100) / 100);
+  });
+
+  it("are labelled in the order list", () => {
+    const csv = ordersCsv([order({ refundAmount: 15 }), order({ refundAmount: 10, productCost: null })], {
+      business: "Shop",
+      year: 2025,
+      preparedOn: new Date(),
+    });
+    expect(csv).toContain(",Sold - partly refunded,100.00,15.00,40.00,");
+    expect(csv).toContain("Sold - partly refunded - product cost missing");
+  });
+});

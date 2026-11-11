@@ -1222,6 +1222,8 @@ function Dashboard() {
         refundUnreviewed: isFullyRefunded(order) && !order.refundOutcome,
         storeName: stores.find((s) => s.id === order.ebayUserId)?.name ?? null,
         storeId: order.ebayUserId,
+        // A partial refund (the buyer kept the item) comes off the sale.
+        refundAmount: isPartiallyRefunded(order) ? order.refundAmount : 0,
         // For the order list spreadsheet.
         ebayOrderId: order.ebayOrderId,
         item: order.item,

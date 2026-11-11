@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { setupNeeded } from "@/lib/setupNeeded";
+import { fullyRefundedSql, statusWithCostSql } from "@/lib/refunds";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -79,7 +80,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ it
       // Cost per item is multiplied by units sold; shipping is per order.
       const setClause =
         field === "unitCost"
-          ? `"productCost" = ROUND($1::numeric * GREATEST(COALESCE(o.quantity, 1), 1), 2), status = 'COMPLETED'`
+          ? `"productCost" = ROUND($1::numeric * GREATEST(COALESCE(o.quantity, 1), 1), 2), status = ${statusWithCostSql("o.")}`
           : `"shippingCost" = $1::numeric`;
       const target = field === "unitCost" ? `"productCost"` : `"shippingCost"`;
       const result = await client.query(
@@ -90,8 +91,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ it
         WHERE o."userId" = $2
           AND o.environment = 'PRODUCTION'
           AND o.${target} IS NULL
-          AND o.status NOT IN ('REFUNDED', 'PARTIALLY_REFUNDED')
-          AND COALESCE(o."refundAmount", 0) = 0
+          AND NOT ${fullyRefundedSql("o.")}
           AND (
             o."ebayItemId" = $3
             OR (

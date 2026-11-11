@@ -85,7 +85,17 @@ export function demoOrders(): ApiOrder[] {
       });
     }
   }
-  return orders.sort((a, b) => String(b.orderDate).localeCompare(String(a.orderDate)));
+  orders.sort((a, b) => String(b.orderDate).localeCompare(String(a.orderDate)));
+  // One partial refund: $15 back for a scuff, and the buyer kept the item.
+  const partial = orders.find(
+    (o) => o.status === "PAID" && o.productCost !== null && Date.now() - Date.parse(String(o.orderDate)) > 20 * 86_400_000
+  );
+  if (partial) {
+    partial.refundAmount = 15;
+    partial.status = "PARTIALLY_REFUNDED";
+    partial.refundedAt = new Date(Date.parse(String(partial.orderDate)) + 5 * 86_400_000).toISOString();
+  }
+  return orders;
 }
 
 export function demoListings(): ApiListing[] {

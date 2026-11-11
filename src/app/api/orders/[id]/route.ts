@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { setupNeeded } from "@/lib/setupNeeded";
+import { fullyRefundedSql, statusWithCostSql } from "@/lib/refunds";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -88,10 +89,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           RETURNING id, status, "productCost", "refundOutcome", "refundShippingLoss", "refundFeeLoss"
         `, [outcome, shipping, fees, cost, orderId, user.id])
       : await pool.query(`
-          UPDATE public."order" SET "productCost" = $1::numeric, status = 'COMPLETED', "updatedAt" = NOW()
+          UPDATE public."order" SET "productCost" = $1::numeric, status = ${statusWithCostSql()}, "updatedAt" = NOW()
           WHERE id = $2 AND "userId" = $3
-            AND status NOT IN ('REFUNDED','PARTIALLY_REFUNDED')
-            AND COALESCE("refundAmount",0) = 0
+            -- A partly refunded order (buyer kept the item) still needs its cost.
+            AND NOT ${fullyRefundedSql()}
           RETURNING id, status, "productCost"
         `, [cost, orderId, user.id]);
     if (result.rowCount) return NextResponse.json(result.rows[0]);

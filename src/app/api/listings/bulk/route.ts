@@ -3,6 +3,7 @@ import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { isMissingColumn } from "@/lib/db/optionalColumns";
 import { setupNeeded } from "@/lib/setupNeeded";
+import { fullyRefundedSql, statusWithCostSql } from "@/lib/refunds";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -76,7 +77,7 @@ export async function POST(request: Request) {
       // older orders without one) the exact same item title.
       const setClause =
         field === "unitCost"
-          ? `"productCost" = ROUND($1::numeric * GREATEST(COALESCE(o.quantity, 1), 1), 2), status = 'COMPLETED'`
+          ? `"productCost" = ROUND($1::numeric * GREATEST(COALESCE(o.quantity, 1), 1), 2), status = ${statusWithCostSql("o.")}`
           : `"shippingCost" = $1::numeric`;
       const target = field === "unitCost" ? `"productCost"` : `"shippingCost"`;
       const result = await client.query(
@@ -91,8 +92,7 @@ export async function POST(request: Request) {
         WHERE o."userId" = $2
           AND o.environment = 'PRODUCTION'
           AND o.${target} IS NULL
-          AND o.status NOT IN ('REFUNDED', 'PARTIALLY_REFUNDED')
-          AND COALESCE(o."refundAmount", 0) = 0
+          AND NOT ${fullyRefundedSql("o.")}
           AND (
             o."ebayItemId" = l."ebayItemId"
             OR (o."ebayItemId" IS NULL AND regexp_replace(lower(btrim(o.item)), '\\s+', ' ', 'g') = l.norm_title)

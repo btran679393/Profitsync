@@ -19,6 +19,9 @@ export type TaxOrder = {
   // Which store it's from (shown in warnings when covering several stores).
   storeName?: string | null;
   storeId?: string | null;
+  // Refunded on an order the buyer kept (a partial refund). Full refunds
+  // use `refunded` instead.
+  refundAmount?: number;
   // For the order list spreadsheet.
   ebayOrderId?: string | null;
   item?: string;
@@ -57,6 +60,8 @@ export type TaxReportData = {
   year: number;
   orderCount: number;
   refundCount: number;
+  // Sold orders with part of the sale refunded.
+  partialRefundCount: number;
   keptCount: number;
   missingCost: number;
   noShipping: number;
@@ -124,7 +129,8 @@ export function orderAmounts(order: TaxOrder) {
   const otherFees = kept ? order.otherFees : 0;
   const shipping = kept ? order.shipping : 0;
   const refundLoss = kept ? 0 : order.refundLoss;
-  const refund = kept ? 0 : order.salePrice;
+  // A partial refund comes off the sale; a full refund takes it all back.
+  const refund = kept ? Math.min(order.salePrice, Math.max(0, order.refundAmount ?? 0)) : order.salePrice;
   return {
     sale: order.salePrice,
     refund,
@@ -200,6 +206,7 @@ export function buildTaxReport(orders: TaxOrder[], expenses: TaxExpense[], year:
     year,
     orderCount: inYear.length,
     refundCount: refunded.length,
+    partialRefundCount: kept.filter((o) => (o.refundAmount ?? 0) > 0).length,
     keptCount: kept.length,
     missingCost: kept.filter((o) => o.productCost === null).length,
     noShipping: kept.filter((o) => o.shipping <= 0).length,
@@ -316,7 +323,7 @@ export function profitAndLossCsv(report: TaxReportData, header: Header): string 
     [],
     ["Notes"],
     ["Amounts are by order date. Sales are what buyers paid, not counting sales tax that eBay collects and pays for you."],
-    ["Refunded orders are taken out of sales; only what a refund cost you counts as a loss."],
+    ["Fully refunded orders are taken out of sales; only what the refund cost you counts as a loss. Partial refunds come off the sale."],
     ["This statement isn't tax advice. Check it with a tax professional before you file."],
   ]);
 }
@@ -330,7 +337,8 @@ export function ordersCsv(orders: TaxOrder[], header: Header): string {
   const rows = inYear.map((order) => {
     const a = orderAmounts(order);
     for (const key of Object.keys(totals) as Array<keyof typeof totals>) totals[key] += a[key];
-    const status = order.refunded ? "Refunded" : order.productCost === null ? "Sold - product cost missing" : "Sold";
+    const sold = (order.refundAmount ?? 0) > 0 ? "Sold - partly refunded" : "Sold";
+    const status = order.refunded ? "Refunded" : order.productCost === null ? `${sold} - product cost missing` : sold;
     return [
       order.orderDate ? order.orderDate.slice(0, 10) : "",
       order.ebayOrderId ?? "",

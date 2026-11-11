@@ -1,5 +1,6 @@
 // Moved out of page.tsx unchanged (redesign phase 1).
 import type { ListingRange, ListingRow } from "../ListingsSection";
+import { refundIsFull, refundIsPartial } from "@/lib/refunds";
 
 // ============================================================
 // TYPES
@@ -156,10 +157,10 @@ export function formatOrders(data: ApiOrder[], storeShipping = 0): Order[] {
   });
 }
 
+// A full refund takes the sale out; a partial one only takes the refunded
+// amount off it (see src/lib/refunds.ts for how they're told apart).
 export function isFullyRefunded(order: Order) {
-  return order.status === "REFUNDED" ||
-    order.status === "PARTIALLY_REFUNDED" ||
-    order.refundAmount > 0;
+  return refundIsFull(order);
 }
 
 export function getRefundLoss(order: Order) {
@@ -170,10 +171,10 @@ export function getRefundLoss(order: Order) {
   return productLoss + order.refundShippingLoss + order.refundFeeLoss;
 }
 
-// Kept for callers; partial refunds are treated like full refunds today.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+// Part of the sale was refunded and the buyer kept the item: the sale still
+// counts, less the refund (getOrderProfit subtracts refundAmount).
 export function isPartiallyRefunded(order: Order) {
-  return false; // All confirmed refund states are excluded from active sales.
+  return refundIsPartial(order);
 }
 
 export function hasRecordedCost(order: Order) {

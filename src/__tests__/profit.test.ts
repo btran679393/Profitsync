@@ -7,6 +7,7 @@ import {
   getShippingCost,
   hasRecordedCost,
   isFullyRefunded,
+  isPartiallyRefunded,
   isValidCost,
   previousRange,
   percentChange,
@@ -83,18 +84,30 @@ describe("getOrderProfit", () => {
   it("a cost of 0 still counts as entered", () => {
     expect(getOrderProfit(order({ savedProductCost: "0" }))).toBe(87);
   });
-  it("refunded orders are left out", () => {
+  it("fully refunded orders are left out", () => {
     expect(getOrderProfit(order({ status: "REFUNDED" }))).toBeNull();
-    expect(getOrderProfit(order({ refundAmount: 10 }))).toBeNull();
+    // The sale after the fees eBay gave back ($100 - $13) is a full refund.
+    expect(getOrderProfit(order({ refundAmount: 87 }))).toBeNull();
+  });
+  it("a partial refund comes off the sale", () => {
+    // 100 sale - 10 refund - 13 fees - 40 cost
+    expect(getOrderProfit(order({ refundAmount: 10, status: "PARTIALLY_REFUNDED" }))).toBe(37);
   });
 });
 
 describe("refunds", () => {
-  it("counts eBay refund states and any refunded amount", () => {
+  it("tells full refunds from partial ones", () => {
     expect(isFullyRefunded(order())).toBe(false);
     expect(isFullyRefunded(order({ status: "REFUNDED" }))).toBe(true);
+    // Marked refunded without an amount: full, to be safe.
     expect(isFullyRefunded(order({ status: "PARTIALLY_REFUNDED" }))).toBe(true);
-    expect(isFullyRefunded(order({ refundAmount: 5 }))).toBe(true);
+    expect(isFullyRefunded(order({ refundAmount: 87 }))).toBe(true);
+    expect(isFullyRefunded(order({ refundAmount: 5 }))).toBe(false);
+    expect(isPartiallyRefunded(order({ refundAmount: 5 }))).toBe(true);
+    expect(isPartiallyRefunded(order({ refundAmount: 87 }))).toBe(false);
+  });
+  it("a partial refund has no refund loss (it's taken off the sale)", () => {
+    expect(getRefundLoss(order({ refundAmount: 5, refundOutcome: "RETURNED", refundShippingLoss: 5 }))).toBe(0);
   });
   it("an unreviewed refund has no loss yet", () => {
     expect(getRefundLoss(order({ status: "REFUNDED", refundShippingLoss: 5 }))).toBe(0);

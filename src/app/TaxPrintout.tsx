@@ -110,7 +110,13 @@ export default function TaxPrintout({
         <dt className="text-gray-600">Orders</dt>
         <dd>
           {report.orderCount.toLocaleString("en-US")}
-          {report.refundCount > 0 ? ` (${report.refundCount.toLocaleString("en-US")} refunded)` : ""}
+          {(() => {
+            const parts = [
+              report.refundCount > 0 && `${report.refundCount.toLocaleString("en-US")} refunded`,
+              report.partialRefundCount > 0 && `${report.partialRefundCount.toLocaleString("en-US")} partly refunded`,
+            ].filter(Boolean);
+            return parts.length ? ` (${parts.join(", ")})` : "";
+          })()}
         </dd>
         <dt className="text-gray-600">Currency</dt>
         <dd>US dollars (USD)</dd>
@@ -224,7 +230,7 @@ export default function TaxPrintout({
         <h2 className="text-[9pt] font-semibold text-black">About these numbers</h2>
         <ul className="mt-[3pt] list-disc space-y-[1pt] pl-[14pt]">
           <li>Amounts are grouped by order date. Sales are what buyers paid, not counting sales tax that eBay collects and pays for you.</li>
-          <li>Refunded orders are taken out of sales. Only what a refund cost you (an item not returned, return shipping, fees eBay kept) counts as a loss.</li>
+          <li>Fully refunded orders are taken out of sales. Only what the refund cost you (an item not returned, return shipping, fees eBay kept) counts as a loss. Partial refunds come off the sale.</li>
           <li>eBay fees and charges come from eBay&apos;s own payment records. Product costs, shipping you paid outside eBay and business expenses are as entered in ProfitSync.</li>
           <li>This statement isn&apos;t tax advice. Check it with a tax professional before you file.</li>
         </ul>
