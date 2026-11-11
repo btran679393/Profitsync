@@ -1222,6 +1222,10 @@ function Dashboard() {
         refundUnreviewed: isFullyRefunded(order) && !order.refundOutcome,
         storeName: stores.find((s) => s.id === order.ebayUserId)?.name ?? null,
         storeId: order.ebayUserId,
+        // For the order list spreadsheet.
+        ebayOrderId: order.ebayOrderId,
+        item: order.item,
+        quantity: order.quantity,
       })),
     [taxSourceOrders, stores]
   );

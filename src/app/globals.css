@@ -254,23 +254,34 @@ body {
   }
 }
 
-/* Printing the tax summary: only the report, black on white. */
+/* The printed tax statement (TaxPrintout.tsx) lives in #ps-print-root, a
+   direct child of <body>. It's hidden on screen; when printing from the
+   Taxes page it's the only thing printed, black on white, with page
+   numbers. */
+#ps-print-root {
+  display: none;
+}
+@page {
+  size: letter;
+  margin: 0.6in 0.6in 0.75in;
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    font: 8pt ui-sans-serif, system-ui, sans-serif;
+    color: #6b7280;
+  }
+}
 @media print {
-  body * {
-    visibility: hidden;
-  }
-  #tax-report,
-  #tax-report * {
-    visibility: visible;
-  }
-  #tax-report {
-    position: absolute;
-    inset: 0 0 auto 0;
-    padding: 0 0.5in;
-  }
   html,
   body {
     background: #fff !important;
+  }
+  body:has(> #ps-print-root) > *:not(#ps-print-root) {
+    display: none !important;
+  }
+  #ps-print-root {
+    display: block !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
   .no-print {
     display: none !important;

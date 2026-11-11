@@ -2,43 +2,37 @@
 
 import { useMemo, useState } from "react";
 import type { ExpenseEntry } from "./ExpensesSection";
-import { Button, LoadingRegion, Notice, SegmentedControl, Select, Skeleton } from "@/components/ui";
+import TaxPrintout from "./TaxPrintout";
+import { Button, LoadingRegion, Menu, Notice, SegmentedControl, Select, Skeleton } from "@/components/ui";
+import {
+  buildTaxReport,
+  expensesCsv,
+  exportFileName,
+  ordersCsv,
+  periodLabel,
+  profitAndLossCsv,
+  yearOf,
+  type Line,
+  type TaxOrder,
+} from "@/lib/taxReport";
 
-// What the report needs from each order (worked out by the dashboard with
-// the same rules as everywhere else in ProfitSync).
-export type TaxOrder = {
-  orderDate: string | null;
-  refunded: boolean;
-  salePrice: number;
-  ebayFees: number;
-  otherFees: number;
-  shipping: number;
-  productCost: number | null;
-  // What a refund cost you (lost item, return shipping, fees kept by eBay).
-  refundLoss: number;
-  // A refunded order whose outcome (item back, lost…) hasn't been set yet.
-  refundUnreviewed?: boolean;
-  // Which store it's from (shown in warnings when covering several stores).
-  storeName?: string | null;
-  storeId?: string | null;
-};
+export type { TaxOrder } from "@/lib/taxReport";
 
 type Warning = { key: string; text: string; fix?: { label: string; onClick: () => void } };
 
 const money = (value: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
 
-function yearOf(date: string | null) {
-  if (!date) return null;
-  const year = Number(date.slice(0, 4));
-  return Number.isFinite(year) ? year : null;
-}
-
-type Line = { label: string; amount: number; strong?: boolean; negative?: boolean };
-
-function csvCell(value: string | number) {
-  const text = String(value);
-  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+function saveFile(text: string, fileName: string) {
+  const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export default function TaxReport({
@@ -83,22 +77,10 @@ export default function TaxReport({
   const [year, setYear] = useState(() => new Date().getFullYear());
 
   const report = useMemo(() => {
+    const base = buildTaxReport(orders, expenses, year);
     const inYear = orders.filter((order) => yearOf(order.orderDate) === year);
     const kept = inYear.filter((order) => !order.refunded);
     const refunded = inYear.filter((order) => order.refunded);
-    const sum = (list: TaxOrder[], pick: (o: TaxOrder) => number) => list.reduce((total, o) => total + pick(o), 0);
-
-    const grossSales = sum(inYear, (o) => o.salePrice);
-    const refunds = sum(refunded, (o) => o.salePrice);
-    const netSales = grossSales - refunds;
-    const cogs = sum(kept, (o) => o.productCost ?? 0);
-    const missingCost = kept.filter((o) => o.productCost === null).length;
-    const ebayFees = sum(kept, (o) => o.ebayFees);
-    const otherFees = sum(kept, (o) => o.otherFees);
-    const shipping = sum(kept, (o) => o.shipping);
-    const refundLosses = sum(refunded, (o) => o.refundLoss);
-    const noShipping = kept.filter((o) => o.shipping <= 0).length;
-    const unreviewed = refunded.filter((o) => o.refundUnreviewed).length;
     // " in vintagekitcorner" when covering several stores, so the seller
     // knows which store to open.
     const where = (list: TaxOrder[]) => {
@@ -116,66 +98,41 @@ export default function TaxReport({
     const missingCostStore = onlyStore(kept.filter((o) => o.productCost === null));
     const unreviewedStore = onlyStore(refunded.filter((o) => o.refundUnreviewed));
 
-    const byCategory = new Map<string, number>();
-    for (const expense of expenses) {
-      if (yearOf(expense.date) !== year) continue;
-      byCategory.set(expense.category, (byCategory.get(expense.category) ?? 0) + Number(expense.amount));
-    }
-    const expenseTotal = [...byCategory.values()].reduce((a, b) => a + b, 0);
-    const grossProfit = netSales - cogs;
-    const netProfit = grossProfit - ebayFees - otherFees - shipping - refundLosses - expenseTotal;
-
-    return {
-      orderCount: inYear.length,
-      refundCount: refunded.length,
-      missingCost,
-      missingCostWhere,
-      unreviewedWhere,
-      missingCostStore,
-      unreviewedStore,
-      noShipping,
-      keptCount: kept.length,
-      unreviewed,
-      expenseCount: byCategory.size,
-      income: [
-        { label: "Gross sales", amount: grossSales },
-        { label: "Refunds and returns", amount: refunds, negative: true },
-        { label: "Net sales", amount: netSales, strong: true },
-        { label: "Cost of goods sold (product costs)", amount: cogs, negative: true },
-        { label: "Gross profit", amount: grossProfit, strong: true },
-      ] as Line[],
-      costs: [
-        { label: "eBay selling fees", amount: ebayFees },
-        { label: "Other eBay charges (e.g. promoted listings)", amount: otherFees },
-        { label: "Shipping and postage", amount: shipping },
-        { label: "Losses on refunded orders", amount: refundLosses },
-        ...[...byCategory].sort((a, b) => b[1] - a[1]).map(([label, amount]) => ({ label, amount })),
-      ] as Line[],
-      totalCosts: ebayFees + otherFees + shipping + refundLosses + expenseTotal,
-      netProfit,
-    };
+    return { ...base, missingCostWhere, unreviewedWhere, missingCostStore, unreviewedStore };
   }, [orders, expenses, year, scope]);
 
-  function downloadCsv() {
-    const rows: Array<[string, string | number]> = [
-      ["ProfitSync tax summary", `${year}`],
-      ["Store", storeLabel],
-      ["Orders", report.orderCount],
-      ["", ""],
-      ...report.income.map((l) => [l.label, (l.negative ? -l.amount : l.amount).toFixed(2)] as [string, string]),
-      ["", ""],
-      ...report.costs.map((l) => [l.label, (-l.amount).toFixed(2)] as [string, string]),
-      ["Total business costs", (-report.totalCosts).toFixed(2)],
-      ["", ""],
-      ["Net profit", report.netProfit.toFixed(2)],
-    ];
-    const blob = new Blob([rows.map((r) => r.map(csvCell).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `profitsync-tax-summary-${year}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+  // For the spreadsheets and the printout.
+  const exportHeader = () => ({ business: storeLabel, year, preparedOn: new Date() });
+  const storeNames = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const order of orders) if (order.storeId && order.storeName) names.set(order.storeId, order.storeName);
+    return names;
+  }, [orders]);
+  const expensesInYear = expenses.filter((e) => yearOf(e.date) === year).length;
+
+  function download(kind: "pl" | "orders" | "expenses") {
+    if (!allowed) return onUpgrade();
+    if (kind === "pl") saveFile(profitAndLossCsv(report, exportHeader()), exportFileName("Profit and Loss", year, storeLabel));
+    if (kind === "orders") saveFile(ordersCsv(orders, exportHeader()), exportFileName("Orders", year, storeLabel));
+    if (kind === "expenses") {
+      saveFile(
+        expensesCsv(expenses, exportHeader(), (id) => storeNames.get(id) ?? null),
+        exportFileName("Business Expenses", year, storeLabel)
+      );
+    }
+  }
+
+  // The PDF's file name comes from the page title while printing.
+  function print() {
+    if (!allowed) return onUpgrade();
+    const title = document.title;
+    document.title = exportFileName("Profit and Loss", year, storeLabel, "").replace(/\.$/, "");
+    const restore = () => {
+      document.title = title;
+      window.removeEventListener("afterprint", restore);
+    };
+    window.addEventListener("afterprint", restore);
+    window.print();
   }
 
   // Things that would make the numbers wrong, with a way to fix each.
@@ -253,10 +210,49 @@ export default function TaxReport({
               {years.map((y) => <option key={y} value={y}>{y}</option>)}
             </Select>
           </span>
-          <Button variant="secondary" onClick={() => (allowed ? downloadCsv() : onUpgrade())}>
-            Download CSV
-          </Button>
-          <Button variant="primary" onClick={() => (allowed ? window.print() : onUpgrade())}>
+          {allowed ? (
+            <Menu
+              label="Download spreadsheets"
+              trigger={({ toggle, ...aria }) => (
+                <Button
+                  variant="secondary"
+                  onClick={toggle}
+                  {...aria}
+                  iconRight={
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                  }
+                >
+                  Download
+                </Button>
+              )}
+              items={[
+                {
+                  label: "Profit and loss (CSV)",
+                  hint: "The statement, with a column for each month",
+                  onSelect: () => download("pl"),
+                },
+                {
+                  label: "Every order (CSV)",
+                  hint: `All ${report.orderCount.toLocaleString("en-US")} orders in ${year}, with totals that match`,
+                  disabled: report.orderCount === 0,
+                  onSelect: () => download("orders"),
+                },
+                {
+                  label: "Business expenses (CSV)",
+                  hint: expensesInYear ? `Every expense you entered for ${year}` : `No expenses entered for ${year}`,
+                  disabled: expensesInYear === 0,
+                  onSelect: () => download("expenses"),
+                },
+              ]}
+            />
+          ) : (
+            <Button variant="secondary" onClick={onUpgrade}>
+              Download
+            </Button>
+          )}
+          <Button variant="primary" onClick={print}>
             Print or save as PDF
           </Button>
         </div>
@@ -304,7 +300,7 @@ export default function TaxReport({
             </h4>
             <p className="mt-1 text-xs text-muted print:text-gray-600">
               {report.orderCount} order{report.orderCount === 1 ? "" : "s"}
-              {report.refundCount > 0 ? ` · ${report.refundCount} refunded` : ""} · January 1 – December 31, {year}
+              {report.refundCount > 0 ? ` · ${report.refundCount} refunded` : ""} · {periodLabel(year)}
             </p>
           </div>
 
@@ -354,6 +350,9 @@ export default function TaxReport({
         )}
       </div>
       )}
+
+      {/* Only appears when printing. */}
+      {allowed && !loading && <TaxPrintout report={report} business={storeLabel} notes={warnings.map((w) => w.text)} />}
     </div>
   );
 }

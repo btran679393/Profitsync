@@ -220,8 +220,10 @@ export default function HelpGuide({
 
         <Section id="guide-taxes" title="Taxes">
           <p>
-            A clear profit and loss summary for the whole year. Print it, save it as a PDF or download a
-            spreadsheet for your accountant. It&apos;s a guide, not tax advice: check it with a tax professional before you file.
+            A clear profit and loss summary for the whole year. <B>Print or save as PDF</B> gives you a formal statement with a
+            month-by-month table and anything to review before filing. <B>Download</B> gives your accountant spreadsheets: the
+            profit and loss by month, every order, and every business expense, with totals that match. It&apos;s a guide, not tax
+            advice: check it with a tax professional before you file.
           </p>
           <p>
             With several stores, it covers <B>all of them</B> by default, since you file one return; you can switch to one store. A{" "}
