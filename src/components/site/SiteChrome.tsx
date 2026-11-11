@@ -26,6 +26,9 @@ export function SiteHeader() {
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
         <Logo />
         <nav aria-label="Main" className="flex items-center gap-1 sm:gap-2">
+          <Link href="/demo" className="hidden rounded-lg px-3 py-2 text-sm text-muted hover:text-ink sm:inline-block">
+            Demo
+          </Link>
           <Link href="/pricing" className="hidden rounded-lg px-3 py-2 text-sm text-muted hover:text-ink sm:inline-block">
             Pricing
           </Link>

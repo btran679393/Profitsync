@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { SitePage } from "@/components/site/SiteChrome";
+import { AppStructuredData, FaqStructuredData } from "@/components/site/StructuredData";
 import PricingCards from "./PricingCards";
 
 export const metadata: Metadata = {
@@ -21,6 +22,8 @@ const PRICING_FAQ: Array<[string, string]> = [
 export default function PricingPage() {
   return (
     <SitePage>
+      <AppStructuredData />
+      <FaqStructuredData items={PRICING_FAQ} />
       <div className="mx-auto max-w-6xl px-4 py-12 text-center sm:px-6 sm:py-16">
         <h1 className="text-4xl font-bold tracking-tight text-ink sm:text-5xl">Simple pricing for eBay sellers</h1>
         <p className="mx-auto mt-4 max-w-2xl text-base text-muted">

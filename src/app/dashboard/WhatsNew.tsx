@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { Button, Notice } from "@/components/ui";
+import { inDemo } from "@/lib/demo/shim";
 
 // Bump this (and the list below) when there's something new to announce.
 const RELEASE = "2026-11-09";
@@ -9,6 +10,7 @@ const STORAGE_KEY = "profitsync:whats-new-seen";
 const EVENT = "profitsync:whats-new";
 
 function readSeen(): string | null {
+  if (inDemo()) return RELEASE; // Not shown in the demo.
   try {
     return localStorage.getItem(STORAGE_KEY);
   } catch {

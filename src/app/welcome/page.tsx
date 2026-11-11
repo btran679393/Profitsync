@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { SitePage } from "@/components/site/SiteChrome";
+import { AppStructuredData, FaqStructuredData } from "@/components/site/StructuredData";
 import { buttonClasses } from "@/components/ui";
 import { PreviewCard } from "../login/BrandPanel";
 import PricingCards from "../pricing/PricingCards";
@@ -93,6 +94,8 @@ const FAQ: Array<[string, string]> = [
 export default function WelcomePage() {
   return (
     <SitePage>
+      <AppStructuredData />
+      <FaqStructuredData items={FAQ} />
       {/* Hero */}
       <section className="relative overflow-hidden">
         <div aria-hidden="true" className="pointer-events-none absolute -right-40 -top-40 h-[480px] w-[480px] rounded-full bg-accent/20 blur-3xl" />
@@ -113,8 +116,8 @@ export default function WelcomePage() {
               <Link href="/login?mode=signup" className={buttonClasses("primary", "lg")}>
                 Start free
               </Link>
-              <Link href="#pricing" className={buttonClasses("secondary", "lg")}>
-                See pricing
+              <Link href="/demo" className={buttonClasses("secondary", "lg")}>
+                Try the live demo
               </Link>
             </div>
             <ul className="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm text-muted">
@@ -207,9 +210,14 @@ export default function WelcomePage() {
           <div className="rounded-3xl border border-accent/30 bg-gradient-to-br from-accent-soft to-surface px-6 py-12 text-center">
             <h2 className="text-3xl font-bold tracking-tight text-ink">See your real profit today</h2>
             <p className="mx-auto mt-3 max-w-lg text-base text-muted">Free for one store. Connect eBay and your numbers are ready in minutes.</p>
-            <Link href="/login?mode=signup" className={buttonClasses("primary", "lg", "mt-7")}>
-              Start free
-            </Link>
+            <div className="mt-7 flex flex-wrap justify-center gap-3">
+              <Link href="/login?mode=signup" className={buttonClasses("primary", "lg")}>
+                Start free
+              </Link>
+              <Link href="/demo" className={buttonClasses("secondary", "lg")}>
+                Try the demo first
+              </Link>
+            </div>
           </div>
         </div>
       </section>
