@@ -108,7 +108,18 @@ async function handle(url: URL, init?: RequestInit): Promise<Response> {
       allStores: false,
       canUseAllStores: true,
       maxStores: null,
-      stores: [{ id: DEMO_STORE_ID, name: DEMO_STORE_NAME, username: "demo_collectibles", active: true, locked: false, needsReconnect: false }],
+      stores: [
+        {
+          id: DEMO_STORE_ID,
+          name: DEMO_STORE_NAME,
+          username: "demo_collectibles",
+          active: true,
+          locked: false,
+          needsReconnect: false,
+          lastSyncAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+          lastFullSyncAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+        },
+      ],
     });
   }
   if (path === "/api/ebay/profile") return json({ storeName: DEMO_STORE_NAME, username: "demo_collectibles" });

@@ -12,6 +12,10 @@ export type EbayStore = {
   needsReconnect: boolean;
   // Beyond the plan's store limit: kept, but can't be opened until upgrading.
   locked?: boolean;
+  // When ProfitSync last synced this store's orders, and last re-checked
+  // the whole year (ISO dates; null before the first sync).
+  lastSyncAt?: string | null;
+  lastFullSyncAt?: string | null;
 };
 
 // Starts eBay's sign-in. eBay always asks which account to use, so this

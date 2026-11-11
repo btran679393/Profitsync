@@ -15,14 +15,23 @@ type StoreRow = {
   refreshTokenExpiresAt: string;
   storeName?: string | null;
   ebayUsername?: string | null;
+  lastOrderSyncAt?: Date | null;
+  lastFullOrderSyncAt?: Date | null;
 };
+
+const iso = (value: Date | null | undefined) => (value ? new Date(value).toISOString() : null);
 
 function newPool() {
   return getPool();
 }
 
 async function loadStores(pool: Pool, userId: string) {
-  const optional = await existingColumns(pool, "ebayConnection", ["storeName", "ebayUsername"]);
+  const optional = await existingColumns(pool, "ebayConnection", [
+    "storeName",
+    "ebayUsername",
+    "lastOrderSyncAt",
+    "lastFullOrderSyncAt",
+  ]);
   const extra = [...optional].map((c) => `, "${c}"`).join("");
   const result = await pool.query<StoreRow>(
     `
@@ -70,6 +79,9 @@ export async function GET() {
           locked: locked.has(row.ebayUserId as string),
           // eBay sign-ins last about 18 months; after that, reconnect.
           needsReconnect: new Date(row.refreshTokenExpiresAt).getTime() <= Date.now(),
+          // Shown in Settings → Syncing.
+          lastSyncAt: iso(row.lastOrderSyncAt),
+          lastFullSyncAt: iso(row.lastFullOrderSyncAt),
         })),
       },
       { headers: { "Cache-Control": "private, no-store" } }

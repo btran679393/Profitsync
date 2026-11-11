@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import AccountBadge from "./AccountBadge";
+import type { EbayStore } from "./StoreSwitcher";
+import { timeAgo } from "./shell/useShell";
 import { PLANS, type BillingStatus } from "@/lib/billing/plans";
 import type { DefaultRange, Preferences, StartPage, ThemeChoice } from "@/lib/preferences";
 
@@ -10,6 +12,7 @@ const SECTIONS: ReadonlyArray<readonly [string, string]> = [
   ["settings-appearance", "Appearance"],
   ["settings-dashboard", "Dashboard"],
   ["settings-alerts", "Listing alerts"],
+  ["settings-syncing", "Syncing"],
   ["settings-account", "Account"],
   ["settings-danger", "Delete account"],
 ];
@@ -36,6 +39,12 @@ const THEMES: Array<{ id: ThemeChoice; label: string; swatch: string }> = [ // f
   { id: "system", label: "Match my device", swatch: "linear-gradient(90deg, #0b1120 50%, #f3f5f9 50%)" },
 ];
 
+// "3 hours ago" for a saved sync date, or "Not yet".
+function syncedText(value: string | null | undefined) {
+  const time = value ? new Date(value).getTime() : NaN;
+  return Number.isNaN(time) ? "Not yet" : timeAgo(time);
+}
+
 export default function SettingsSection({
   preferences,
   onChange,
@@ -43,6 +52,10 @@ export default function SettingsSection({
   storeCount,
   onOpenPlans,
   onSignOut,
+  stores = [],
+  allStores = false,
+  syncing = false,
+  onFullSync,
 }: {
   preferences: Preferences;
   onChange: (changes: Partial<Preferences>) => Promise<void>;
@@ -50,6 +63,12 @@ export default function SettingsSection({
   storeCount: number;
   onOpenPlans: () => void;
   onSignOut: () => void;
+  // For Settings → Syncing: the stores, whether the "All stores" view is on,
+  // and a full re-check of the past year for the store(s) being viewed.
+  stores?: EbayStore[];
+  allStores?: boolean;
+  syncing?: boolean;
+  onFullSync?: () => void;
 }) {
   const [saved, setSaved] = useState("");
   const [error, setError] = useState("");
@@ -106,6 +125,9 @@ export default function SettingsSection({
   }
 
   const planName = billing?.enabled ? PLANS[billing.plan].name : "Early access";
+  // The full re-check covers the store being viewed, or every store in the
+  // "All stores" view.
+  const syncStores = stores.filter((store) => !store.locked && (allStores || store.active));
 
   return (
     <div className="lg:grid lg:grid-cols-[11rem_minmax(0,1fr)] lg:gap-8">
@@ -239,6 +261,45 @@ export default function SettingsSection({
             </label>
           </Row>
         </div>
+      </section>
+
+      {/* Syncing */}
+      <section id="settings-syncing" className={`${card} scroll-mt-24`}>
+        <h3 className="text-base font-semibold text-ink">Syncing</h3>
+        <p className="mt-1 max-w-2xl text-xs leading-5 text-subtle">
+          After the first sync, ProfitSync only brings in orders that are new or changed on eBay, so syncing is quick. Once a
+          week it also re-checks the whole past year by itself.
+        </p>
+        {syncStores.length === 0 ? (
+          <p className="mt-5 text-sm text-muted">Connect an eBay store to start syncing.</p>
+        ) : (
+          <div className="mt-5 divide-y divide-line">
+            {syncStores.map((store) => (
+              <Row
+                key={store.id}
+                title={store.name}
+                hint={`Last synced: ${syncedText(store.lastSyncAt)} · Last full re-check: ${syncedText(store.lastFullSyncAt)}`}
+              >
+                {null}
+              </Row>
+            ))}
+            <Row
+              title="Re-check the whole year"
+              hint={`Brings in the past 12 months from eBay again for ${
+                syncStores.length > 1 ? "all your stores" : syncStores[0].name
+              }. Use it if something looks off. It takes longer than a normal sync.`}
+            >
+              <button
+                type="button"
+                onClick={onFullSync}
+                disabled={!onFullSync || syncing}
+                className={`${field} font-semibold hover:border-accent/40 disabled:opacity-50`}
+              >
+                {syncing ? "Syncing…" : "Re-check now"}
+              </button>
+            </Row>
+          </div>
+        )}
       </section>
 
       {/* Account */}

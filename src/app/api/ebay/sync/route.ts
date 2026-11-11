@@ -885,27 +885,20 @@ async function readSyncState(pool: Queryable, connectionId: string | number): Pr
     return { supported: false, lastSyncAt: null, lastFullSyncAt: null };
   }
 }
-// Remember this sync. `fullHistory` false means the next sync must be full
-// (e.g. orders were held back by the plan and may be imported after an
-// upgrade).
+// Remember this sync (and, for a full sync, the full re-check).
 async function saveSyncState(
   pool: Queryable,
   connectionId: string | number,
-  window: SyncWindow,
-  fullHistory: boolean
+  window: SyncWindow
 ): Promise<void> {
   const at = window.until.toISOString();
   try {
     await pool.query(
       `UPDATE public."ebayConnection"
        SET "lastOrderSyncAt" = $2::timestamptz,
-           "lastFullOrderSyncAt" = CASE
-             WHEN NOT $4::boolean THEN NULL
-             WHEN $3::boolean THEN $2::timestamptz
-             ELSE "lastFullOrderSyncAt"
-           END
+           "lastFullOrderSyncAt" = CASE WHEN $3::boolean THEN $2::timestamptz ELSE "lastFullOrderSyncAt" END
        WHERE id = $1`,
-      [connectionId, at, window.mode === "full", fullHistory]
+      [connectionId, at, window.mode === "full"]
     );
   } catch (error) {
     if ((error as { code?: string }).code !== "42703") throw error;
@@ -1397,7 +1390,12 @@ async function syncOrders(request: Request, onProgress: (progress: SyncProgress)
     // STEP 6: Full or quick sync? (see syncWindow.ts)
     // --------------------------------------------------------
     const syncState = await readSyncState(getPool(), connection.id);
-    const forceFull = new URL(request.url).searchParams.get("full") === "1";
+    // Plans with a monthly cap or shorter history can hold orders back, so
+    // they always sync in full: an upgrade then brings those orders in.
+    const forceFull =
+      new URL(request.url).searchParams.get("full") === "1" ||
+      planLimits.monthlyOrders !== null ||
+      planLimits.historyDays < ORDER_HISTORY_DAYS;
     const window = planSyncWindow({
       now: new Date(),
       lastSyncAt: syncState.lastSyncAt,
@@ -2023,14 +2021,7 @@ async function syncOrders(request: Request, onProgress: (progress: SyncProgress)
     // ========================================================
     // SYNC COMPLETE
     // ========================================================
-    // Plans with a shorter history or a monthly cap may hold orders back;
-    // keep syncing in full so an upgrade brings them in.
-    await saveSyncState(
-      getPool(),
-      connection.id,
-      window,
-      planLimits.historyDays >= ORDER_HISTORY_DAYS && ordersOverPlanLimit === 0
-    );
+    await saveSyncState(getPool(), connection.id, window);
     const windowText =
       window.mode === "full"
         ? `from the past ${ORDER_HISTORY_DAYS} days`

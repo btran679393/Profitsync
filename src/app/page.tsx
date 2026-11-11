@@ -1025,6 +1025,8 @@ function Dashboard() {
 
       recordSync();
       await loadOrders();
+      // Refresh "Last synced" in Settings → Syncing.
+      void loadStores();
 
       // Also refresh listings (the order sync renews the eBay sign-in first).
       void syncListings(true);
@@ -1891,6 +1893,10 @@ function Dashboard() {
               storeCount={stores.length}
               onOpenPlans={goToPlans}
               onSignOut={() => void logout()}
+              stores={stores}
+              allStores={allStores}
+              syncing={syncing}
+              onFullSync={() => void syncEbayOrders({ full: true })}
             />
           )}
 
