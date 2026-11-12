@@ -68,7 +68,15 @@ type EbayOrder = {
     }>;
   };
   lineItems?: EbayLineItem[];
+  // Always returned; cancelState is CANCELED once a cancellation is done.
+  cancelStatus?: {
+    cancelState?: string;
+    cancelledDate?: string;
+  };
 };
+function isEbayCanceled(order: EbayOrder): boolean {
+  return order.cancelStatus?.cancelState === "CANCELED";
+}
 type EbayOrdersResponse = {
   total?: number;
   orders?: EbayOrder[];
@@ -141,6 +149,8 @@ type PreparedOrder = {
   creationDate: string | null;
   refund: RefundInfo | undefined;
   listing: ListingInfo;
+  // eBay says the order was cancelled.
+  canceled: boolean;
 };
 type ListingInfo = {
   // Set only when every line item in the order comes from the same
@@ -913,10 +923,12 @@ async function insertOrder(
 ): Promise<void> {
   const refundCents =
     order.refund?.amountCents ?? 0;
-  const status = getRefundStatus(
-    order.saleCents,
-    refundCents
-  );
+  const status = order.canceled
+    ? "CANCELED"
+    : getRefundStatus(
+        order.saleCents,
+        refundCents
+      );
   await client.query(
     `
       INSERT INTO public."order" (
@@ -1045,6 +1057,8 @@ async function updateExistingOrder(
         END,
         status = CASE
           WHEN $3::numeric IS NULL THEN status
+          -- A cancelled order stays cancelled.
+          WHEN status = 'CANCELED' THEN status
           WHEN (CASE WHEN $11::boolean THEN $3::numeric
                      ELSE GREATEST(COALESCE("refundAmount", 0), $3::numeric)
                 END) >= "salePrice" - 0.01 THEN 'REFUNDED'
@@ -1067,6 +1081,7 @@ async function updateExistingOrder(
                     ELSE LEAST("salePrice", GREATEST(COALESCE("refundAmount", 0), $3::numeric)) END)
             OR status IS DISTINCT FROM
               (CASE
+                WHEN status = 'CANCELED' THEN status
                 WHEN (CASE WHEN $11::boolean THEN $3::numeric
                            ELSE GREATEST(COALESCE("refundAmount", 0), $3::numeric)
                       END) >= "salePrice" - 0.01 THEN 'REFUNDED'
@@ -1582,6 +1597,7 @@ async function syncOrders(request: Request, onProgress: (progress: SyncProgress)
     let labelColumnMissing = false;
     let shippingDefaultsApplied = 0;
     let otherFeesUpdated = 0;
+    let canceledMarked = 0;
     const syncStartedAt = new Date().toISOString();
     let fullyRefunded = 0;
     let partiallyRefunded = 0;
@@ -1649,6 +1665,7 @@ async function syncOrders(request: Request, onProgress: (progress: SyncProgress)
               ebayOrder.creationDate ?? null,
             refund,
             listing: getListingInfo(ebayOrder),
+            canceled: isEbayCanceled(ebayOrder),
           };
           let transactionStarted = false;
           try {
@@ -1887,6 +1904,28 @@ async function syncOrders(request: Request, onProgress: (progress: SyncProgress)
           }
         }
         // ====================================================
+        // CANCELLED ORDERS
+        // ====================================================
+        // Orders eBay says were cancelled: not a sale and not a refund.
+        const canceledIds = ebayOrders
+          .filter((ebayOrder) => ebayOrder.orderId && isEbayCanceled(ebayOrder))
+          .map((ebayOrder) => ebayOrder.orderId);
+        if (canceledIds.length > 0) {
+          const result = await client.query(
+            `
+              UPDATE public."order"
+              SET status = 'CANCELED', "updatedAt" = NOW()
+              WHERE "userId" = $1
+                AND "ebayUserId" = $2
+                AND environment = $3
+                AND "ebayOrderId" = ANY($4::text[])
+                AND status IS DISTINCT FROM 'CANCELED'
+            `,
+            [userId, ebayUserId, environment, canceledIds]
+          );
+          canceledMarked = result.rowCount ?? 0;
+        }
+        // ====================================================
         // LINK SAVED ORDERS TO THEIR LISTINGS
         // ====================================================
         // Orders saved before ProfitSync recorded the listing ID get it
@@ -2046,6 +2085,7 @@ async function syncOrders(request: Request, onProgress: (progress: SyncProgress)
       labelColumnMissing,
       shippingDefaultsApplied,
       otherFeesUpdated,
+      canceledMarked,
       otherFeeOrdersFound: otherFeesByOrder?.size ?? null,
       fullyRefunded,
       partiallyRefunded,

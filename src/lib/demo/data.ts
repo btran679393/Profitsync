@@ -95,6 +95,15 @@ export function demoOrders(): ApiOrder[] {
     partial.status = "PARTIALLY_REFUNDED";
     partial.refundedAt = new Date(Date.parse(String(partial.orderDate)) + 5 * 86_400_000).toISOString();
   }
+  // One order the buyer cancelled before it shipped.
+  const canceled = orders.find((o) => o.status === "PAID" && o !== partial && o.productCost !== null && Date.now() - Date.parse(String(o.orderDate)) > 8 * 86_400_000);
+  if (canceled) {
+    canceled.status = "CANCELED";
+    canceled.refundAmount = canceled.salePrice;
+    canceled.refundedAt = canceled.orderDate;
+    canceled.productCost = null;
+    canceled.shippingLabelCost = 0;
+  }
   return orders;
 }
 

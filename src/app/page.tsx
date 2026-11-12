@@ -46,7 +46,7 @@ import BillingSection from "./BillingSection";
 import TaxReport, { type TaxOrder } from "./TaxReport";
 import { PLANS, type BillingStatus } from "@/lib/billing/plans";
 
-import { type ApiListing, type Order, type ApiOrder, type SyncResponse, type OrderFilter, type DateRange, money, isValidCost, formatOrders, isFullyRefunded, getRefundLoss, isPartiallyRefunded, hasRecordedCost, getShippingCost, getOrderProfit, type View, subscribeToHash, viewFromHash, VIEW_COPY, isOrderInListingRange, normalizeTitle, buildListingRows, getDateRangeStart, isOrderInDateRange, dateRangeLabel, localDateKey, startOfLocalDay, computeTotals, previousRange } from "./dashboard/model";
+import { type ApiListing, type Order, type ApiOrder, type SyncResponse, type OrderFilter, type DateRange, money, isValidCost, formatOrders, isFullyRefunded, isCanceled, getRefundLoss, isPartiallyRefunded, hasRecordedCost, getShippingCost, getOrderProfit, type View, subscribeToHash, viewFromHash, VIEW_COPY, isOrderInListingRange, normalizeTitle, buildListingRows, getDateRangeStart, isOrderInDateRange, dateRangeLabel, localDateKey, startOfLocalDay, computeTotals, previousRange } from "./dashboard/model";
 import { OrderDetailsPanel } from "./dashboard/OrderParts";
 import CommandPalette, { type PaletteAction } from "./shell/CommandPalette";
 import ShortcutsDialog from "./shell/ShortcutsDialog";
@@ -1212,6 +1212,8 @@ function Dashboard() {
       taxSourceOrders.map((order) => ({
         orderDate: order.orderDate,
         refunded: isFullyRefunded(order),
+        // Cancelled orders are left out of the tax statement entirely.
+        canceled: isCanceled(order),
         salePrice: order.salePrice,
         ebayFees: order.ebayFees,
         otherFees: order.otherFees,
@@ -1219,7 +1221,7 @@ function Dashboard() {
         productCost: hasRecordedCost(order) ? Number(order.savedProductCost) : null,
         refundLoss: getRefundLoss(order),
         // For the report's "before you file" warnings.
-        refundUnreviewed: isFullyRefunded(order) && !order.refundOutcome,
+        refundUnreviewed: isFullyRefunded(order) && !isCanceled(order) && !order.refundOutcome,
         storeName: stores.find((s) => s.id === order.ebayUserId)?.name ?? null,
         storeId: order.ebayUserId,
         // A partial refund (the buyer kept the item) comes off the sale.

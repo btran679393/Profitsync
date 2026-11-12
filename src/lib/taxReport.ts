@@ -7,6 +7,8 @@
 export type TaxOrder = {
   orderDate: string | null;
   refunded: boolean;
+  // Cancelled orders never happened: left out of the statement entirely.
+  canceled?: boolean;
   salePrice: number;
   ebayFees: number;
   otherFees: number;
@@ -145,7 +147,7 @@ export function orderAmounts(order: TaxOrder) {
 
 export function buildTaxReport(orders: TaxOrder[], expenses: TaxExpense[], year: number): TaxReportData {
   const months = MONTHS.map((_, i) => emptyMonth(i));
-  const inYear = orders.filter((order) => yearOf(order.orderDate) === year);
+  const inYear = orders.filter((order) => !order.canceled && yearOf(order.orderDate) === year);
   const kept = inYear.filter((order) => !order.refunded);
   const refunded = inYear.filter((order) => order.refunded);
 
@@ -331,7 +333,7 @@ export function profitAndLossCsv(report: TaxReportData, header: Header): string 
 // One line per order, with totals that match the statement.
 export function ordersCsv(orders: TaxOrder[], header: Header): string {
   const inYear = orders
-    .filter((order) => yearOf(order.orderDate) === header.year)
+    .filter((order) => !order.canceled && yearOf(order.orderDate) === header.year)
     .sort((a, b) => String(a.orderDate).localeCompare(String(b.orderDate)));
   const totals = { sale: 0, refund: 0, cogs: 0, ebayFees: 0, otherFees: 0, shipping: 0, refundLoss: 0, net: 0 };
   const rows = inYear.map((order) => {

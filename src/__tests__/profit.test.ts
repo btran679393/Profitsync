@@ -206,3 +206,17 @@ describe("previousRange and percentChange", () => {
     expect(percentChange(-50, -100)).toBe(50);
   });
 });
+
+describe("cancelled orders", () => {
+  it("aren't a sale, a refund or a loss", () => {
+    const o = order({ status: "CANCELED", refundAmount: 100, refundOutcome: null });
+    expect(isFullyRefunded(o)).toBe(true);
+    expect(getRefundLoss(o)).toBe(0);
+    expect(getOrderProfit(o)).toBeNull();
+    const marked = order({ status: "PARTIALLY_REFUNDED", refundAmount: 87, refundOutcome: "CANCELED", refundShippingLoss: 5 });
+    expect(getRefundLoss(marked)).toBe(0);
+    const totals = computeTotals([order(), o], []);
+    expect(totals.refundedCount).toBe(0);
+    expect(totals.orderCount).toBe(1);
+  });
+});

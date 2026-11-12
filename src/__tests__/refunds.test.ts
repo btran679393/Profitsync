@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { refundIsFull, refundIsPartial } from "@/lib/refunds";
+import { orderIsCanceled, refundIsFull, refundIsPartial } from "@/lib/refunds";
 
 const sale = { status: "PARTIALLY_REFUNDED", salePrice: 69.99, ebayFees: 10.7 };
 
@@ -25,5 +25,15 @@ describe("full or partial refund", () => {
   it("leaves orders with no refund alone", () => {
     expect(refundIsFull({ ...sale, status: "COMPLETED", refundAmount: 0 })).toBe(false);
     expect(refundIsPartial({ ...sale, status: "COMPLETED", refundAmount: 0 })).toBe(false);
+  });
+});
+
+describe("cancelled orders", () => {
+  it("are out of sales, whether eBay or the seller marked them", () => {
+    expect(orderIsCanceled({ status: "CANCELED" })).toBe(true);
+    expect(orderIsCanceled({ status: "PARTIALLY_REFUNDED", refundOutcome: "CANCELED" })).toBe(true);
+    expect(orderIsCanceled({ status: "REFUNDED", refundOutcome: "RETURNED" })).toBe(false);
+    expect(refundIsFull({ ...sale, status: "CANCELED", refundAmount: 0 })).toBe(true);
+    expect(refundIsPartial({ ...sale, status: "CANCELED", refundAmount: 10 })).toBe(false);
   });
 });

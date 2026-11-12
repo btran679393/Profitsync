@@ -10,6 +10,7 @@ import {
   getOrderProfit,
   getRefundLoss,
   hasRecordedCost,
+  isCanceled,
   isFullyRefunded,
   isPartiallyRefunded,
   isValidCost,
@@ -25,6 +26,8 @@ const PAGE_SIZES = [25, 50, 100] as const;
 // Profit for display: the draft cost while typing, the refund loss for a
 // refund (same as the old table).
 function displayProfit(order: Order): number | null {
+  // A cancelled order has no profit or loss to show.
+  if (isCanceled(order)) return null;
   if (isFullyRefunded(order)) return -getRefundLoss(order);
   if (!isValidCost(order.productCost)) return null;
   return order.salePrice - order.refundAmount - order.ebayFees - order.otherFees - getShippingCost(order) - Number(order.productCost);
@@ -314,7 +317,9 @@ export default function OrdersView({
                         )}
                       </td>
                       <td className="ps-num whitespace-nowrap px-3 py-3 text-right font-semibold">
-                        {profit === null ? (
+                        {isCanceled(order) ? (
+                          <span className="font-normal text-subtle" aria-label="Not counted">—</span>
+                        ) : profit === null ? (
                           <span className="font-normal text-subtle">Pending</span>
                         ) : (
                           <span className={profit < 0 ? "text-loss" : refunded && profit === 0 ? "text-subtle" : "text-profit"}>{money(profit === 0 ? 0 : profit)}</span>

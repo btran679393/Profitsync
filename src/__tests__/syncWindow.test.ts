@@ -107,3 +107,10 @@ describe("orderNeedsUpdate", () => {
     expect(orderNeedsUpdate(partial, { ...none, refundCents: 2500, buyerRefundConfirmed: true })).toBe(true);
   });
 });
+
+describe("cancelled orders in sync", () => {
+  it("keep their status when a refund comes in", () => {
+    const canceled = { ebayFees: "13.25", imageUrl: "x", salePrice: "100.00", refundAmount: "100.00", status: "CANCELED" };
+    expect(orderNeedsUpdate(canceled, { feeCents: undefined, imageUrl: null, refundCents: 10000, buyerRefundConfirmed: true })).toBe(false);
+  });
+});

@@ -1,6 +1,6 @@
 // Moved out of page.tsx unchanged (redesign phase 1).
 import type { ListingRange, ListingRow } from "../ListingsSection";
-import { refundIsFull, refundIsPartial } from "@/lib/refunds";
+import { orderIsCanceled, refundIsFull, refundIsPartial } from "@/lib/refunds";
 
 // ============================================================
 // TYPES
@@ -163,8 +163,15 @@ export function isFullyRefunded(order: Order) {
   return refundIsFull(order);
 }
 
+// Cancelled orders (by eBay or marked by the seller) aren't sales, refunds
+// or losses. isFullyRefunded is also true for them, so they're left out of
+// sales everywhere.
+export function isCanceled(order: Order) {
+  return orderIsCanceled(order);
+}
+
 export function getRefundLoss(order: Order) {
-  if (!isFullyRefunded(order)) return 0;
+  if (!isFullyRefunded(order) || isCanceled(order)) return 0;
   if (!order.refundOutcome) return 0; // Unreviewed refund: loss unknown.
   const productLoss = order.refundOutcome === "SHIPPED_LOST"
     ? Number(order.savedProductCost || 0) : 0;
@@ -315,6 +322,8 @@ export function buildListingRows(
   }
 
   for (const order of orders) {
+    // A cancelled order never sold.
+    if (isCanceled(order)) continue;
     // Prefer the saved listing ID; otherwise match on the exact title;
     // otherwise group past sales of the same item title together.
     const itemId = order.ebayItemId ?? listingIdByTitle.get(normalizeTitle(order.item)) ?? null;
@@ -475,7 +484,8 @@ export function startOfLocalDay(date: Date) {
 
 export function computeTotals(periodOrders: Order[], periodExpenses: Array<{ amount: string | number }>) {
   const activeOrders = periodOrders.filter((order) => !isFullyRefunded(order));
-  const refundedCount = periodOrders.length - activeOrders.length;
+  // Cancelled orders are neither sales nor refunds.
+  const refundedCount = periodOrders.filter((order) => isFullyRefunded(order) && !isCanceled(order)).length;
   const totalRevenue = activeOrders.reduce(
     (sum, order) => sum + Math.max(0, order.salePrice - order.refundAmount), 0
   );

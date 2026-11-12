@@ -78,7 +78,7 @@ export default function TaxReport({
 
   const report = useMemo(() => {
     const base = buildTaxReport(orders, expenses, year);
-    const inYear = orders.filter((order) => yearOf(order.orderDate) === year);
+    const inYear = orders.filter((order) => !order.canceled && yearOf(order.orderDate) === year);
     const kept = inYear.filter((order) => !order.refunded);
     const refunded = inYear.filter((order) => order.refunded);
     // " in vintagekitcorner" when covering several stores, so the seller

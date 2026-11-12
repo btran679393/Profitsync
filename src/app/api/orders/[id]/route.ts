@@ -61,11 +61,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   let fees: number | null = null;
   let outcome: string | null = null;
   if (refundMode) {
-    if (!["NOT_SHIPPED", "SHIPPED_LOST", "RETURNED"].includes(String(body.refundOutcome)))
+    if (!["CANCELED", "NOT_SHIPPED", "SHIPPED_LOST", "RETURNED"].includes(String(body.refundOutcome)))
       return NextResponse.json({ error: "Invalid refund outcome." }, { status: 400 });
     outcome = String(body.refundOutcome);
-    shipping = parseMoney(body.refundShippingLoss);
-    fees = parseMoney(body.refundFeeLoss);
+    // A cancelled order lost nothing.
+    shipping = outcome === "CANCELED" ? 0 : parseMoney(body.refundShippingLoss);
+    fees = outcome === "CANCELED" ? 0 : parseMoney(body.refundFeeLoss);
     if (shipping === null || fees === null) return NextResponse.json({ error: "Enter valid shipping and retained fee amounts." }, { status: 400 });
     if (outcome === "SHIPPED_LOST") cost = parseMoney(body.productCost);
     if (outcome === "SHIPPED_LOST" && cost === null) return NextResponse.json({ error: "Enter the lost product cost." }, { status: 400 });
@@ -85,7 +86,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
             "productCost" = CASE WHEN $1 = 'SHIPPED_LOST' THEN $4::numeric ELSE NULL END,
             "updatedAt" = NOW()
           WHERE id = $5 AND "userId" = $6
-            AND (status IN ('REFUNDED','PARTIALLY_REFUNDED') OR COALESCE("refundAmount",0) > 0)
+            AND (status IN ('REFUNDED','PARTIALLY_REFUNDED','CANCELED') OR COALESCE("refundAmount",0) > 0)
           RETURNING id, status, "productCost", "refundOutcome", "refundShippingLoss", "refundFeeLoss"
         `, [outcome, shipping, fees, cost, orderId, user.id])
       : await pool.query(`

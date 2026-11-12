@@ -141,6 +141,8 @@ export function orderNeedsUpdate(
       : Math.max(savedRefund ?? 0, incoming.refundCents);
     const amount = Math.min(sale, basis);
     if (savedRefund !== amount) return true;
+    // A cancelled order keeps its status.
+    if (saved.status === "CANCELED") return false;
     const status = basis >= sale - 1 ? "REFUNDED" : incoming.refundCents > 0 ? "PARTIALLY_REFUNDED" : saved.status;
     if (status !== saved.status) return true;
   }

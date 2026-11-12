@@ -13,9 +13,18 @@ export type RefundFacts = {
   salePrice: number;
   ebayFees: number;
   refundAmount: number;
+  refundOutcome?: string | null;
 };
 
-export function refundIsFull({ status, salePrice, ebayFees, refundAmount }: RefundFacts): boolean {
+// Cancelled: by eBay (status from the sync) or marked by the seller. Not a
+// sale, not a refund and no loss: left out of every total.
+export function orderIsCanceled(order: Pick<RefundFacts, "status" | "refundOutcome">): boolean {
+  return order.status === "CANCELED" || order.refundOutcome === "CANCELED";
+}
+
+export function refundIsFull({ status, salePrice, ebayFees, refundAmount, refundOutcome }: RefundFacts): boolean {
+  // A cancelled order is out of sales too (see orderIsCanceled).
+  if (orderIsCanceled({ status, refundOutcome })) return true;
   if (status === "REFUNDED") return true;
   const refund = Number(refundAmount) || 0;
   // Marked refunded by eBay but without an amount: treat it as full, as before.
@@ -31,7 +40,8 @@ export function refundIsPartial(order: RefundFacts): boolean {
 export function fullyRefundedSql(prefix = ""): string {
   const p = prefix;
   return `(
-    ${p}status = 'REFUNDED'
+    ${p}status IN ('REFUNDED', 'CANCELED')
+    OR ${p}"refundOutcome" = 'CANCELED'
     OR (${p}status = 'PARTIALLY_REFUNDED' AND COALESCE(${p}"refundAmount", 0) <= 0)
     OR (COALESCE(${p}"refundAmount", 0) > 0
         AND ${p}"refundAmount" >= ${p}"salePrice" - GREATEST(COALESCE(${p}"ebayFees", 0), 0) - ${CENT})

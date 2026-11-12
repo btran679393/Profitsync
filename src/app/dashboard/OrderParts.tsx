@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Badge, Button, Drawer, Field, MoneyInput, Select, cn, useConfirm } from "@/components/ui";
-import { type Order, money, isValidCost, isFullyRefunded, isPartiallyRefunded, getRefundLoss, getShippingCost, formatOrderDate } from "./model";
+import { type Order, money, isValidCost, isCanceled, isFullyRefunded, isPartiallyRefunded, getRefundLoss, getShippingCost, formatOrderDate } from "./model";
 import { Icon } from "./Icon";
 import { ListingImage } from "./ListingImage";
 
@@ -26,6 +26,7 @@ function SavingMark({ state }: { state: "saving" | "saved" | null }) {
 // ============================================================
 
 export function OrderStatusBadge({ order }: { order: Order }) {
+  if (isCanceled(order)) return <Badge tone="neutral">Canceled</Badge>;
   if (isFullyRefunded(order)) return <Badge tone="loss">Refunded</Badge>;
   // Partly refunded and the cost is in: the sale counts, less the refund.
   if (isPartiallyRefunded(order) && isValidCost(order.savedProductCost)) {
@@ -282,7 +283,11 @@ export function OrderDetailsPanel({
   const [refundError, setRefundError] = useState("");
   const confirm = useConfirm();
   const validMoney = (v: string) => isValidCost(v);
-  const refundValid = validMoney(shippingLoss) && validMoney(feeLoss) && (refundOutcome !== "SHIPPED_LOST" || validMoney(lostProductCost));
+  // Marked cancelled here: nothing was sent and nothing was lost.
+  const markingCanceled = refundOutcome === "CANCELED";
+  const refundValid =
+    markingCanceled ||
+    (validMoney(shippingLoss) && validMoney(feeLoss) && (refundOutcome !== "SHIPPED_LOST" || validMoney(lostProductCost)));
   async function saveRefundDetails() {
     if (!refundValid || refundSaving) return;
     setRefundSaving(true);
@@ -291,8 +296,8 @@ export function OrderDetailsPanel({
       await onSaveRefund(order.id, {
         refundOutcome,
         productCost: refundOutcome === "SHIPPED_LOST" ? Number(lostProductCost) : null,
-        refundShippingLoss: Number(shippingLoss),
-        refundFeeLoss: Number(feeLoss),
+        refundShippingLoss: markingCanceled ? 0 : Number(shippingLoss),
+        refundFeeLoss: markingCanceled ? 0 : Number(feeLoss),
       });
     } catch (error) {
       setRefundError(error instanceof Error ? error.message : "Could not save refund details.");
@@ -301,6 +306,8 @@ export function OrderDetailsPanel({
     }
   }
   const refunded = isFullyRefunded(order);
+  // eBay says it was cancelled: nothing to fill in.
+  const ebayCanceled = order.status === "CANCELED";
   const validDraft = isValidCost(order.productCost);
 
   const calculatedProfit =
@@ -323,6 +330,7 @@ export function OrderDetailsPanel({
     !(isValidCost(order.productCost) && isValidCost(order.savedProductCost) && Number(order.productCost) === Number(order.savedProductCost));
   const refundDirty =
     refunded &&
+    !ebayCanceled &&
     (refundOutcome !== (order.refundOutcome ?? "NOT_SHIPPED") ||
       shippingLoss !== String(order.refundShippingLoss) ||
       feeLoss !== String(order.refundFeeLoss) ||
@@ -401,34 +409,56 @@ export function OrderDetailsPanel({
         </div>
       </div>
 
-      {refunded && (
+      {ebayCanceled && (
+        <section className="mt-6 rounded-xl border border-line bg-surface-2 p-4">
+          <h4 className="text-sm font-semibold text-ink">This order was canceled</h4>
+          <p className="mt-1 text-xs leading-5 text-muted">
+            eBay shows it as canceled, so it isn&apos;t counted as a sale, a refund or a loss anywhere in ProfitSync, including
+            your taxes.
+          </p>
+        </section>
+      )}
+
+      {refunded && !ebayCanceled && (
         <section className="mt-6 rounded-xl border border-loss/25 bg-loss-soft p-4">
           <h4 className="text-sm font-semibold text-ink">What happened to this refund?</h4>
           <p className="mt-1 text-xs leading-5 text-muted">Any loss you record here comes off your net profit.</p>
           <div className="mt-4 space-y-3">
             <Field label="Product outcome">
               <Select value={refundOutcome} onChange={(e) => setRefundOutcome(e.target.value)}>
+                <option value="CANCELED">Order was canceled (nothing sent)</option>
                 <option value="NOT_SHIPPED">Not shipped / still in inventory</option>
                 <option value="SHIPPED_LOST">Shipped &amp; lost / not returned</option>
                 <option value="RETURNED">Product returned / recovered</option>
               </Select>
             </Field>
-            {refundOutcome === "SHIPPED_LOST" && (
+            {markingCanceled && (
+              <p className="text-xs leading-5 text-muted">
+                A canceled order isn&apos;t counted as a sale, a refund or a loss anywhere, including your taxes.
+              </p>
+            )}
+            {!markingCanceled && refundOutcome === "SHIPPED_LOST" && (
               <Field label="Lost product cost">
                 <MoneyInput value={lostProductCost} onChange={(e) => setLostProductCost(e.target.value)} placeholder="Cost of the lost product" aria-invalid={!validMoney(lostProductCost)} />
               </Field>
             )}
-            <Field label="Shipping you didn't get back">
-              <MoneyInput value={shippingLoss} onChange={(e) => setShippingLoss(e.target.value)} aria-invalid={!validMoney(shippingLoss)} />
-            </Field>
-            <Field label="eBay fees eBay kept" hint="Only fees eBay didn't credit back, so nothing counts twice.">
-              <MoneyInput value={feeLoss} onChange={(e) => setFeeLoss(e.target.value)} aria-invalid={!validMoney(feeLoss)} />
-            </Field>
+            {!markingCanceled && (
+              <>
+                <Field label="Shipping you didn't get back">
+                  <MoneyInput value={shippingLoss} onChange={(e) => setShippingLoss(e.target.value)} aria-invalid={!validMoney(shippingLoss)} />
+                </Field>
+                <Field label="eBay fees eBay kept" hint="Only fees eBay didn't credit back, so nothing counts twice.">
+                  <MoneyInput value={feeLoss} onChange={(e) => setFeeLoss(e.target.value)} aria-invalid={!validMoney(feeLoss)} />
+                </Field>
+              </>
+            )}
           </div>
-          <p className="ps-num mt-4 text-sm font-semibold text-loss">
-            Estimated refund loss:{" "}
-            {money((refundOutcome === "SHIPPED_LOST" ? Number(lostProductCost || 0) : 0) + Number(shippingLoss || 0) + Number(feeLoss || 0))}
-          </p>
+          {!markingCanceled && (
+            <p className="ps-num mt-4 text-sm font-semibold text-loss">
+              Estimated refund loss:{" "}
+              {money((refundOutcome === "SHIPPED_LOST" ? Number(lostProductCost || 0) : 0) + Number(shippingLoss || 0) + Number(feeLoss || 0))}
+            </p>
+          )}
           {refundError && <p role="alert" className="mt-2 text-xs text-loss">{refundError}</p>}
           <Button
             variant="danger"

@@ -164,3 +164,14 @@ describe("partial refunds on the statement", () => {
     expect(csv).toContain("Sold - partly refunded - product cost missing");
   });
 });
+
+describe("cancelled orders on the statement", () => {
+  it("are left out completely", () => {
+    const withCancel = [...orders, order({ canceled: true, refunded: true, salePrice: 89.99, ebayOrderId: "26-1" })];
+    const r = buildTaxReport(withCancel, expenses, 2025);
+    expect(r.orderCount).toBe(3);
+    expect(r.grossSales).toBe(230);
+    expect(r.refunds).toBe(80);
+    expect(ordersCsv(withCancel, { business: "Shop A", year: 2025, preparedOn: new Date() })).not.toContain("26-1");
+  });
+});
