@@ -37,15 +37,18 @@ export function refundIsPartial(order: RefundFacts): boolean {
 }
 
 // The same rule in SQL, for an order table alias like `o.` (or "" for none).
+// Always true or false, never NULL: an empty column (most orders have no
+// refund outcome) would otherwise make the whole check NULL, and
+// `NOT NULL` silently blocks every update that uses it.
 export function fullyRefundedSql(prefix = ""): string {
   const p = prefix;
-  return `(
-    ${p}status IN ('REFUNDED', 'CANCELED')
-    OR ${p}"refundOutcome" = 'CANCELED'
-    OR (${p}status = 'PARTIALLY_REFUNDED' AND COALESCE(${p}"refundAmount", 0) <= 0)
+  return `COALESCE((
+    COALESCE(${p}status, '') IN ('REFUNDED', 'CANCELED')
+    OR COALESCE(${p}"refundOutcome", '') = 'CANCELED'
+    OR (COALESCE(${p}status, '') = 'PARTIALLY_REFUNDED' AND COALESCE(${p}"refundAmount", 0) <= 0)
     OR (COALESCE(${p}"refundAmount", 0) > 0
-        AND ${p}"refundAmount" >= ${p}"salePrice" - GREATEST(COALESCE(${p}"ebayFees", 0), 0) - ${CENT})
-  )`;
+        AND ${p}"refundAmount" >= COALESCE(${p}"salePrice", 0) - GREATEST(COALESCE(${p}"ebayFees", 0), 0) - ${CENT})
+  ), false)`;
 }
 
 // The status an order gets once it has a product cost.

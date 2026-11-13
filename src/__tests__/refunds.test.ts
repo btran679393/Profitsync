@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { orderIsCanceled, refundIsFull, refundIsPartial } from "@/lib/refunds";
+import { fullyRefundedSql, orderIsCanceled, refundIsFull, refundIsPartial } from "@/lib/refunds";
 
 const sale = { status: "PARTIALLY_REFUNDED", salePrice: 69.99, ebayFees: 10.7 };
 
@@ -35,5 +35,19 @@ describe("cancelled orders", () => {
     expect(orderIsCanceled({ status: "REFUNDED", refundOutcome: "RETURNED" })).toBe(false);
     expect(refundIsFull({ ...sale, status: "CANCELED", refundAmount: 0 })).toBe(true);
     expect(refundIsPartial({ ...sale, status: "CANCELED", refundAmount: 10 })).toBe(false);
+  });
+});
+
+describe("the database version of the rule", () => {
+  it("is never NULL, so a missing refund outcome can't block saving a cost", () => {
+    for (const prefix of ["", "o."]) {
+      const sql = fullyRefundedSql(prefix).replace(/\s+/g, " ").trim();
+      // Wrapped so NULL becomes false: NOT NULL would silently block every update.
+      expect(sql.startsWith("COALESCE((")).toBe(true);
+      expect(sql.endsWith("), false)")).toBe(true);
+      // Columns that are often empty are compared through COALESCE.
+      expect(sql).toContain(`COALESCE(${prefix}"refundOutcome", '') = 'CANCELED'`);
+      expect(sql).not.toMatch(new RegExp(`OR ${prefix.replace(".", "\.")}"refundOutcome" =`));
+    }
   });
 });
