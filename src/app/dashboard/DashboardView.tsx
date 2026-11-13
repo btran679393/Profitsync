@@ -5,7 +5,7 @@ import { Badge, Button, Card, CardHeader, EmptyState, InfoTip, Skeleton, StatCar
 import type { ListingRow } from "../ListingsSection";
 import { Icon } from "./Icon";
 import { ListingImage } from "./ListingImage";
-import { formatOrderDate, getOrderProfit, isFullyRefunded, money, percentChange, type Order, type Totals } from "./model";
+import { formatOrderDate, getOrderProfit, isCanceled, isFullyRefunded, money, percentChange, type Order, type Totals } from "./model";
 import TrendChart, { type TrendPoint } from "./TrendChart";
 
 export type CostSlice = { label: string; amount: number; color: string };
@@ -314,6 +314,7 @@ export default function DashboardView({
           ) : (
             <ul className="px-3 pb-3 pt-2">
               {recentOrders.map((order) => {
+                const canceled = isCanceled(order);
                 const refunded = isFullyRefunded(order);
                 const profit = getOrderProfit(order);
                 return (
@@ -329,8 +330,12 @@ export default function DashboardView({
                         <span className="block text-xs text-muted">{formatOrderDate(order.orderDate)}</span>
                       </span>
                       <span className="shrink-0 text-right">
-                        <span className="ps-num block text-sm font-medium text-ink">{money(order.salePrice)}</span>
-                        {refunded ? (
+                        <span className={cn("ps-num block text-sm font-medium", canceled ? "text-subtle line-through" : "text-ink")}>
+                          {money(order.salePrice)}
+                        </span>
+                        {canceled ? (
+                          <Badge tone="neutral">Canceled</Badge>
+                        ) : refunded ? (
                           <Badge tone="loss">Refunded</Badge>
                         ) : profit === null ? (
                           <Badge tone="warn">Needs cost</Badge>

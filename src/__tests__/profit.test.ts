@@ -8,6 +8,8 @@ import {
   hasRecordedCost,
   isFullyRefunded,
   isPartiallyRefunded,
+  refundLossEstimate,
+  refundNeedsReview,
   isValidCost,
   previousRange,
   percentChange,
@@ -218,5 +220,44 @@ describe("cancelled orders", () => {
     const totals = computeTotals([order(), o], []);
     expect(totals.refundedCount).toBe(0);
     expect(totals.orderCount).toBe(1);
+  });
+});
+
+describe("return policy estimates", () => {
+  const refunded = (over: Partial<Order> = {}) =>
+    order({ status: "REFUNDED", refundAmount: 100, savedProductCost: "", productCost: "", shippingLabelCost: 8, ...over });
+
+  it("with no returns, a refund loses the item and the shipping", () => {
+    const o = refunded({ storeReturnPolicy: "none", listingCost: 40 });
+    expect(refundLossEstimate(o)).toBe(48);
+    expect(getRefundLoss(o)).toBe(48);
+    expect(refundNeedsReview(o)).toBe(false);
+  });
+
+  it("with no returns but no item cost, only shipping is counted and it still needs a look", () => {
+    const o = refunded({ storeReturnPolicy: "none", listingCost: null });
+    expect(getRefundLoss(o)).toBe(8);
+    expect(refundNeedsReview(o)).toBe(true);
+  });
+
+  it("with returns accepted, only the shipping is lost", () => {
+    expect(getRefundLoss(refunded({ storeReturnPolicy: "accepted", listingCost: 40 }))).toBe(8);
+  });
+
+  it("without a policy the loss isn't known yet", () => {
+    const o = refunded();
+    expect(getRefundLoss(o)).toBe(0);
+    expect(refundNeedsReview(o)).toBe(true);
+  });
+
+  it("what the seller recorded always wins over the policy", () => {
+    const o = refunded({ storeReturnPolicy: "none", listingCost: 40, refundOutcome: "RETURNED", refundShippingLoss: 5 });
+    expect(getRefundLoss(o)).toBe(5);
+    expect(refundNeedsReview(o)).toBe(false);
+  });
+
+  it("never applies to cancelled orders or partial refunds", () => {
+    expect(getRefundLoss(refunded({ status: "CANCELED", storeReturnPolicy: "none", listingCost: 40 }))).toBe(0);
+    expect(getRefundLoss(order({ refundAmount: 10, storeReturnPolicy: "none", listingCost: 40 }))).toBe(0);
   });
 });

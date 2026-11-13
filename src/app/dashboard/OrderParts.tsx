@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Badge, Button, Drawer, Field, MoneyInput, Select, cn, useConfirm } from "@/components/ui";
-import { type Order, money, isValidCost, isCanceled, isFullyRefunded, isPartiallyRefunded, getRefundLoss, getShippingCost, formatOrderDate } from "./model";
+import { type Order, money, isValidCost, isCanceled, isFullyRefunded, isPartiallyRefunded, getRefundLoss, getShippingCost, formatOrderDate, refundNeedsReview } from "./model";
 import { Icon } from "./Icon";
 import { ListingImage } from "./ListingImage";
 
@@ -275,10 +275,20 @@ export function OrderDetailsPanel({
   onSaveShipping: (id: number, value: string) => Promise<void>;
   onSaveRefund: (id: number, data: { refundOutcome: string; productCost: number | null; refundShippingLoss: number; refundFeeLoss: number }) => Promise<void>;
 }) {
-  const [refundOutcome, setRefundOutcome] = useState(order.refundOutcome ?? "NOT_SHIPPED");
-  const [lostProductCost, setLostProductCost] = useState(order.savedProductCost || "");
-  const [shippingLoss, setShippingLoss] = useState(String(order.refundShippingLoss));
-  const [feeLoss, setFeeLoss] = useState(String(order.refundFeeLoss));
+  // Where the refund box starts: what the seller saved, else the store's
+  // return policy (no returns: item lost; returns accepted: item back).
+  const policy = order.storeReturnPolicy ?? null;
+  const reviewed = Boolean(order.refundOutcome);
+  const start = {
+    outcome: order.refundOutcome ?? (policy === "none" ? "SHIPPED_LOST" : policy === "accepted" ? "RETURNED" : "NOT_SHIPPED"),
+    itemCost: order.savedProductCost || (!reviewed && order.listingCost != null ? order.listingCost.toFixed(2) : ""),
+    shipping: reviewed || !policy ? String(order.refundShippingLoss) : getShippingCost(order).toFixed(2),
+    fees: String(order.refundFeeLoss),
+  };
+  const [refundOutcome, setRefundOutcome] = useState(start.outcome);
+  const [lostProductCost, setLostProductCost] = useState(start.itemCost);
+  const [shippingLoss, setShippingLoss] = useState(start.shipping);
+  const [feeLoss, setFeeLoss] = useState(start.fees);
   const [refundSaving, setRefundSaving] = useState(false);
   const [refundError, setRefundError] = useState("");
   const confirm = useConfirm();
@@ -331,10 +341,10 @@ export function OrderDetailsPanel({
   const refundDirty =
     refunded &&
     !ebayCanceled &&
-    (refundOutcome !== (order.refundOutcome ?? "NOT_SHIPPED") ||
-      shippingLoss !== String(order.refundShippingLoss) ||
-      feeLoss !== String(order.refundFeeLoss) ||
-      (refundOutcome === "SHIPPED_LOST" && lostProductCost !== (order.savedProductCost || "")));
+    (refundOutcome !== start.outcome ||
+      shippingLoss !== start.shipping ||
+      feeLoss !== start.fees ||
+      (refundOutcome === "SHIPPED_LOST" && lostProductCost !== start.itemCost));
   const dirty = costDirty || refundDirty;
 
   // Closing (X, Escape or clicking outside) never silently throws work away.
@@ -423,6 +433,20 @@ export function OrderDetailsPanel({
         <section className="mt-6 rounded-xl border border-loss/25 bg-loss-soft p-4">
           <h4 className="text-sm font-semibold text-ink">What happened to this refund?</h4>
           <p className="mt-1 text-xs leading-5 text-muted">Any loss you record here comes off your net profit.</p>
+          {!reviewed && policy && (
+            <p className="mt-2 text-xs leading-5 text-ink-2">
+              Counted from your return policy (returns {policy === "none" ? "not accepted" : "accepted"}):{" "}
+              <b className="ps-num">{money(refundLoss)}</b> lost
+              {refundNeedsReview(order) ? " so far. Add what the item cost below." : "."} Save to confirm, or change it if this
+              refund was different.
+            </p>
+          )}
+          {!reviewed && !policy && (
+            <p className="mt-2 text-xs leading-5 text-ink-2">
+              Tip: set your return policy next to “Shipping per order” on the Orders page, and ProfitSync will count refund
+              losses for you.
+            </p>
+          )}
           <div className="mt-4 space-y-3">
             <Field label="Product outcome">
               <Select value={refundOutcome} onChange={(e) => setRefundOutcome(e.target.value)}>

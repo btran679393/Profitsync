@@ -48,7 +48,20 @@ export type Order = {
   refundFeeLoss: number;
   status: string;
   orderDate: string | null;
+  // The store's return policy, set by the seller (null = not set). Used to
+  // count a refund's loss before the seller reviews it.
+  storeReturnPolicy?: ReturnPolicy | null;
+  // The item's cost from its listing × quantity, when the listing has one.
+  listingCost?: number | null;
 };
+
+// "none": returns not accepted, so a refunded item doesn't come back.
+// "accepted": returns accepted, so a refunded item usually comes back.
+export type ReturnPolicy = "none" | "accepted";
+
+export function isReturnPolicy(value: unknown): value is ReturnPolicy {
+  return value === "none" || value === "accepted";
+}
 
 export type ApiOrder = {
   id: number;
@@ -172,10 +185,40 @@ export function isCanceled(order: Order) {
 
 export function getRefundLoss(order: Order) {
   if (!isFullyRefunded(order) || isCanceled(order)) return 0;
-  if (!order.refundOutcome) return 0; // Unreviewed refund: loss unknown.
+  if (!order.refundOutcome) return refundLossEstimate(order) ?? 0;
   const productLoss = order.refundOutcome === "SHIPPED_LOST"
     ? Number(order.savedProductCost || 0) : 0;
   return productLoss + order.refundShippingLoss + order.refundFeeLoss;
+}
+
+// A full refund the seller hasn't said anything about yet.
+export function isRefundUnreviewed(order: Order) {
+  return isFullyRefunded(order) && !isCanceled(order) && !order.refundOutcome;
+}
+
+// What the refunded item cost: saved on the order, else from its listing.
+export function refundItemCost(order: Order): number | null {
+  if (isValidCost(order.savedProductCost)) return Number(order.savedProductCost);
+  return order.listingCost ?? null;
+}
+
+// Until the seller reviews a refund, its loss follows the store's return
+// policy: with no returns the item is gone (its cost and the shipping are
+// lost); with returns accepted it usually comes back (only shipping is
+// lost). null = no policy set, so the loss isn't known yet.
+export function refundLossEstimate(order: Order): number | null {
+  if (!isRefundUnreviewed(order) || !order.storeReturnPolicy) return null;
+  const shipping = getShippingCost(order);
+  if (order.storeReturnPolicy === "accepted") return shipping;
+  return shipping + (refundItemCost(order) ?? 0);
+}
+
+// An unreviewed refund whose loss still isn't fully known: no return
+// policy set, or no returns but the item's cost is missing.
+export function refundNeedsReview(order: Order) {
+  if (!isRefundUnreviewed(order)) return false;
+  if (!order.storeReturnPolicy) return true;
+  return order.storeReturnPolicy === "none" && refundItemCost(order) === null;
 }
 
 // Part of the sale was refunded and the buyer kept the item: the sale still

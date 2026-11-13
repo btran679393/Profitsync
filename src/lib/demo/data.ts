@@ -95,6 +95,14 @@ export function demoOrders(): ApiOrder[] {
     partial.status = "PARTIALLY_REFUNDED";
     partial.refundedAt = new Date(Date.parse(String(partial.orderDate)) + 5 * 86_400_000).toISOString();
   }
+  // The newest refund hasn't been reviewed yet, so the return-policy
+  // estimate has something to show.
+  const unreviewed = orders.find((o) => o.status === "REFUNDED");
+  if (unreviewed) {
+    unreviewed.refundOutcome = null;
+    unreviewed.refundShippingLoss = 0;
+    unreviewed.refundFeeLoss = 0;
+  }
   // One order the buyer cancelled before it shipped.
   const canceled = orders.find((o) => o.status === "PAID" && o !== partial && o.productCost !== null && Date.now() - Date.parse(String(o.orderDate)) > 8 * 86_400_000);
   if (canceled) {

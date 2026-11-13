@@ -23,6 +23,7 @@ import { SYNC_EVENT, useLastSynced } from "./shell/useShell";
 import { describeProgress, readSyncResponse } from "@/lib/ebay/readSync";
 import ListingsSection, { LISTING_RANGES, type ListingRange } from "./ListingsSection";
 import StoreShippingSetting from "./StoreShippingSetting";
+import StoreReturnPolicySetting from "./StoreReturnPolicySetting";
 import StoreSwitcher, { type EbayStore } from "./StoreSwitcher";
 import OrderTools, { type ToolOrder } from "./OrderTools";
 import ExpensesSection, {
@@ -46,7 +47,7 @@ import BillingSection from "./BillingSection";
 import TaxReport, { type TaxOrder } from "./TaxReport";
 import { PLANS, type BillingStatus } from "@/lib/billing/plans";
 
-import { type ApiListing, type Order, type ApiOrder, type SyncResponse, type OrderFilter, type DateRange, money, isValidCost, formatOrders, isFullyRefunded, isCanceled, getRefundLoss, isPartiallyRefunded, hasRecordedCost, getShippingCost, getOrderProfit, type View, subscribeToHash, viewFromHash, VIEW_COPY, isOrderInListingRange, normalizeTitle, buildListingRows, getDateRangeStart, isOrderInDateRange, dateRangeLabel, localDateKey, startOfLocalDay, computeTotals, previousRange } from "./dashboard/model";
+import { type ApiListing, type Order, type ApiOrder, type SyncResponse, type OrderFilter, type DateRange, money, isValidCost, formatOrders, isFullyRefunded, isCanceled, refundNeedsReview, isReturnPolicy, type ReturnPolicy, getRefundLoss, isPartiallyRefunded, hasRecordedCost, getShippingCost, getOrderProfit, type View, subscribeToHash, viewFromHash, VIEW_COPY, isOrderInListingRange, normalizeTitle, buildListingRows, getDateRangeStart, isOrderInDateRange, dateRangeLabel, localDateKey, startOfLocalDay, computeTotals, previousRange } from "./dashboard/model";
 import { OrderDetailsPanel } from "./dashboard/OrderParts";
 import CommandPalette, { type PaletteAction } from "./shell/CommandPalette";
 import ShortcutsDialog from "./shell/ShortcutsDialog";
@@ -134,6 +135,9 @@ function Dashboard() {
     byStore: Record<string, number>;
     legacy: number | null;
   }>({ byStore: {}, legacy: null });
+  // Each store's return policy (user_metadata.returnPolicyByStore): decides
+  // what an unreviewed refund is counted as losing.
+  const [returnPolicies, setReturnPolicies] = useState<Record<string, ReturnPolicy>>({});
 
   const [firstName, setFirstName] = useState("");
   const [sellerName, setSellerName] = useState("");
@@ -203,6 +207,13 @@ function Dashboard() {
           }
         }
         setProfitGoals(goals);
+        const policies: Record<string, ReturnPolicy> = {};
+        if (meta.returnPolicyByStore && typeof meta.returnPolicyByStore === "object") {
+          for (const [id, policy] of Object.entries(meta.returnPolicyByStore as Record<string, unknown>)) {
+            if (isReturnPolicy(policy)) policies[id] = policy;
+          }
+        }
+        setReturnPolicies(policies);
         setShippingDefaults({
           byStore,
           legacy: meta.defaultShippingCost == null || !Number.isFinite(legacy) ? null : legacy,
@@ -479,15 +490,45 @@ function Dashboard() {
       ? shippingDefaults.byStore[activeStoreId]
       : shippingDefaults.legacy;
 
-  // Each order uses its own store's default (matters in the All stores view).
+  // Each listing's saved cost per item, for refund estimates.
+  const listingUnitCosts = useMemo(() => {
+    const costs = new Map<string, number>();
+    for (const listing of listings) {
+      if (listing.unitCost !== null && listing.unitCost !== undefined && isValidCost(String(listing.unitCost))) {
+        costs.set(listing.ebayItemId, Number(listing.unitCost));
+      }
+    }
+    return costs;
+  }, [listings]);
+
+  // Each order uses its own store's defaults (matters in the All stores view).
   const orders = useMemo(
     () =>
       rawOrders.map((order) => {
         const fromStore = order.ebayUserId ? shippingDefaults.byStore[order.ebayUserId] : undefined;
-        return { ...order, storeShipping: fromStore ?? shippingDefaults.legacy ?? 0 };
+        const unit = order.ebayItemId ? listingUnitCosts.get(order.ebayItemId) : undefined;
+        return {
+          ...order,
+          storeShipping: fromStore ?? shippingDefaults.legacy ?? 0,
+          storeReturnPolicy: order.ebayUserId ? returnPolicies[order.ebayUserId] ?? null : null,
+          listingCost: unit === undefined ? null : Math.round(unit * Math.max(1, order.quantity) * 100) / 100,
+        };
       }),
-    [rawOrders, shippingDefaults]
+    [rawOrders, shippingDefaults, returnPolicies, listingUnitCosts]
   );
+
+  // The active store's return policy (null = not set).
+  const storeReturnPolicy = activeStoreId ? returnPolicies[activeStoreId] ?? null : null;
+
+  async function saveReturnPolicy(policy: ReturnPolicy | null) {
+    if (!activeStoreId) return;
+    const next = { ...returnPolicies };
+    if (policy) next[activeStoreId] = policy;
+    else delete next[activeStoreId];
+    const { error } = await createClient().auth.updateUser({ data: { returnPolicyByStore: next } });
+    if (error) throw error;
+    setReturnPolicies(next);
+  }
 
   // Monthly profit goal per store ("all" for the All stores view), saved on
   // the ProfitSync account (user_metadata.profitGoalByStore).
@@ -1185,7 +1226,13 @@ function Dashboard() {
         if (cancelled) return;
         const withShipping = formatOrders(all).map((order) => {
           const fromStore = order.ebayUserId ? shippingDefaults.byStore[order.ebayUserId] : undefined;
-          return { ...order, storeShipping: fromStore ?? shippingDefaults.legacy ?? 0 };
+          const unit = order.ebayItemId ? listingUnitCosts.get(order.ebayItemId) : undefined;
+          return {
+            ...order,
+            storeShipping: fromStore ?? shippingDefaults.legacy ?? 0,
+            storeReturnPolicy: order.ebayUserId ? returnPolicies[order.ebayUserId] ?? null : null,
+            listingCost: unit === undefined ? null : Math.round(unit * Math.max(1, order.quantity) * 100) / 100,
+          };
         });
         setBusinessData({ orders: withShipping, expenses: expenseData.expenses ?? [] });
       } catch (error) {
@@ -1199,7 +1246,7 @@ function Dashboard() {
     };
     // Reload when returning to Taxes or when orders change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, useBusiness, rawOrders, shippingDefaults]);
+  }, [view, useBusiness, rawOrders, shippingDefaults, returnPolicies, listingUnitCosts]);
 
   const taxSourceOrders = useBusiness && businessData ? businessData.orders : orders;
   const taxExpenses = useMemo(
@@ -1221,7 +1268,7 @@ function Dashboard() {
         productCost: hasRecordedCost(order) ? Number(order.savedProductCost) : null,
         refundLoss: getRefundLoss(order),
         // For the report's "before you file" warnings.
-        refundUnreviewed: isFullyRefunded(order) && !isCanceled(order) && !order.refundOutcome,
+        refundUnreviewed: refundNeedsReview(order),
         storeName: stores.find((s) => s.id === order.ebayUserId)?.name ?? null,
         storeId: order.ebayUserId,
         // A partial refund (the buyer kept the item) comes off the sale.
@@ -1852,6 +1899,7 @@ function Dashboard() {
               tools={
                 <>
                   {!allStores && <StoreShippingSetting value={storeShipping} onSave={saveStoreShipping} />}
+                  {!allStores && <StoreReturnPolicySetting value={storeReturnPolicy} onSave={saveReturnPolicy} />}
                   <OrderTools
                     orders={toolOrders}
                     periodLabel={dateRangeLabel(dateRange)}

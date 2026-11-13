@@ -161,7 +161,7 @@ export default function TaxReport({
   if (report.unreviewed > 0) {
     warnings.push({
       key: "refunds",
-      text: `${plural(report.unreviewed, "refund", "refunds")}${report.unreviewedWhere} ${report.unreviewed === 1 ? "hasn't" : "haven't"} been reviewed, so any loss on ${report.unreviewed === 1 ? "it" : "them"} isn't counted yet.`,
+      text: `${plural(report.unreviewed, "refund", "refunds")}${report.unreviewedWhere} ${report.unreviewed === 1 ? "has" : "have"} a loss ProfitSync can't work out yet. Set your return policy on the Orders page, or review ${report.unreviewed === 1 ? "it" : "them"}.`,
       fix: onFix?.refunds && { label: "Review refunds", onClick: () => onFix.refunds?.(report.unreviewedStore) },
     });
   }
