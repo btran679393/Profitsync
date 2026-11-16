@@ -1,0 +1,2026 @@
+import { createHmac } from "crypto";
+import { getPool } from "@/lib/db/pool";
+import type { PoolClient } from "pg";
+import { NextResponse } from "next/server";
+import { db } from "@/prisma/db";
+import { pickConnection, storeAllowedByPlan, storeForSync } from "@/lib/ebay/activeStore";
+import { allowedNewOrderIds, getUserPlan, ordersPerMonth } from "@/lib/billing/server";
+import type { PlanLimits } from "@/lib/billing/plans";
+import { createClient } from "@/lib/supabase/server";
+import type { User } from "@supabase/supabase-js";
+import { existingColumns } from "@/lib/db/optionalColumns";
+import {
+  ORDER_HISTORY_DAYS,
+  financeCovers,
+  financeFilter,
+  orderNeedsUpdate,
+  planSyncWindow,
+  type SyncWindow,
+} from "@/lib/ebay/syncWindow";
+import {
+  type Money,
+  type RefundInfo,
+  type MonthlyCharge,
+  chargeNote,
+  feesByOrder as sumFeesByOrder,
+  firstFullMonth,
+  formatMoney,
+  getBuyerRefundInfo,
+  getRefundStatus,
+  monthlyUnattachedCharges,
+  netChargesByOrder,
+  parseMoney,
+  sellerSaleCents,
+} from "@/lib/ebay/money";
+
+// Listing photos for new orders are looked up one by one. On a first sync
+// of thousands of orders that alone could hit the time limit, so each run
+// looks up a limited number; the rest are filled in on the next sync.
+const IMAGE_LOOKUPS_PER_SYNC = 150;
+const IMAGE_TIME_BUDGET_MS = 60_000;
+// ============================================================
+// TYPES
+// ============================================================
+type EbayTokenResponse = {
+  access_token?: string;
+  expires_in?: number;
+  error?: string;
+  error_description?: string;
+};
+type EbayLineItem = {
+  title?: string;
+  quantity?: number;
+  legacyItemId?: string;
+  legacyVariationId?: string;
+  sku?: string;
+  image?: {
+    imageUrl?: string;
+  };
+};
+type EbayOrder = {
+  orderId: string;
+  creationDate?: string;
+  buyer?: {
+    username?: string;
+  };
+  pricingSummary?: {
+    total?: Money;
+    tax?: Money;
+  };
+  paymentSummary?: {
+    refunds?: Array<{
+      refundId?: string;
+      refundDate?: string;
+      refundAmount?: Money;
+      refundStatus?: string;
+    }>;
+  };
+  lineItems?: EbayLineItem[];
+  // Always returned; cancelState is CANCELED once a cancellation is done.
+  cancelStatus?: {
+    cancelState?: string;
+    cancelledDate?: string;
+  };
+};
+function isEbayCanceled(order: EbayOrder): boolean {
+  return order.cancelStatus?.cancelState === "CANCELED";
+}
+type EbayOrdersResponse = {
+  total?: number;
+  orders?: EbayOrder[];
+};
+type EbayTransaction = {
+  transactionId?: string;
+  orderId?: string;
+  transactionType?: string;
+  transactionDate?: string;
+  totalFeeAmount?: Money;
+  amount?: Money;
+  bookingEntry?: string;
+  feeType?: string;
+  transactionMemo?: string;
+  references?: Array<{
+    referenceId?: string;
+    referenceType?: string;
+  }>;
+};
+// Shipping label transactions don't always carry orderId at the top level;
+// eBay may list it under references instead.
+function transactionOrderId(transaction: EbayTransaction): string | undefined {
+  return (
+    transaction.orderId ||
+    transaction.references?.find((ref) => ref.referenceType === "ORDER_ID")?.referenceId ||
+    undefined
+  );
+}
+type EbayTransactionsResponse = {
+  total?: number;
+  transactions?: EbayTransaction[];
+};
+type EbayBrowseItem = {
+  image?: {
+    imageUrl?: string;
+  };
+};
+type FinancialData = {
+  feesByOrder: Map<string, number>;
+  refundsByOrder: Map<string, RefundInfo>;
+  // Net shipping label spend per order in cents (purchases minus voids).
+  // null when eBay's label records couldn't be read this time.
+  labelsByOrder: Map<string, number> | null;
+  // Other eBay charges tied to an order (e.g. promoted-listing ad fees),
+  // net of credits, in cents. null when they couldn't be read.
+  otherFeesByOrder: Map<string, number> | null;
+  // eBay charges not tied to an order, by month and kind. null when they
+  // couldn't be read.
+  unattachedCharges: MonthlyCharge[] | null;
+};
+type ExistingOrder = {
+  id: number;
+  ebayOrderId: string | null;
+  ebayBuyerId: string | null;
+  ebayFees: unknown;
+  imageUrl: string | null;
+  salePrice: unknown;
+  refundAmount: unknown;
+  status: string | null;
+  orderDate: unknown;
+};
+type PreparedOrder = {
+  orderId: string;
+  buyerId: string;
+  item: string;
+  saleCents: number;
+  feeCents: number | undefined;
+  imageUrl: string | null;
+  creationDate: string | null;
+  refund: RefundInfo | undefined;
+  listing: ListingInfo;
+  // eBay says the order was cancelled.
+  canceled: boolean;
+};
+type ListingInfo = {
+  // Set only when every line item in the order comes from the same
+  // listing, so the whole sale can be credited to that listing.
+  itemId: string | null;
+  sku: string | null;
+  quantity: number;
+};
+function getListingInfo(order: EbayOrder): ListingInfo {
+  const lineItems = order.lineItems ?? [];
+  const itemIds = new Set(
+    lineItems
+      .map((lineItem) => lineItem.legacyItemId)
+      .filter((id): id is string => Boolean(id))
+  );
+  const quantity = lineItems.reduce(
+    (sum, lineItem) => sum + Math.max(1, Number(lineItem.quantity) || 1),
+    0
+  );
+  return {
+    itemId: itemIds.size === 1 ? [...itemIds][0] : null,
+    sku: lineItems.length === 1 ? lineItems[0].sku ?? null : null,
+    quantity: Math.max(1, quantity),
+  };
+}
+// ============================================================
+// CONFIGURATION
+// ============================================================
+const ORDERS_PAGE_SIZE = 200;
+const MAX_ORDER_PAGES = 100;
+const FINANCES_PAGE_SIZE = 100;
+const MAX_FINANCES_PAGES = 100;
+// ============================================================
+function validImageUrl(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") {
+      return null;
+    }
+    const hostname = url.hostname.toLowerCase();
+    if (
+      hostname !== "ebayimg.com" &&
+      !hostname.endsWith(".ebayimg.com")
+    ) {
+      return null;
+    }
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+async function getApplicationToken(
+  ebayApiBase: string
+): Promise<string | null> {
+  const clientId = process.env.EBAY_CLIENT_ID;
+  const clientSecret = process.env.EBAY_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    return null;
+  }
+  const credentials = Buffer.from(
+    `${clientId}:${clientSecret}`
+  ).toString("base64");
+  const body = new URLSearchParams({
+    grant_type: "client_credentials",
+    scope: "https\://api.ebay.com/oauth/api_scope",
+  });
+  try {
+    const response = await fetch(
+      `${ebayApiBase}/identity/v1/oauth2/token`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/x-www-form-urlencoded",
+          Authorization: `Basic ${credentials}`,
+        },
+        body: body.toString(),
+        cache: "no-store",
+      }
+    );
+    if (!response.ok) {
+      console.error(
+        "Unable to obtain eBay application token:",
+        response.status
+      );
+      return null;
+    }
+    const data: EbayTokenResponse = await response.json();
+    return data.access_token ?? null;
+  } catch (error) {
+    console.error(
+      "Error obtaining eBay application token:",
+      error
+    );
+    return null;
+  }
+}
+async function getListingImage(
+  ebayApiBase: string,
+  applicationToken: string,
+  lineItem: EbayLineItem
+): Promise<string | null> {
+  const directImage = validImageUrl(
+    lineItem.image?.imageUrl
+  );
+  if (directImage) {
+    return directImage;
+  }
+  if (!lineItem.legacyItemId) {
+    return null;
+  }
+  const params = new URLSearchParams({
+    legacy_item_id: lineItem.legacyItemId,
+  });
+  if (lineItem.legacyVariationId) {
+    params.set(
+      "legacy_variation_id",
+      lineItem.legacyVariationId
+    );
+  } else if (lineItem.sku) {
+    params.set("legacy_variation_sku", lineItem.sku);
+  }
+  try {
+    const response = await fetch(
+      `${ebayApiBase}/buy/browse/v1/item/get_item_by_legacy_id?${params.toString()}`,
+      {
+        headers: {
+          Authorization: `Bearer ${applicationToken}`,
+          Accept: "application/json",
+          "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+        },
+        cache: "no-store",
+      }
+    );
+    if (!response.ok) {
+      console.warn(
+        "eBay listing image unavailable:",
+        lineItem.legacyItemId,
+        response.status
+      );
+      return null;
+    }
+    const item: EbayBrowseItem = await response.json();
+    return validImageUrl(item.image?.imageUrl);
+  } catch (error) {
+    console.error(
+      "Error retrieving eBay listing image:",
+      error
+    );
+    return null;
+  }
+}
+async function getOrderImage(
+  ebayApiBase: string,
+  applicationToken: string | null,
+  order: EbayOrder,
+  imageCache: Map<string, string | null>
+): Promise<string | null> {
+  for (const lineItem of order.lineItems ?? []) {
+    const directImage = validImageUrl(
+      lineItem.image?.imageUrl
+    );
+    if (directImage) {
+      return directImage;
+    }
+    if (!lineItem.legacyItemId || !applicationToken) {
+      continue;
+    }
+    const cacheKey = [
+      lineItem.legacyItemId,
+      lineItem.legacyVariationId ?? "",
+      lineItem.sku ?? "",
+    ].join(":");
+    if (imageCache.has(cacheKey)) {
+      const cached = imageCache.get(cacheKey);
+      if (cached) {
+        return cached;
+      }
+      continue;
+    }
+    const imageUrl = await getListingImage(
+      ebayApiBase,
+      applicationToken,
+      lineItem
+    );
+    imageCache.set(cacheKey, imageUrl);
+    if (imageUrl) {
+      return imageUrl;
+    }
+  }
+  return null;
+}
+// ============================================================
+// ACCOUNT DELETION PROTECTION
+// ============================================================
+function hashIdentifier(
+  identifier: string,
+  identifierType: "userId" | "username",
+  secret: string
+): string {
+  return createHmac("sha256", secret)
+    .update(`${identifierType}:${identifier}`)
+    .digest("hex");
+}
+function getIdentifierHashes(
+  identifier: string,
+  secret: string
+): string[] {
+  return [
+    hashIdentifier(identifier, "userId", secret),
+    hashIdentifier(identifier, "username", secret),
+  ];
+}
+async function lockAndCheckIdentifiers(
+  client: PoolClient,
+  environment: string,
+  identifiers: string[],
+  hashSecret: string
+): Promise<boolean> {
+  const hashes = Array.from(
+    new Set(
+      identifiers.flatMap((identifier) =>
+        getIdentifierHashes(identifier, hashSecret)
+      )
+    )
+  ).sort();
+  for (const hash of hashes) {
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtext($1))",
+      [`${environment}:${hash}`]
+    );
+  }
+  const deleted = await client.query(
+    `
+      SELECT 1
+      FROM public."ebayDeletedIdentifier"
+      WHERE environment = $1
+        AND "identifierHash" = ANY($2::text[])
+      LIMIT 1
+    `,
+    [environment, hashes]
+  );
+  return Boolean(deleted.rowCount);
+}
+async function verifyActiveConnection(
+  client: PoolClient,
+  connectionId: string | number,
+  userId: string,
+  ebayUserId: string,
+  environment: string
+): Promise<void> {
+  const active = await client.query(
+    `
+      SELECT 1
+      FROM public."ebayConnection"
+      WHERE id = $1
+        AND "userId" = $2
+        AND "ebayUserId" = $3
+        AND environment = $4
+      LIMIT 1
+    `,
+    [connectionId, userId, ebayUserId, environment]
+  );
+  if (!active.rowCount) {
+    throw new Error(
+      "eBay connection was removed during sync."
+    );
+  }
+}
+// ============================================================
+// HISTORICAL ORDER RETRIEVAL
+// ============================================================
+// A full sync asks for the past year of orders; a quick sync only for
+// orders created or changed since the last sync (see syncWindow.ts).
+async function getHistoricalOrders(
+  ebayApiBase: string,
+  accessToken: string,
+  orderFilter: string,
+  onPage: (found: number) => void = () => {}
+): Promise<EbayOrder[]> {
+  const ebayOrders: EbayOrder[] = [];
+  const seenOrderIds = new Set<string>();
+  let offset = 0;
+  let complete = false;
+  for (
+    let page = 0;
+    page < MAX_ORDER_PAGES;
+    page++
+  ) {
+    const params = new URLSearchParams({
+      filter: orderFilter,
+      limit: String(ORDERS_PAGE_SIZE),
+      offset: String(offset),
+    });
+    const response = await fetch(
+      `${ebayApiBase}/sell/fulfillment/v1/order?${params.toString()}`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json",
+        },
+        cache: "no-store",
+      }
+    );
+    if (!response.ok) {
+      const responseText = await response.text();
+      console.error(
+        "Historical eBay orders request failed:",
+        {
+          status: response.status,
+          page,
+          offset,
+          response: responseText.slice(0, 1000),
+        }
+      );
+      throw new Error(
+        `eBay historical orders request failed (HTTP ${response.status}).`
+      );
+    }
+    const data: EbayOrdersResponse =
+      await response.json();
+    const pageOrders = data.orders ?? [];
+    for (const order of pageOrders) {
+      if (
+        order.orderId &&
+        !seenOrderIds.has(order.orderId)
+      ) {
+        seenOrderIds.add(order.orderId);
+        ebayOrders.push(order);
+      }
+    }
+    offset += pageOrders.length;
+    onPage(ebayOrders.length);
+    console.log("ProfitSync order history page:", {
+      page: page + 1,
+      retrieved: pageOrders.length,
+      totalImportedFromApi: ebayOrders.length,
+      reportedTotal: data.total,
+    });
+    if (
+      pageOrders.length === 0 ||
+      pageOrders.length < ORDERS_PAGE_SIZE ||
+      (
+        typeof data.total === "number" &&
+        offset >= data.total
+      )
+    ) {
+      complete = true;
+      break;
+    }
+  }
+  if (!complete) {
+    throw new Error(
+      "Historical order pagination limit reached."
+    );
+  }
+  return ebayOrders;
+}
+// ============================================================
+// FINANCIAL TRANSACTIONS
+//
+// Retrieves:
+// 1. SALE transactions for seller fees
+// 2. REFUND transactions for refunded amounts
+//
+// Refunds are stored separately from seller fees.
+// ============================================================
+async function getFinancialTransactions(
+  ebayFinancesBase: string,
+  accessToken: string,
+  transactionType: "SALE" | "REFUND" | "SHIPPING_LABEL" | "NON_SALE_CHARGE",
+  window: SyncWindow,
+  options: { requireOrderId?: boolean } = {}
+): Promise<EbayTransaction[]> {
+  const transactions: EbayTransaction[] = [];
+  const seenTransactions = new Set<string>();
+  let offset = 0;
+  let complete = false;
+  for (
+    let page = 0;
+    page < MAX_FINANCES_PAGES;
+    page++
+  ) {
+    const params = new URLSearchParams({
+      // Only the sync window: with no date, eBay returns five years.
+      filter: financeFilter(transactionType, window),
+      limit: String(FINANCES_PAGE_SIZE),
+      offset: String(offset),
+    });
+    const response = await fetch(
+      `${ebayFinancesBase}/sell/finances/v1/transaction?${params.toString()}`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json",
+        },
+        cache: "no-store",
+      }
+    );
+    if (response.status === 204) {
+      complete = true;
+      break;
+    }
+    if (!response.ok) {
+      const responseText = await response.text();
+      console.error(
+        `eBay ${transactionType} transactions request failed:`,
+        {
+          status: response.status,
+          response: responseText.slice(0, 1000),
+        }
+      );
+      throw new Error(
+        `Unable to retrieve eBay ${transactionType} transactions (HTTP ${response.status}).`
+      );
+    }
+    const data: EbayTransactionsResponse =
+      await response.json();
+    const pageTransactions = data.transactions ?? [];
+    for (const transaction of pageTransactions) {
+      const orderId = transactionOrderId(transaction);
+      if (
+        transaction.transactionType !== transactionType ||
+        (!orderId && options.requireOrderId !== false) ||
+        !transaction.transactionId
+      ) {
+        continue;
+      }
+      transaction.orderId = orderId;
+      if (
+        seenTransactions.has(transaction.transactionId)
+      ) {
+        continue;
+      }
+      seenTransactions.add(transaction.transactionId);
+      transactions.push(transaction);
+    }
+    offset += pageTransactions.length;
+    if (
+      pageTransactions.length === 0 ||
+      pageTransactions.length < FINANCES_PAGE_SIZE ||
+      (
+        typeof data.total === "number" &&
+        offset >= data.total
+      )
+    ) {
+      complete = true;
+      break;
+    }
+  }
+  if (!complete) {
+    throw new Error(
+      `eBay ${transactionType} pagination limit reached.`
+    );
+  }
+  return transactions;
+}
+async function getFinancialData(
+  ebayFinancesBase: string,
+  accessToken: string,
+  window: SyncWindow
+): Promise<FinancialData> {
+  const refundsByOrder = new Map<string, RefundInfo>();
+  // --------------------------------------------
+  // Retrieve SALE transactions
+  // --------------------------------------------
+  const sales = await getFinancialTransactions(
+    ebayFinancesBase,
+    accessToken,
+    "SALE",
+    window
+  );
+  const feesByOrder = sumFeesByOrder(sales);
+  // --------------------------------------------
+  // Retrieve REFUND transactions
+  // --------------------------------------------
+  const refunds = await getFinancialTransactions(
+    ebayFinancesBase,
+    accessToken,
+    "REFUND",
+    window
+  );
+  for (const transaction of refunds) {
+    if (!transaction.orderId) {
+      continue;
+    }
+    const parsedAmount = parseMoney(
+      transaction.amount
+    );
+    if (parsedAmount === null) {
+      console.warn(
+        "Skipping refund with unavailable amount:",
+        transaction.transactionId
+      );
+      continue;
+    }
+    // eBay refund transactions may represent
+    // outgoing money with a negative value.
+    const refundCents = Math.abs(parsedAmount);
+    if (refundCents <= 0) {
+      continue;
+    }
+    const previous = refundsByOrder.get(
+      transaction.orderId
+    );
+    const previousAmount =
+      previous?.amountCents ?? 0;
+    let refundedAt =
+      previous?.refundedAt ?? null;
+    if (transaction.transactionDate) {
+      const date = new Date(
+        transaction.transactionDate
+      );
+      if (!Number.isNaN(date.getTime())) {
+        const currentDate = date.toISOString();
+        if (
+          !refundedAt ||
+          currentDate > refundedAt
+        ) {
+          refundedAt = currentDate;
+        }
+      }
+    }
+    refundsByOrder.set(
+      transaction.orderId,
+      {
+        amountCents:
+          previousAmount + refundCents,
+        refundedAt,
+      }
+    );
+  }
+  // --------------------------------------------
+  // Retrieve SHIPPING_LABEL transactions
+  // (labels bought through eBay; voided labels come back as credits)
+  // Never fails the sync: without them, profit just excludes labels.
+  // --------------------------------------------
+  let labelsByOrder: Map<string, number> | null = new Map();
+  let labelTransactions = 0;
+  try {
+    const labels = await getFinancialTransactions(
+      ebayFinancesBase,
+      accessToken,
+      "SHIPPING_LABEL",
+      window
+    );
+    labelTransactions = labels.length;
+    labelsByOrder = netChargesByOrder(labels);
+  } catch (error) {
+    console.error("Shipping label transactions unavailable:", error);
+    labelsByOrder = null;
+  }
+  // --------------------------------------------
+  // Retrieve NON_SALE_CHARGE transactions (other eBay charges such as
+  // promoted-listing ad fees, insertion fees, store subscriptions).
+  // Charges tied to an order are counted against that order's profit;
+  // the rest become monthly business expenses. Never fails the sync.
+  // --------------------------------------------
+  let otherFeesByOrder: Map<string, number> | null = new Map();
+  // Charges with no order (store subscription, insertion fees, ad fees
+  // billed by the day), by month: saved as automatic business expenses.
+  let unattachedCharges: MonthlyCharge[] | null = [];
+  let otherChargeTransactions = 0;
+  try {
+    const charges = await getFinancialTransactions(
+      ebayFinancesBase,
+      accessToken,
+      "NON_SALE_CHARGE",
+      window,
+      { requireOrderId: false }
+    );
+    otherChargeTransactions = charges.length;
+    otherFeesByOrder = netChargesByOrder(charges);
+    unattachedCharges = monthlyUnattachedCharges(charges, window.financeStart);
+  } catch (error) {
+    console.error("Other eBay charges unavailable:", error);
+    otherFeesByOrder = null;
+    unattachedCharges = null;
+  }
+  console.log("ProfitSync other eBay charges:", {
+    transactions: otherChargeTransactions,
+    ordersWithCharges: otherFeesByOrder?.size ?? null,
+    monthsNotTiedToAnOrder: unattachedCharges?.length ?? null,
+  });
+  console.log("ProfitSync financial data:", {
+    saleTransactions: sales.length,
+    refundTransactions: refunds.length,
+    labelTransactions,
+    ordersWithFees: feesByOrder.size,
+    ordersWithRefunds: refundsByOrder.size,
+    ordersWithLabels: labelsByOrder?.size ?? null,
+  });
+  return {
+    feesByOrder,
+    refundsByOrder,
+    labelsByOrder,
+    otherFeesByOrder,
+    unattachedCharges,
+  };
+}
+// ============================================================
+// DATABASE HELPERS
+// ============================================================
+// When this store last synced (for quick syncs). Needs
+// docs/sql/2026-11-11_quick_sync.sql; until it runs, every sync is full.
+type SyncState = {
+  supported: boolean;
+  lastSyncAt: string | null;
+  lastFullSyncAt: string | null;
+};
+type Queryable = Pick<PoolClient, "query">;
+async function readSyncState(pool: Queryable, connectionId: string | number): Promise<SyncState> {
+  try {
+    const result = await pool.query<{ lastSyncAt: Date | null; lastFullSyncAt: Date | null }>(
+      `SELECT "lastOrderSyncAt" AS "lastSyncAt", "lastFullOrderSyncAt" AS "lastFullSyncAt"
+       FROM public."ebayConnection" WHERE id = $1`,
+      [connectionId]
+    );
+    const row = result.rows[0];
+    return {
+      supported: true,
+      lastSyncAt: row?.lastSyncAt ? new Date(row.lastSyncAt).toISOString() : null,
+      lastFullSyncAt: row?.lastFullSyncAt ? new Date(row.lastFullSyncAt).toISOString() : null,
+    };
+  } catch (error) {
+    if ((error as { code?: string }).code !== "42703") throw error;
+    return { supported: false, lastSyncAt: null, lastFullSyncAt: null };
+  }
+}
+// Remember this sync (and, for a full sync, the full re-check).
+async function saveSyncState(
+  pool: Queryable,
+  connectionId: string | number,
+  window: SyncWindow
+): Promise<void> {
+  const at = window.until.toISOString();
+  try {
+    await pool.query(
+      `UPDATE public."ebayConnection"
+       SET "lastOrderSyncAt" = $2::timestamptz,
+           "lastFullOrderSyncAt" = CASE WHEN $3::boolean THEN $2::timestamptz ELSE "lastFullOrderSyncAt" END
+       WHERE id = $1`,
+      [connectionId, at, window.mode === "full"]
+    );
+  } catch (error) {
+    if ((error as { code?: string }).code !== "42703") throw error;
+  }
+}
+async function insertOrder(
+  client: PoolClient,
+  order: PreparedOrder,
+  userId: string,
+  ebayUserId: string,
+  environment: string
+): Promise<void> {
+  const refundCents =
+    order.refund?.amountCents ?? 0;
+  const status = order.canceled
+    ? "CANCELED"
+    : getRefundStatus(
+        order.saleCents,
+        refundCents
+      );
+  await client.query(
+    `
+      INSERT INTO public."order" (
+        "userId",
+        "ebayOrderId",
+        "ebayUserId",
+        "ebayBuyerId",
+        environment,
+        item,
+        "salePrice",
+        "ebayFees",
+        "productCost",
+        "imageUrl",
+        status,
+        "refundAmount",
+        "refundedAt",
+        "orderDate",
+        "updatedAt",
+        "ebayItemId",
+        sku,
+        quantity
+      )
+      VALUES (
+        $1, $2, $3, $4, $5,
+        $6, $7, $8,
+        -- Use the listing's saved cost per item, if the seller set one.
+        CASE WHEN $11::text = 'COST_NEEDED'
+          THEN COALESCE($9::numeric, (
+            SELECT l."unitCost" * $17::int
+            FROM public."EbayListing" l
+            WHERE l."userId" = $1 AND l."ebayUserId" = $3
+              AND l.environment = $5 AND l."ebayItemId" = $15::text
+              AND l."unitCost" IS NOT NULL
+            LIMIT 1
+          ))
+          ELSE $9::numeric
+        END,
+        $10,
+        CASE WHEN $11::text = 'COST_NEEDED' AND EXISTS (
+            SELECT 1 FROM public."EbayListing" l
+            WHERE l."userId" = $1 AND l."ebayUserId" = $3
+              AND l.environment = $5 AND l."ebayItemId" = $15::text
+              AND l."unitCost" IS NOT NULL
+          ) THEN 'COMPLETED' ELSE $11::text
+        END,
+        $12, $13,
+        COALESCE($14::timestamptz, NOW()),
+        NOW(),
+        $15, $16, $17
+      )
+    `,
+    [
+      userId,
+      order.orderId,
+      ebayUserId,
+      order.buyerId,
+      environment,
+      order.item,
+      formatMoney(order.saleCents),
+      order.feeCents !== undefined
+        ? formatMoney(order.feeCents)
+        : "0.00",
+      null,
+      order.imageUrl,
+      status,
+      formatMoney(refundCents),
+      order.refund?.refundedAt ?? null,
+      order.creationDate,
+      order.listing.itemId,
+      order.listing.sku,
+      order.listing.quantity,
+    ]
+  );
+}
+// Fill in which listing an already-saved order came from (orders saved
+// before ProfitSync started recording it). Never overwrites a value.
+async function backfillListingInfo(
+  client: PoolClient,
+  orderId: number,
+  userId: string,
+  listing: ListingInfo
+): Promise<boolean> {
+  if (!listing.itemId) return false;
+  const result = await client.query(
+    `
+      UPDATE public."order"
+      SET
+        "ebayItemId" = $1,
+        sku = COALESCE(sku, $2),
+        quantity = $3,
+        "updatedAt" = NOW()
+      WHERE id = $4
+        AND "userId" = $5
+        AND "ebayItemId" IS NULL
+      RETURNING id
+    `,
+    [listing.itemId, listing.sku, listing.quantity, orderId, userId]
+  );
+  return Boolean(result.rowCount);
+}
+async function updateExistingOrder(
+  client: PoolClient,
+  order: ExistingOrder,
+  userId: string,
+  ebayUserId: string,
+  environment: string,
+  feeCents: number | undefined,
+  imageUrl: string | null,
+  refund: RefundInfo | undefined,
+  buyerRefundConfirmed: boolean
+): Promise<boolean> {
+  const result = await client.query(
+    `
+      UPDATE public."order"
+      SET
+        "ebayFees" = COALESCE($1::numeric, "ebayFees"),
+        "imageUrl" = COALESCE("imageUrl", $2::text),
+        "refundAmount" = CASE
+          WHEN $3::numeric IS NULL THEN "refundAmount"
+          WHEN $11::boolean THEN LEAST("salePrice", $3::numeric)
+          ELSE LEAST("salePrice", GREATEST(COALESCE("refundAmount", 0), $3::numeric))
+        END,
+        "refundedAt" = CASE
+          WHEN $3::numeric IS NULL THEN "refundedAt"
+          ELSE COALESCE($4::timestamptz, "refundedAt")
+        END,
+        status = CASE
+          WHEN $3::numeric IS NULL THEN status
+          -- A cancelled order stays cancelled.
+          WHEN status = 'CANCELED' THEN status
+          WHEN (CASE WHEN $11::boolean THEN $3::numeric
+                     ELSE GREATEST(COALESCE("refundAmount", 0), $3::numeric)
+                END) >= "salePrice" - 0.01 THEN 'REFUNDED'
+          WHEN $3::numeric > 0 THEN 'PARTIALLY_REFUNDED'
+          ELSE status
+        END,
+        "updatedAt" = NOW()
+      WHERE id = $5
+        AND "userId" = $6
+        AND "ebayUserId" = $7
+        AND environment = $8
+        AND "ebayOrderId" = $9
+        AND "ebayBuyerId" = $10
+        AND (
+          ($1::numeric IS NOT NULL AND "ebayFees" IS DISTINCT FROM $1::numeric)
+          OR ("imageUrl" IS NULL AND $2::text IS NOT NULL)
+          OR ($3::numeric IS NOT NULL AND (
+            "refundAmount" IS DISTINCT FROM
+              (CASE WHEN $11::boolean THEN LEAST("salePrice", $3::numeric)
+                    ELSE LEAST("salePrice", GREATEST(COALESCE("refundAmount", 0), $3::numeric)) END)
+            OR status IS DISTINCT FROM
+              (CASE
+                WHEN status = 'CANCELED' THEN status
+                WHEN (CASE WHEN $11::boolean THEN $3::numeric
+                           ELSE GREATEST(COALESCE("refundAmount", 0), $3::numeric)
+                      END) >= "salePrice" - 0.01 THEN 'REFUNDED'
+                WHEN $3::numeric > 0 THEN 'PARTIALLY_REFUNDED'
+                ELSE status END)
+          ))
+        )
+      RETURNING id
+    `,
+    [
+      feeCents !== undefined ? formatMoney(feeCents) : null,
+      imageUrl,
+      refund ? formatMoney(refund.amountCents) : null,
+      refund?.refundedAt ?? null,
+      order.id,
+      userId,
+      ebayUserId,
+      environment,
+      order.ebayOrderId,
+      order.ebayBuyerId,
+      buyerRefundConfirmed,
+    ]
+  );
+  return Boolean(result.rowCount);
+}
+
+// What the seller sees while a sync runs.
+export type SyncProgress =
+  | { stage: "orders"; found: number }
+  | { stage: "fees" }
+  | { stage: "saving"; done: number; total: number };
+
+// Syncs one eBay store's orders. Normally for the signed-in seller (the
+// store comes from ?store= or the one they're viewing); the daily
+// background sync passes `as` instead, with the store in ?store=.
+// The caller holds the account's sync lock (see syncLock.ts).
+export async function syncOrders(
+  request: Request,
+  onProgress: (progress: SyncProgress) => void = () => {},
+  as?: { userId: string }
+) {
+  try {
+    // --------------------------------------------------------
+    // STEP 1: Authenticate ProfitSync user
+    // --------------------------------------------------------
+    let user: User | null = null;
+    if (!as) {
+      const supabase = await createClient();
+      const {
+        data: { user: signedIn },
+        error: authError,
+      } = await supabase.auth.getUser();
+      if (authError || !signedIn) {
+        return NextResponse.json(
+          {
+            error: "Authentication required.",
+          },
+          { status: 401 }
+        );
+      }
+      user = signedIn;
+    }
+    const userId = as ? as.userId : (user as User).id;
+    // --------------------------------------------------------
+    // STEP 2: Determine eBay environment
+    // --------------------------------------------------------
+    const environment =
+      process.env.EBAY_ENVIRONMENT === "PRODUCTION"
+        ? "PRODUCTION"
+        : "SANDBOX";
+    const ebayApiBase =
+      environment === "PRODUCTION"
+        ? "https\://api.ebay.com"
+        : "https\://api.sandbox.ebay.com";
+    const ebayFinancesBase =
+      environment === "PRODUCTION"
+        ? "https\://apiz.ebay.com"
+        : "https\://apiz.sandbox.ebay.com";
+    // --------------------------------------------------------
+    // STEP 3: Verify configuration
+    // --------------------------------------------------------
+    const hashSecret =
+      process.env.EBAY_DELETION_HASH_SECRET;
+    const databaseUrl =
+      process.env.DATABASE_URL;
+    if (!hashSecret || !databaseUrl) {
+      console.error(
+        "Missing order sync configuration."
+      );
+      return NextResponse.json(
+        {
+          error:
+            "Order sync protection unavailable.",
+        },
+        { status: 503 }
+      );
+    }
+    // --------------------------------------------------------
+    // STEP 4: Retrieve connected eBay account
+    // --------------------------------------------------------
+    const connections =
+      await db.orm.public.EbayConnection.where({
+        userId,
+        environment,
+      }).all();
+    const identifiedConnections =
+      connections.filter(
+        (connection) =>
+          Boolean(connection.ebayUserId)
+      );
+    if (identifiedConnections.length === 0) {
+      return NextResponse.json(
+        {
+          error: "No eBay account connected.",
+          message:
+            "Please connect your eBay account before syncing.",
+        },
+        { status: 401 }
+      );
+    }
+    // With several stores connected, sync the one the seller is viewing.
+    const connection =
+      pickConnection(
+        identifiedConnections,
+        user ? storeForSync(user, request) : new URL(request.url).searchParams.get("store")
+      ) ??
+      identifiedConnections[0];
+    const ebayUserId =
+      connection.ebayUserId;
+    if (!ebayUserId) {
+      return NextResponse.json(
+        {
+          error:
+            "Connected eBay account has no user ID.",
+        },
+        { status: 401 }
+      );
+    }
+    // The seller's plan: stores beyond its limit can't sync, and Free
+    // imports a limited number of orders.
+    const planPool = getPool();
+    let planLimits: PlanLimits;
+    try {
+      if (!(await storeAllowedByPlan(planPool, userId, ebayUserId))) {
+        return NextResponse.json(
+          {
+            error: "Your plan doesn't include this many stores.",
+            message: "Upgrade your plan to sync this store.",
+            upgrade: true,
+          },
+          { status: 402 }
+        );
+      }
+      planLimits = (await getUserPlan(planPool, userId)).limits;
+    } finally {
+      // The shared pool stays open for the next request.
+    }
+    let accessToken =
+      connection.accessToken;
+    // --------------------------------------------------------
+    // STEP 5: Refresh access token if expired
+    // --------------------------------------------------------
+    const accessTokenExpiresAt = new Date(
+      connection.accessTokenExpiresAt
+    ).getTime();
+    if (
+      !Number.isFinite(accessTokenExpiresAt) ||
+      accessTokenExpiresAt <= Date.now() + 60000
+    ) {
+      const refreshTokenExpiresAt = new Date(
+        connection.refreshTokenExpiresAt
+      ).getTime();
+      if (
+        !Number.isFinite(refreshTokenExpiresAt) ||
+        refreshTokenExpiresAt <= Date.now()
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "eBay refresh token expired.",
+            message:
+              "Please reconnect your eBay account.",
+            reconnect: true,
+          },
+          { status: 401 }
+        );
+      }
+      const clientId =
+        process.env.EBAY_CLIENT_ID;
+      const clientSecret =
+        process.env.EBAY_CLIENT_SECRET;
+      if (!clientId || !clientSecret) {
+        return NextResponse.json(
+          {
+            error:
+              "Missing eBay API credentials.",
+          },
+          { status: 500 }
+        );
+      }
+      const credentials = Buffer.from(
+        `${clientId}:${clientSecret}`
+      ).toString("base64");
+      const scopes = [
+        "https\://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly",
+        "https\://api.ebay.com/oauth/api_scope/commerce.identity.readonly",
+        "https\://api.ebay.com/oauth/api_scope/sell.finances",
+      ];
+      const body = new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token:
+          connection.refreshToken,
+        scope: scopes.join(" "),
+      });
+      const tokenResponse = await fetch(
+        `${ebayApiBase}/identity/v1/oauth2/token`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/x-www-form-urlencoded",
+            Authorization:
+              `Basic ${credentials}`,
+          },
+          body: body.toString(),
+          cache: "no-store",
+        }
+      );
+      const tokenData: EbayTokenResponse =
+        await tokenResponse.json();
+      if (
+        !tokenResponse.ok ||
+        !tokenData.access_token ||
+        !tokenData.expires_in
+      ) {
+        console.error(
+          "eBay token refresh failed:",
+          {
+            status: tokenResponse.status,
+            error: tokenData.error,
+            description:
+              tokenData.error_description,
+          }
+        );
+        return NextResponse.json(
+          {
+            error:
+              "Unable to refresh eBay access token.",
+            message:
+              "Please reconnect your eBay account.",
+            reconnect: true,
+          },
+          { status: 401 }
+        );
+      }
+      accessToken =
+        tokenData.access_token;
+      const newExpiration = new Date(
+        Date.now() +
+          tokenData.expires_in * 1000
+      ).toISOString();
+      await db.orm.public.EbayConnection.where({
+        id: connection.id,
+        userId,
+      }).update({
+        accessToken,
+        accessTokenExpiresAt:
+          newExpiration,
+      });
+    }
+    // --------------------------------------------------------
+    // STEP 6: Full or quick sync? (see syncWindow.ts)
+    // --------------------------------------------------------
+    const syncState = await readSyncState(getPool(), connection.id);
+    // Plans with a monthly cap or shorter history can hold orders back, so
+    // they always sync in full: an upgrade then brings those orders in.
+    const forceFull =
+      new URL(request.url).searchParams.get("full") === "1" ||
+      planLimits.monthlyOrders !== null ||
+      planLimits.historyDays < ORDER_HISTORY_DAYS;
+    const window = planSyncWindow({
+      now: new Date(),
+      lastSyncAt: syncState.lastSyncAt,
+      lastFullSyncAt: syncState.lastFullSyncAt,
+      forceFull,
+    });
+    console.log("ProfitSync sync mode:", {
+      mode: window.mode,
+      reason: window.reason,
+      syncStateSaved: syncState.supported,
+    });
+    // --------------------------------------------------------
+    // STEP 6b: Retrieve eBay orders
+    // --------------------------------------------------------
+    onProgress({ stage: "orders", found: 0 });
+    let ebayOrders =
+      await getHistoricalOrders(
+        ebayApiBase,
+        accessToken,
+        window.orderFilter,
+        (found) => onProgress({ stage: "orders", found })
+      );
+    onProgress({ stage: "fees" });
+    console.log(
+      "ProfitSync eBay orders found:",
+      ebayOrders.length
+    );
+    // --------------------------------------------------------
+    // STEP 7: Retrieve fees and refunds
+    // --------------------------------------------------------
+    const financialData =
+      await getFinancialData(
+        ebayFinancesBase,
+        accessToken,
+        window
+      );
+    const {
+      feesByOrder,
+      refundsByOrder,
+      labelsByOrder,
+      otherFeesByOrder,
+      unattachedCharges,
+    } = financialData;
+    // Order-level buyer refunds take priority over seller-side adjustments.
+    const buyerRefundsByOrder = new Map<string, RefundInfo>();
+    for (const order of ebayOrders) {
+      const refund = getBuyerRefundInfo(order);
+      if (refund) buyerRefundsByOrder.set(order.orderId, refund);
+    }
+    console.log("ProfitSync refund source summary:", {
+      ordersWithBuyerRefunds: buyerRefundsByOrder.size,
+      ordersWithFinancialRefunds: refundsByOrder.size,
+      ordersUsingFinancialFallback: Array.from(refundsByOrder.keys()).filter(
+        (orderId) => !buyerRefundsByOrder.has(orderId)
+      ).length,
+    });
+    // --------------------------------------------------------
+    // STEP 8: Retrieve existing ProfitSync orders
+    // --------------------------------------------------------
+    const existingOrders =
+      await db.orm.public.Order.where({
+        userId,
+        ebayUserId,
+        environment,
+      }).all();
+    const existingIds = new Set(
+      existingOrders
+        .map((order) => order.ebayOrderId)
+        .filter(
+          (id): id is string =>
+            id !== null
+        )
+    );
+    const existingByEbayId = new Map(
+      existingOrders
+        .filter((order) =>
+          Boolean(order.ebayOrderId)
+        )
+        .map((order) => [
+          order.ebayOrderId,
+          order,
+        ])
+    );
+    // --------------------------------------------------------
+    // STEP 8b: Plan limits on new orders (history window and,
+    // on Free, the monthly allowance). Orders already imported
+    // keep updating as usual.
+    // --------------------------------------------------------
+    // A quick sync can return an old order that eBay changed recently:
+    // new orders still only come from the past year, as with a full sync.
+    const historyCutoff = window.until.getTime() - ORDER_HISTORY_DAYS * 24 * 60 * 60 * 1000;
+    ebayOrders = ebayOrders.filter((order) => {
+      if (!order.orderId || existingIds.has(order.orderId) || !order.creationDate) return true;
+      const created = new Date(order.creationDate).getTime();
+      return Number.isNaN(created) || created >= historyCutoff;
+    });
+    let ordersOverPlanLimit = 0;
+    if (planLimits.monthlyOrders !== null || planLimits.historyDays < ORDER_HISTORY_DAYS) {
+      const newOrders = ebayOrders.filter(
+        (order): order is EbayOrder & { orderId: string } =>
+          Boolean(order.orderId) && !existingIds.has(order.orderId)
+      );
+      const countPool = getPool();
+      try {
+        const { allowed, overLimit } = allowedNewOrderIds(newOrders, await ordersPerMonth(countPool, userId), planLimits);
+        ordersOverPlanLimit = overLimit;
+        ebayOrders = ebayOrders.filter(
+          (order) => !order.orderId || existingIds.has(order.orderId) || allowed.has(order.orderId)
+        );
+      } finally {
+        // The shared pool stays open for the next request.
+      }
+    }
+    // --------------------------------------------------------
+    // STEP 9: Retrieve missing listing images
+    // --------------------------------------------------------
+    const ordersNeedingImages =
+      ebayOrders.filter((order) => {
+        const existing =
+          existingByEbayId.get(
+            order.orderId
+          );
+        return (
+          !existing ||
+          !existing.imageUrl
+        );
+      });
+    const needsApplicationToken =
+      ordersNeedingImages.some((order) =>
+        order.lineItems?.some(
+          (lineItem) =>
+            Boolean(lineItem.legacyItemId) &&
+            !validImageUrl(
+              lineItem.image?.imageUrl
+            )
+        )
+      );
+    const applicationToken =
+      needsApplicationToken
+        ? await getApplicationToken(
+            ebayApiBase
+          )
+        : null;
+    const imageCache =
+      new Map<string, string | null>();
+    const imagesByOrder =
+      new Map<string, string>();
+    const imageStartedAt = Date.now();
+    let imageLookups = 0;
+    for (const order of ordersNeedingImages) {
+      if (
+        imageLookups >= IMAGE_LOOKUPS_PER_SYNC ||
+        Date.now() - imageStartedAt > IMAGE_TIME_BUDGET_MS
+      ) {
+        break;
+      }
+      imageLookups++;
+      const imageUrl =
+        await getOrderImage(
+          ebayApiBase,
+          applicationToken,
+          order,
+          imageCache
+        );
+      if (imageUrl) {
+        imagesByOrder.set(
+          order.orderId,
+          imageUrl
+        );
+      }
+    }
+    // --------------------------------------------------------
+    // STEP 10: Prepare counters
+    // --------------------------------------------------------
+    let imported = 0;
+    let skipped = 0;
+    let feesUpdated = 0;
+    let feesUnavailable = 0;
+    let imagesImported = 0;
+    let imagesUpdated = 0;
+    let refundedImported = 0;
+    let refundsUpdated = 0;
+    let listingsLinked = 0;
+    let labelCostsUpdated = 0;
+    let labelColumnMissing = false;
+    let shippingDefaultsApplied = 0;
+    let otherFeesUpdated = 0;
+    let ebayChargesSaved = 0;
+    let canceledMarked = 0;
+    const syncStartedAt = new Date().toISOString();
+    let fullyRefunded = 0;
+    let partiallyRefunded = 0;
+    // --------------------------------------------------------
+    // STEP 11: Connect to PostgreSQL
+    // --------------------------------------------------------
+    const pool = getPool();
+    try {
+      const client =
+        await pool.connect();
+      try {
+        // ====================================================
+        // IMPORT NEW ORDERS
+        // ====================================================
+        let processed = 0;
+        for (const ebayOrder of ebayOrders) {
+          processed++;
+          if (processed % 50 === 0) onProgress({ stage: "saving", done: processed, total: ebayOrders.length });
+          if (
+            !ebayOrder.orderId ||
+            existingIds.has(ebayOrder.orderId)
+          ) {
+            skipped++;
+            continue;
+          }
+          const buyerId =
+            ebayOrder.buyer?.username?.trim();
+          if (!buyerId) {
+            skipped++;
+            continue;
+          }
+          // Sales tax eBay collects is never the seller's revenue.
+          const totalCents = sellerSaleCents(ebayOrder);
+          if (totalCents === null) {
+            skipped++;
+            continue;
+          }
+          const item =
+            ebayOrder.lineItems
+              ?.map((lineItem) =>
+                lineItem.title
+              )
+              .filter(Boolean)
+              .join(", ") ||
+            "eBay Order";
+          const feeCents =
+            feesByOrder.get(
+              ebayOrder.orderId
+            );
+          const rawRefund = buyerRefundsByOrder.get(ebayOrder.orderId) ?? refundsByOrder.get(ebayOrder.orderId);
+          const refund = rawRefund ? { ...rawRefund, amountCents: Math.min(totalCents, rawRefund.amountCents) } : undefined;
+          const imageUrl =
+            imagesByOrder.get(
+              ebayOrder.orderId
+            ) ?? null;
+          const preparedOrder: PreparedOrder = {
+            orderId: ebayOrder.orderId,
+            buyerId,
+            item,
+            saleCents: totalCents,
+            feeCents,
+            imageUrl,
+            creationDate:
+              ebayOrder.creationDate ?? null,
+            refund,
+            listing: getListingInfo(ebayOrder),
+            canceled: isEbayCanceled(ebayOrder),
+          };
+          let transactionStarted = false;
+          try {
+            await client.query("BEGIN");
+            transactionStarted = true;
+            // Respect account deletion requests.
+            const deleted =
+              await lockAndCheckIdentifiers(
+                client,
+                environment,
+                [
+                  ebayUserId,
+                  buyerId,
+                ],
+                hashSecret
+              );
+            if (deleted) {
+              await client.query("COMMIT");
+              transactionStarted = false;
+              skipped++;
+              continue;
+            }
+            await verifyActiveConnection(
+              client,
+              connection.id,
+              userId,
+              ebayUserId,
+              environment
+            );
+            // Prevent duplicate imports.
+            const duplicate =
+              await client.query(
+                `
+                  SELECT 1
+                  FROM public."order"
+                  WHERE "userId" = $1
+                    AND "ebayUserId" = $2
+                    AND environment = $3
+                    AND "ebayOrderId" = $4
+                  LIMIT 1
+                `,
+                [
+                  userId,
+                  ebayUserId,
+                  environment,
+                  ebayOrder.orderId,
+                ]
+              );
+            if (duplicate.rowCount) {
+              await client.query("COMMIT");
+              transactionStarted = false;
+              existingIds.add(
+                ebayOrder.orderId
+              );
+              skipped++;
+              continue;
+            }
+            // Insert order and refund information.
+            await insertOrder(
+              client,
+              preparedOrder,
+              userId,
+              ebayUserId,
+              environment
+            );
+            await client.query("COMMIT");
+            transactionStarted = false;
+            existingIds.add(
+              ebayOrder.orderId
+            );
+            imported++;
+            if (imageUrl) {
+              imagesImported++;
+            }
+            if (feeCents === undefined) {
+              feesUnavailable++;
+            }
+            if (refund && refund.amountCents > 0) {
+              refundedImported++;
+              const status = getRefundStatus(
+                totalCents,
+                refund.amountCents
+              );
+              if (status === "REFUNDED") {
+                fullyRefunded++;
+              } else {
+                partiallyRefunded++;
+              }
+            }
+          } catch (error) {
+            if (transactionStarted) {
+              try {
+                await client.query("ROLLBACK");
+              } catch (rollbackError) {
+                console.error(
+                  "Order import rollback failed:",
+                  rollbackError
+                );
+              }
+            }
+            throw error;
+          }
+        }
+        // ====================================================
+        // UPDATE EXISTING ORDERS
+        //
+        // Preserve:
+        // - Saved product costs
+        // - Original sale prices
+        // - Order dates
+        //
+        // Update:
+        // - Seller fees
+        // - Missing images
+        // - Refund amounts
+        // - Refund dates
+        // - Refund statuses
+        // ====================================================
+        for (const order of existingOrders) {
+          if (!order.ebayOrderId) {
+            continue;
+          }
+          // eBay money records are only complete for orders created inside
+          // the downloaded window; older orders keep their saved amounts.
+          const financeComplete = financeCovers(order.orderDate, window.financeStart);
+          const feeCents = financeComplete
+            ? feesByOrder.get(order.ebayOrderId)
+            : undefined;
+          const imageUrl =
+            imagesByOrder.get(
+              order.ebayOrderId
+            ) ?? null;
+          const refund =
+            buyerRefundsByOrder.get(order.ebayOrderId) ??
+            (financeComplete ? refundsByOrder.get(order.ebayOrderId) : undefined);
+          if (
+            feeCents === undefined &&
+            !imageUrl &&
+            !refund
+          ) {
+            if (financeComplete) feesUnavailable++;
+            continue;
+          }
+          // Nothing new for this order: skip the database round trip.
+          if (
+            !orderNeedsUpdate(order, {
+              feeCents,
+              imageUrl,
+              refundCents: refund?.amountCents,
+              buyerRefundConfirmed: buyerRefundsByOrder.has(order.ebayOrderId),
+            })
+          ) {
+            continue;
+          }
+          if (!order.ebayBuyerId) {
+            skipped++;
+            continue;
+          }
+          let transactionStarted = false;
+          try {
+            await client.query("BEGIN");
+            transactionStarted = true;
+            const deleted =
+              await lockAndCheckIdentifiers(
+                client,
+                environment,
+                [
+                  ebayUserId,
+                  order.ebayBuyerId,
+                ],
+                hashSecret
+              );
+            if (deleted) {
+              await client.query("COMMIT");
+              transactionStarted = false;
+              skipped++;
+              continue;
+            }
+            await verifyActiveConnection(
+              client,
+              connection.id,
+              userId,
+              ebayUserId,
+              environment
+            );
+            const updated =
+              await updateExistingOrder(
+                client,
+                order,
+                userId,
+                ebayUserId,
+                environment,
+                feeCents,
+                imageUrl,
+                refund,
+                buyerRefundsByOrder.has(order.ebayOrderId)
+              );
+            await client.query("COMMIT");
+            transactionStarted = false;
+            if (updated) {
+              if (
+                feeCents !== undefined &&
+                Number(order.ebayFees) !==
+                  feeCents / 100
+              ) {
+                feesUpdated++;
+              }
+              if (
+                imageUrl &&
+                !order.imageUrl
+              ) {
+                imagesUpdated++;
+              }
+              if (
+                refund &&
+                refund.amountCents > 0
+              ) {
+                refundsUpdated++;
+              }
+            }
+            if (feeCents === undefined) {
+              feesUnavailable++;
+            }
+          } catch (error) {
+            if (transactionStarted) {
+              try {
+                await client.query("ROLLBACK");
+              } catch (rollbackError) {
+                console.error(
+                  "Order update rollback failed:",
+                  rollbackError
+                );
+              }
+            }
+            throw error;
+          }
+        }
+        // ====================================================
+        // CANCELLED ORDERS
+        // ====================================================
+        // Orders eBay says were cancelled: not a sale and not a refund.
+        const canceledIds = ebayOrders
+          .filter((ebayOrder) => ebayOrder.orderId && isEbayCanceled(ebayOrder))
+          .map((ebayOrder) => ebayOrder.orderId);
+        if (canceledIds.length > 0) {
+          const result = await client.query(
+            `
+              UPDATE public."order"
+              SET status = 'CANCELED', "updatedAt" = NOW()
+              WHERE "userId" = $1
+                AND "ebayUserId" = $2
+                AND environment = $3
+                AND "ebayOrderId" = ANY($4::text[])
+                AND status IS DISTINCT FROM 'CANCELED'
+            `,
+            [userId, ebayUserId, environment, canceledIds]
+          );
+          canceledMarked = result.rowCount ?? 0;
+        }
+        // ====================================================
+        // LINK SAVED ORDERS TO THEIR LISTINGS
+        // ====================================================
+        // Orders saved before ProfitSync recorded the listing ID get it
+        // filled in here so the Listings page can group them correctly.
+        const ebayOrdersById = new Map(
+          ebayOrders.map((ebayOrder) => [ebayOrder.orderId, ebayOrder])
+        );
+        const unlinked = await client.query<{ id: number; ebayOrderId: string }>(
+          `
+            SELECT id, "ebayOrderId"
+            FROM public."order"
+            WHERE "userId" = $1
+              AND "ebayUserId" = $2
+              AND environment = $3
+              AND "ebayOrderId" IS NOT NULL
+              AND "ebayItemId" IS NULL
+          `,
+          [userId, ebayUserId, environment]
+        );
+        for (const order of unlinked.rows) {
+          const ebayOrder = ebayOrdersById.get(order.ebayOrderId);
+          if (!ebayOrder) continue;
+          if (
+            await backfillListingInfo(
+              client,
+              order.id,
+              userId,
+              getListingInfo(ebayOrder)
+            )
+          ) {
+            listingsLinked++;
+          }
+        }
+        // ====================================================
+        // SHIPPING LABEL COSTS
+        // ====================================================
+        // Save each order's net label spend. Needs the optional
+        // "shippingLabelCost" column (docs/sql/2026-11-07_shipping_label_cost.sql);
+        // skipped quietly until it exists.
+        if (labelsByOrder && labelsByOrder.size > 0) {
+          const orderIds = [...labelsByOrder.keys()];
+          const costs = orderIds.map((id) =>
+            formatMoney(Math.max(0, labelsByOrder.get(id) ?? 0))
+          );
+          try {
+            const result = await client.query(
+              `
+                UPDATE public."order" o
+                SET "shippingLabelCost" = v.cost,
+                    "updatedAt" = NOW()
+                FROM unnest($1::text[], $2::numeric[]) AS v(order_id, cost)
+                WHERE o."ebayOrderId" = v.order_id
+                  AND o."userId" = $3
+                  AND o."ebayUserId" = $4
+                  AND o.environment = $5
+                  AND o."shippingLabelCost" IS DISTINCT FROM v.cost
+                  -- Only orders whose label records were all downloaded.
+                  AND o."orderDate" >= $6::timestamptz
+              `,
+              [orderIds, costs, userId, ebayUserId, environment, window.financeStart.toISOString()]
+            );
+            labelCostsUpdated = result.rowCount ?? 0;
+          } catch (error) {
+            if ((error as { code?: string }).code !== "42703") throw error;
+            labelColumnMissing = true;
+          }
+        }
+        // ====================================================
+        // OTHER EBAY CHARGES PER ORDER (ad fees etc.)
+        // ====================================================
+        // Needs docs/sql/2026-11-07_other_ebay_fees.sql; skipped until then.
+        if (otherFeesByOrder && otherFeesByOrder.size > 0) {
+          const orderIds = [...otherFeesByOrder.keys()];
+          const amounts = orderIds.map((id) =>
+            formatMoney(Math.max(0, otherFeesByOrder.get(id) ?? 0))
+          );
+          try {
+            const result = await client.query(
+              `
+                UPDATE public."order" o
+                SET "otherFees" = v.amount, "updatedAt" = NOW()
+                FROM unnest($1::text[], $2::numeric[]) AS v(order_id, amount)
+                WHERE o."ebayOrderId" = v.order_id
+                  AND o."userId" = $3
+                  AND o."ebayUserId" = $4
+                  AND o.environment = $5
+                  AND o."otherFees" IS DISTINCT FROM v.amount
+                  AND o."orderDate" >= $6::timestamptz
+              `,
+              [orderIds, amounts, userId, ebayUserId, environment, window.financeStart.toISOString()]
+            );
+            otherFeesUpdated = result.rowCount ?? 0;
+          } catch (error) {
+            if ((error as { code?: string }).code !== "42703") throw error;
+          }
+        }
+        // ====================================================
+        // EBAY CHARGES NOT TIED TO AN ORDER -> EXPENSES
+        // ====================================================
+        // Store subscription, insertion fees and ad fees billed by the day
+        // are business costs too. One expense row per store, month and
+        // kind, kept up to date on every sync (and removed if eBay credits
+        // it all back). Needs docs/sql/2026-11-16_ebay_charge_expenses.sql;
+        // skipped until then.
+        if (unattachedCharges) try {
+          const columns = await existingColumns(client, "expense", ["ebayChargeKey"]);
+          if (columns.has("ebayChargeKey")) {
+            const kept = unattachedCharges.filter((charge) => charge.cents > 0);
+            if (kept.length > 0) {
+              const result = await client.query(
+                `
+                  INSERT INTO public."expense"
+                    ("userId", "ebayUserId", "spentOn", category, amount, note, "ebayChargeKey")
+                  SELECT $1, $2, (v.month || '-01')::date, v.category, v.amount, v.note, v.key
+                  FROM unnest($3::text[], $4::text[], $5::text[], $6::numeric[], $7::text[])
+                    AS v(key, month, category, amount, note)
+                  ON CONFLICT ("userId", "ebayUserId", "ebayChargeKey") WHERE "ebayChargeKey" IS NOT NULL
+                  DO UPDATE SET amount = EXCLUDED.amount, note = EXCLUDED.note, category = EXCLUDED.category
+                  WHERE public."expense".amount IS DISTINCT FROM EXCLUDED.amount
+                     OR public."expense".note IS DISTINCT FROM EXCLUDED.note
+                `,
+                [
+                  userId,
+                  ebayUserId,
+                  kept.map((charge) => charge.key),
+                  kept.map((charge) => charge.month),
+                  kept.map((charge) => charge.category),
+                  kept.map((charge) => formatMoney(charge.cents)),
+                  kept.map((charge) => chargeNote(charge.count)),
+                ]
+              );
+              ebayChargesSaved = result.rowCount ?? 0;
+            }
+            // Months that were fully downloaded but no longer have a charge.
+            await client.query(
+              `
+                DELETE FROM public."expense"
+                WHERE "userId" = $1
+                  AND "ebayUserId" = $2
+                  AND "ebayChargeKey" IS NOT NULL
+                  AND "spentOn" >= ($3 || '-01')::date
+                  AND NOT ("ebayChargeKey" = ANY($4::text[]))
+              `,
+              [userId, ebayUserId, firstFullMonth(window.financeStart), kept.map((charge) => charge.key)]
+            );
+          }
+        } catch (error) {
+          // Never fails the sync: the orders are already saved.
+          console.error("Saving eBay charges as expenses failed:", error);
+        }
+        // ====================================================
+        // DEFAULT SHIPPING FROM LISTINGS (new orders only)
+        // ====================================================
+        // Needs docs/sql/2026-11-07_shipping_cost.sql; skipped until then.
+        if (imported > 0) {
+          try {
+            const result = await client.query(
+              `
+                UPDATE public."order" o
+                SET "shippingCost" = l."shippingCost", "updatedAt" = NOW()
+                FROM public."EbayListing" l
+                WHERE o."userId" = $1
+                  AND o."ebayUserId" = $2
+                  AND o.environment = $3
+                  AND o."createdAt" >= $4::timestamptz
+                  AND o."shippingCost" IS NULL
+                  AND l."userId" = o."userId"
+                  AND l."ebayUserId" = o."ebayUserId"
+                  AND l.environment = o.environment
+                  AND l."ebayItemId" = o."ebayItemId"
+                  AND l."shippingCost" IS NOT NULL
+              `,
+              [userId, ebayUserId, environment, syncStartedAt]
+            );
+            shippingDefaultsApplied = result.rowCount ?? 0;
+          } catch (error) {
+            if ((error as { code?: string }).code !== "42703") throw error;
+          }
+        }
+      } finally {
+        client.release();
+      }
+    } finally {
+      // The shared pool stays open for the next request.
+    }
+    // ========================================================
+    // SYNC COMPLETE
+    // ========================================================
+    await saveSyncState(getPool(), connection.id, window);
+    const windowText =
+      window.mode === "full"
+        ? `from the past ${ORDER_HISTORY_DAYS} days`
+        : "created or changed since your last sync";
+    return NextResponse.json({
+      success: true,
+      environment,
+      mode: window.mode,
+      historyDays: ORDER_HISTORY_DAYS,
+      found: ebayOrders.length,
+      imported,
+      skipped,
+      feesUpdated,
+      feesUnavailable,
+      imagesImported,
+      imagesUpdated,
+      refundedImported,
+      refundsUpdated,
+      listingsLinked,
+      labelCostsUpdated,
+      labelOrdersFound: labelsByOrder?.size ?? null,
+      labelColumnMissing,
+      shippingDefaultsApplied,
+      otherFeesUpdated,
+      ebayChargesSaved,
+      canceledMarked,
+      otherFeeOrdersFound: otherFeesByOrder?.size ?? null,
+      fullyRefunded,
+      partiallyRefunded,
+      ordersOverPlanLimit,
+      monthlyOrderLimit: planLimits.monthlyOrders,
+      financialOrdersMatched:
+        feesByOrder.size,
+      refundedOrdersMatched:
+        refundsByOrder.size,
+      message:
+        `Found ${ebayOrders.length} eBay orders ` +
+        `${windowText}. ` +
+        `Imported ${imported} new orders. ` +
+        `Updated fees on ${feesUpdated} existing orders. ` +
+        `Added ${imagesImported + imagesUpdated} listing images. ` +
+        `Imported ${refundedImported} orders with refunds. ` +
+        `Updated ${refundsUpdated} existing orders with refund information.`,
+    });
+  } catch (error) {
+    console.error(
+      "Failed to sync eBay orders:",
+      error
+    );
+    return NextResponse.json(
+      {
+        error:
+          "Something went wrong syncing eBay orders.",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unknown synchronization error.",
+      },
+      { status: 500 }
+    );
+  }
+}
