@@ -26,6 +26,7 @@ import StoreShippingSetting from "./StoreShippingSetting";
 import StoreReturnPolicySetting from "./StoreReturnPolicySetting";
 import StoreSwitcher, { type EbayStore } from "./StoreSwitcher";
 import OrderTools, { type ToolOrder } from "./OrderTools";
+import InventorySection from "./InventorySection";
 import ExpensesSection, {
   todayKey,
   type Expense,
@@ -2033,6 +2034,20 @@ function Dashboard() {
               onSaveStoreShipping={saveStoreShipping}
               canSetStoreShipping={!allStores}
               staleAfterDays={preferences.staleAfterDays}
+            />
+          )}
+
+          {view === "inventory" && (
+            <InventorySection
+              // Reload when switching stores.
+              key={allStores ? "all" : activeStore?.id ?? "none"}
+              orders={orders}
+              listings={listings}
+              staleAfterDays={preferences.staleAfterDays}
+              onCostsApplied={() => {
+                void loadOrders();
+                void loadListings();
+              }}
             />
           )}
 

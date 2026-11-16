@@ -266,7 +266,7 @@ export function getOrderProfit(order: Order) {
 // so Back, refresh and shared links open the same view.
 // ============================================================
 
-export type View = "dashboard" | "orders" | "listings" | "expenses" | "taxes" | "billing" | "settings" | "help";
+export type View = "dashboard" | "orders" | "listings" | "inventory" | "expenses" | "taxes" | "billing" | "settings" | "help";
 
 export function subscribeToHash(onChange: () => void) {
   window.addEventListener("hashchange", onChange);
@@ -276,6 +276,7 @@ export function subscribeToHash(onChange: () => void) {
 export function viewFromHash(hash: string): View {
   if (hash === "#orders") return "orders";
   if (hash === "#listings") return "listings";
+  if (hash === "#inventory") return "inventory";
   if (hash === "#expenses") return "expenses";
   if (hash === "#taxes") return "taxes";
   if (hash === "#billing") return "billing";
@@ -296,6 +297,10 @@ export const VIEW_COPY: Record<View, { title: string; subtitle: string }> = {
   listings: {
     title: "Listings",
     subtitle: "See how every listing is selling and what it earns.",
+  },
+  inventory: {
+    title: "Inventory",
+    subtitle: "What you bought, what's left, how fast it sells and which purchases paid off.",
   },
   expenses: {
     title: "Expenses",

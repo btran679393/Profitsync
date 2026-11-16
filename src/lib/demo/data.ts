@@ -3,6 +3,7 @@
 
 import type { ApiListing, ApiOrder } from "@/app/dashboard/model";
 import type { Expense } from "@/app/ExpensesSection";
+import type { InventoryItem, Purchase } from "@/lib/inventory";
 
 export const DEMO_STORE_ID = "demo-store";
 export const DEMO_STORE_NAME = "Demo Collectibles";
@@ -138,4 +139,28 @@ export function demoExpenses(): Expense[] {
     { id: 3, ebayUserId: DEMO_STORE_ID, spentOn: day(12), category: "Sourcing & travel", amount: "35.00", note: "Weekend estate sale gas", repeatMonthly: false, endedOn: null },
     { id: 4, ebayUserId: null, spentOn: day(55), category: "Software & tools", amount: "9.99", note: "Photo editing app", repeatMonthly: true, endedOn: null },
   ];
+}
+
+// A few sourcing trips, so the Inventory page has something to show. Items
+// are linked to the demo listings; their sales come from demoOrders().
+export function demoInventory(): { purchases: Purchase[]; items: InventoryItem[] } {
+  const day = (daysAgo: number) => iso(daysAgo, 12).slice(0, 10);
+  const purchases: Purchase[] = [
+    { id: 1, ebayUserId: DEMO_STORE_ID, purchasedOn: day(100), source: "Estate sale on Maple St", note: "Camera, LEGO and jeans", },
+    { id: 2, ebayUserId: DEMO_STORE_ID, purchasedOn: day(96), source: "Card show", note: null },
+    { id: 3, ebayUserId: DEMO_STORE_ID, purchasedOn: day(70), source: "Goodwill Outlet", note: "Half-price day" },
+    { id: 4, ebayUserId: DEMO_STORE_ID, purchasedOn: day(9), source: "Facebook Marketplace lot", note: null },
+  ];
+  const items: InventoryItem[] = [
+    { id: 1, purchaseId: 1, name: "Canon AE-1 with 50mm lens", quantity: 4, unitCost: 72, ebayItemId: "394011" },
+    { id: 2, purchaseId: 1, name: "LEGO Millennium Falcon 75257", quantity: 5, unitCost: 61, ebayItemId: "394014" },
+    { id: 3, purchaseId: 1, name: "Levi's 501 jeans", quantity: 12, unitCost: 12, ebayItemId: "394017" },
+    { id: 4, purchaseId: 2, name: "1998 Upper Deck card lots", quantity: 20, unitCost: 9, ebayItemId: "394015" },
+    { id: 5, purchaseId: 2, name: "Funko Pop Spider-Man #593", quantity: 15, unitCost: 11, ebayItemId: "394019" },
+    { id: 6, purchaseId: 3, name: "Patagonia Better Sweater fleece", quantity: 8, unitCost: 22, ebayItemId: "394020" },
+    { id: 7, purchaseId: 3, name: "Vintage Pyrex bowls", quantity: 3, unitCost: 6, ebayItemId: null },
+    { id: 8, purchaseId: 4, name: "Sony WH-1000XM4 headphones", quantity: 2, unitCost: 110, ebayItemId: "394022" },
+    { id: 9, purchaseId: 4, name: "Game controller bundle", quantity: 1, unitCost: 40, ebayItemId: null },
+  ];
+  return { purchases, items };
 }
