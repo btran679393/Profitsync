@@ -137,6 +137,8 @@ export default function SettingsSection({
   // Past years eBay still keeps (newest first), for "Bring in older orders".
   const [pastYears] = useState(() => historyYears(new Date()));
   const [pastYear, setPastYear] = useState(() => pastYears[0]?.year ?? new Date().getFullYear() - 1);
+  // The oldest year eBay only partly keeps: its orders are leaving eBay now.
+  const leaving = pastYears.find((option): option is { year: number; from: Date } => option.from !== null) ?? null;
 
   return (
     <div className="lg:grid lg:grid-cols-[11rem_minmax(0,1fr)] lg:gap-8">
@@ -349,6 +351,32 @@ export default function SettingsSection({
                   </button>
                 )}
               </Row>
+            )}
+            {leaving && (
+              <div className="py-4" role="note">
+                <div className="flex flex-col gap-3 rounded-xl border border-warn/30 bg-warn-soft p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs leading-5 text-ink-2">
+                    <b className="text-ink">Orders are leaving eBay.</b> eBay only keeps orders for 2 years, so your{" "}
+                    {leaving.year} orders are disappearing from eBay day by day (everything before{" "}
+                    {leaving.from.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })} is already gone).
+                    Once they’re in ProfitSync, they stay for good.
+                  </p>
+                  {historyAllowed ? (
+                    <button
+                      type="button"
+                      onClick={() => onBringInYear?.(leaving.year)}
+                      disabled={!onBringInYear || syncing}
+                      className={`${field} shrink-0 font-semibold hover:border-accent/40 disabled:opacity-50`}
+                    >
+                      {syncing ? "Syncing…" : `Bring in ${leaving.year} now`}
+                    </button>
+                  ) : (
+                    <button type="button" onClick={onOpenPlans} className={`${field} shrink-0 font-semibold hover:border-accent/40`}>
+                      See plans
+                    </button>
+                  )}
+                </div>
+              </div>
             )}
           </div>
         )}
