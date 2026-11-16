@@ -68,6 +68,8 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith("/twitter-image") ||
     pathname.startsWith("/apple-icon") ||
     pathname.startsWith("/icon") ||
+    // App manifest, so the site can be added to a phone's home screen.
+    pathname === "/manifest.webmanifest" ||
     pathname === "/robots.txt" ||
     pathname === "/sitemap.xml";
 

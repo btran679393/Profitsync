@@ -22,6 +22,9 @@ export const metadata: Metadata = {
   title: { default: SITE_NAME, template: `%s · ${SITE_NAME}` },
   description: SITE_DESCRIPTION,
   applicationName: SITE_NAME,
+  // Added to an iPhone home screen, it opens full screen as "ProfitSync"
+  // (the icon is apple-icon.tsx; other phones use manifest.ts).
+  appleWebApp: { title: SITE_NAME, statusBarStyle: "default" },
   openGraph: {
     type: "website",
     siteName: SITE_NAME,
