@@ -107,7 +107,7 @@ export default function HelpGuide({
               </>,
               <>
                 <B>Sync your orders.</B> Press <B>Sync</B> in the top right. The first sync brings in a year of orders, eBay fees, shipping labels
-                and refunds, and can take a minute for a big store. After that, syncs only bring in what&apos;s new or changed, so they&apos;re quick.
+                and refunds, and can take a minute for a big store. After that, syncs only bring in what&apos;s new or changed, so they&apos;re quick. On Pro and Ultimate, <B>Settings → Syncing → Bring in older orders</B> adds a past year (eBay keeps orders for 2 years).
               </>,
               <>
                 <B>Set your usual shipping cost.</B> On the Orders page, <B>Shipping per order</B> is what you normally pay to ship. It&apos;s used

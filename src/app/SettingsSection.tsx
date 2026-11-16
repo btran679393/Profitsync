@@ -4,6 +4,7 @@ import { useState } from "react";
 import AccountBadge from "./AccountBadge";
 import type { EbayStore } from "./StoreSwitcher";
 import { timeAgo } from "./shell/useShell";
+import { historyYears } from "@/lib/ebay/syncWindow";
 import { PLANS, type BillingStatus } from "@/lib/billing/plans";
 import type { DefaultRange, Preferences, StartPage, ThemeChoice } from "@/lib/preferences";
 
@@ -56,6 +57,8 @@ export default function SettingsSection({
   allStores = false,
   syncing = false,
   onFullSync,
+  historyAllowed = false,
+  onBringInYear,
 }: {
   preferences: Preferences;
   onChange: (changes: Partial<Preferences>) => Promise<void>;
@@ -69,6 +72,9 @@ export default function SettingsSection({
   allStores?: boolean;
   syncing?: boolean;
   onFullSync?: () => void;
+  // Bringing in a past year (paid plans): the year chosen.
+  historyAllowed?: boolean;
+  onBringInYear?: (year: number) => void;
 }) {
   const [saved, setSaved] = useState("");
   const [error, setError] = useState("");
@@ -128,6 +134,9 @@ export default function SettingsSection({
   // The full re-check covers the store being viewed, or every store in the
   // "All stores" view.
   const syncStores = stores.filter((store) => !store.locked && (allStores || store.active));
+  // Past years eBay still keeps (newest first), for "Bring in older orders".
+  const [pastYears] = useState(() => historyYears(new Date()));
+  const [pastYear, setPastYear] = useState(() => pastYears[0]?.year ?? new Date().getFullYear() - 1);
 
   return (
     <div className="lg:grid lg:grid-cols-[11rem_minmax(0,1fr)] lg:gap-8">
@@ -298,6 +307,49 @@ export default function SettingsSection({
                 {syncing ? "Syncing…" : "Re-check now"}
               </button>
             </Row>
+            {pastYears.length > 0 && (
+              <Row
+                title="Bring in older orders"
+                hint={
+                  historyAllowed
+                    ? `Adds a past year’s orders, fees, refunds and shipping labels for ${
+                        syncStores.length > 1 ? "all your stores" : syncStores[0].name
+                      }. eBay keeps orders for 2 years. Costs you’ve entered are never changed.`
+                    : "Bring in orders from past years with Pro or Ultimate. eBay keeps orders for 2 years."
+                }
+              >
+                {historyAllowed ? (
+                  <span className="flex items-center gap-2">
+                    <select
+                      value={pastYear}
+                      onChange={(e) => setPastYear(Number(e.target.value))}
+                      aria-label="Year to bring in"
+                      className={field}
+                    >
+                      {pastYears.map((option) => (
+                        <option key={option.year} value={option.year}>
+                          {option.from
+                            ? `${option.year} (from ${option.from.toLocaleDateString("en-US", { month: "short", day: "numeric" })})`
+                            : option.year}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => onBringInYear?.(pastYear)}
+                      disabled={!onBringInYear || syncing}
+                      className={`${field} font-semibold hover:border-accent/40 disabled:opacity-50`}
+                    >
+                      {syncing ? "Syncing…" : "Bring in"}
+                    </button>
+                  </span>
+                ) : (
+                  <button type="button" onClick={onOpenPlans} className={`${field} font-semibold hover:border-accent/40`}>
+                    See plans
+                  </button>
+                )}
+              </Row>
+            )}
           </div>
         )}
       </section>

@@ -15,6 +15,8 @@ import {
   financeFilter,
   orderNeedsUpdate,
   planSyncWindow,
+  yearWindow,
+  chargeMonthsBefore,
   type SyncWindow,
 } from "@/lib/ebay/syncWindow";
 import {
@@ -1251,18 +1253,45 @@ export async function syncOrders(
     // STEP 6: Full or quick sync? (see syncWindow.ts)
     // --------------------------------------------------------
     const syncState = await readSyncState(getPool(), connection.id);
-    // Plans with a monthly cap or shorter history can hold orders back, so
-    // they always sync in full: an upgrade then brings those orders in.
-    const forceFull =
-      new URL(request.url).searchParams.get("full") === "1" ||
-      planLimits.monthlyOrders !== null ||
-      planLimits.historyDays < ORDER_HISTORY_DAYS;
-    const window = planSyncWindow({
-      now: new Date(),
-      lastSyncAt: syncState.lastSyncAt,
-      lastFullSyncAt: syncState.lastFullSyncAt,
-      forceFull,
-    });
+    const params = new URL(request.url).searchParams;
+    // ?year=2025: bring in one past year (Settings → Syncing). Paid plans
+    // only, and only as far back as eBay keeps orders.
+    const yearParam = params.get("year");
+    let window: SyncWindow;
+    if (yearParam !== null) {
+      const year = Number(yearParam);
+      const pastYear = Number.isInteger(year) ? yearWindow(year, new Date()) : null;
+      if (!pastYear) {
+        return NextResponse.json(
+          { error: "That year can't be brought in.", message: "eBay only keeps orders from the last two years." },
+          { status: 400 }
+        );
+      }
+      if (planLimits.historyDays < ORDER_HISTORY_DAYS) {
+        return NextResponse.json(
+          {
+            error: "Older orders are part of the Pro and Ultimate plans.",
+            message: "Upgrade your plan to bring in orders from past years.",
+            upgrade: true,
+          },
+          { status: 402 }
+        );
+      }
+      window = pastYear;
+    } else {
+      // Plans with a monthly cap or shorter history can hold orders back, so
+      // they always sync in full: an upgrade then brings those orders in.
+      const forceFull =
+        params.get("full") === "1" ||
+        planLimits.monthlyOrders !== null ||
+        planLimits.historyDays < ORDER_HISTORY_DAYS;
+      window = planSyncWindow({
+        now: new Date(),
+        lastSyncAt: syncState.lastSyncAt,
+        lastFullSyncAt: syncState.lastFullSyncAt,
+        forceFull,
+      });
+    }
     console.log("ProfitSync sync mode:", {
       mode: window.mode,
       reason: window.reason,
@@ -1346,8 +1375,9 @@ export async function syncOrders(
     // keep updating as usual.
     // --------------------------------------------------------
     // A quick sync can return an old order that eBay changed recently:
-    // new orders still only come from the past year, as with a full sync.
-    const historyCutoff = window.until.getTime() - ORDER_HISTORY_DAYS * 24 * 60 * 60 * 1000;
+    // new orders still only come from the past year, as with a full sync
+    // (or from the chosen year when bringing in a past year).
+    const historyCutoff = window.ordersFrom.getTime();
     ebayOrders = ebayOrders.filter((order) => {
       if (!order.orderId || existingIds.has(order.orderId) || !order.creationDate) return true;
       const created = new Date(order.creationDate).getTime();
@@ -1637,7 +1667,7 @@ export async function syncOrders(
           }
           // eBay money records are only complete for orders created inside
           // the downloaded window; older orders keep their saved amounts.
-          const financeComplete = financeCovers(order.orderDate, window.financeStart);
+          const financeComplete = financeCovers(order.orderDate, window.financeStart, window.financeOrdersUntil);
           const feeCents = financeComplete
             ? feesByOrder.get(order.ebayOrderId)
             : undefined;
@@ -1831,8 +1861,9 @@ export async function syncOrders(
                   AND o."shippingLabelCost" IS DISTINCT FROM v.cost
                   -- Only orders whose label records were all downloaded.
                   AND o."orderDate" >= $6::timestamptz
+                  AND o."orderDate" <= $7::timestamptz
               `,
-              [orderIds, costs, userId, ebayUserId, environment, window.financeStart.toISOString()]
+              [orderIds, costs, userId, ebayUserId, environment, window.financeStart.toISOString(), window.financeOrdersUntil.toISOString()]
             );
             labelCostsUpdated = result.rowCount ?? 0;
           } catch (error) {
@@ -1861,8 +1892,9 @@ export async function syncOrders(
                   AND o.environment = $5
                   AND o."otherFees" IS DISTINCT FROM v.amount
                   AND o."orderDate" >= $6::timestamptz
+                  AND o."orderDate" <= $7::timestamptz
               `,
-              [orderIds, amounts, userId, ebayUserId, environment, window.financeStart.toISOString()]
+              [orderIds, amounts, userId, ebayUserId, environment, window.financeStart.toISOString(), window.financeOrdersUntil.toISOString()]
             );
             otherFeesUpdated = result.rowCount ?? 0;
           } catch (error) {
@@ -1881,7 +1913,12 @@ export async function syncOrders(
           try {
             const columns = await existingColumns(client, "expense", ["ebayChargeKey"]);
             if (columns.has("ebayChargeKey")) {
-              const kept = unattachedCharges.filter((charge) => charge.cents > 0);
+              // Bringing in a past year only touches that year's months: the
+              // months after it weren't fully downloaded.
+              const beforeMonth = chargeMonthsBefore(window);
+              const kept = unattachedCharges.filter(
+                (charge) => charge.cents > 0 && (beforeMonth === null || charge.month < beforeMonth)
+              );
               if (kept.length > 0) {
                 const result = await client.query(
                   `
@@ -1915,9 +1952,10 @@ export async function syncOrders(
                     AND "ebayUserId" = $2
                     AND "ebayChargeKey" IS NOT NULL
                     AND "spentOn" >= ($3 || '-01')::date
+                    AND ($5::text IS NULL OR "spentOn" < ($5 || '-01')::date)
                     AND NOT ("ebayChargeKey" = ANY($4::text[]))
                 `,
-                [userId, ebayUserId, firstFullMonth(window.financeStart), kept.map((charge) => charge.key)]
+                [userId, ebayUserId, firstFullMonth(window.financeStart), kept.map((charge) => charge.key), beforeMonth]
               );
             }
           } catch (error) {
@@ -1963,11 +2001,14 @@ export async function syncOrders(
     // ========================================================
     // SYNC COMPLETE
     // ========================================================
-    await saveSyncState(getPool(), connection.id, window);
+    // Bringing in a past year leaves the quick-sync dates alone.
+    if (window.mode !== "history") await saveSyncState(getPool(), connection.id, window);
     const windowText =
       window.mode === "full"
         ? `from the past ${ORDER_HISTORY_DAYS} days`
-        : "created or changed since your last sync";
+        : window.mode === "history"
+          ? `from ${window.ordersFrom.getUTCFullYear()}`
+          : "created or changed since your last sync";
     return NextResponse.json({
       success: true,
       environment,

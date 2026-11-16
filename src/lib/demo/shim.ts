@@ -124,6 +124,10 @@ async function handle(url: URL, init?: RequestInit): Promise<Response> {
   }
   if (path === "/api/ebay/profile") return json({ storeName: DEMO_STORE_NAME, username: "demo_collectibles" });
   if (path === "/api/billing" && method === "GET") return json(billing());
+  if (path === "/api/ebay/sync" && url.searchParams.get("year")) {
+    // The demo store only has recent orders: nothing older to bring in.
+    return json({ success: true, mode: "history", found: 0, imported: 0, skipped: 0 });
+  }
   if (path === "/api/ebay/sync" || path === "/api/ebay/listings/sync") {
     return json({ success: true, found: d.orders.length, imported: 0, skipped: d.orders.length, listings: d.listings.length });
   }

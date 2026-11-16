@@ -1008,8 +1008,12 @@ function Dashboard() {
   // Most syncs only bring in orders created or changed since the last one;
   // `full` re-checks the whole year with eBay.
   // quiet: an automatic sync. It only speaks up when something changed or
-  // went wrong.
-  async function syncEbayOrders({ full = false, quiet = false }: { full?: boolean; quiet?: boolean } = {}) {
+  // went wrong. year: bring in one past year (Settings → Syncing).
+  async function syncEbayOrders({
+    full = false,
+    quiet = false,
+    year,
+  }: { full?: boolean; quiet?: boolean; year?: number } = {}) {
     if (syncing || syncInFlightRef.current || savingRef.current || loggingOut) {
       return;
     }
@@ -1026,6 +1030,7 @@ function Dashboard() {
         const params = new URLSearchParams();
         if (target) params.set("store", target.id);
         if (full) params.set("full", "1");
+        if (year) params.set("year", String(year));
         const query = params.toString();
         const response = await fetch(
           query ? `/api/ebay/sync?${query}` : "/api/ebay/sync",
@@ -1086,9 +1091,14 @@ function Dashboard() {
       const overLimit = results.reduce((sum, r) => sum + (r.ordersOverPlanLimit ?? 0), 0);
       // A quick sync only looks at what changed, so its count is small.
       const quick = results.every((r) => r.mode === "quick");
+      const pastYear = results.every((r) => r.mode === "history");
       if (!quiet || changes.length > 0) {
         toast.success(
-          quick ? "Synced with eBay" : `Synced ${found} order${found === 1 ? "" : "s"}`,
+          pastYear
+            ? `Brought in ${year}: ${found} order${found === 1 ? "" : "s"} found`
+            : quick
+              ? "Synced with eBay"
+              : `Synced ${found} order${found === 1 ? "" : "s"}`,
           changes.length ? changes.join(" · ") : "Everything is up to date."
         );
       }
@@ -1987,6 +1997,8 @@ function Dashboard() {
               allStores={allStores}
               syncing={syncing}
               onFullSync={() => void syncEbayOrders({ full: true })}
+              historyAllowed={!billing?.enabled || (billing?.limits.historyDays ?? 0) >= 365}
+              onBringInYear={(year) => void syncEbayOrders({ year })}
             />
           )}
 

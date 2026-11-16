@@ -197,7 +197,7 @@ export default function BillingSection({
           <UsageBar label="eBay stores" used={billing?.usage.stores ?? 0} limit={enabled ? limits.maxStores : null} overLabel="locked" />
           <UsageBar label="Orders imported this month" used={billing?.usage.ordersThisMonth ?? 0} limit={enabled ? limits.monthlyOrders : null} />
           <p className="text-[11px] text-subtle">
-            Order history: last {enabled && limits.historyDays < 365 ? `${limits.historyDays} days` : "12 months"}
+            Order history: {enabled && limits.historyDays < 365 ? `last ${limits.historyDays} days` : "up to 2 years (bring in past years in Settings → Syncing)"}
           </p>
         </div>
       </section>

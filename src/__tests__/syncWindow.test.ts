@@ -3,10 +3,15 @@ import {
   FULL_SYNC_EVERY_DAYS,
   QUICK_FINANCE_DAYS,
   QUICK_MAX_GAP_DAYS,
+  EBAY_MAX_HISTORY_DAYS,
+  HISTORY_FINANCE_TAIL_DAYS,
   financeCovers,
   financeFilter,
   orderNeedsUpdate,
+  historyYears,
   planSyncWindow,
+  yearWindow,
+  chargeMonthsBefore,
 } from "@/lib/ebay/syncWindow";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -112,5 +117,47 @@ describe("cancelled orders in sync", () => {
   it("keep their status when a refund comes in", () => {
     const canceled = { ebayFees: "13.25", imageUrl: "x", salePrice: "100.00", refundAmount: "100.00", status: "CANCELED" };
     expect(orderNeedsUpdate(canceled, { feeCents: undefined, imageUrl: null, refundCents: 10000, buyerRefundConfirmed: true })).toBe(false);
+  });
+});
+
+describe("bringing in a past year", () => {
+  it("offers the years eBay still keeps, newest first", () => {
+    const years = historyYears(now);
+    expect(years.map((y) => y.year)).toEqual([2025, 2024]);
+    expect(years[0].from).toBeNull();
+    // 2024 only from two years back (eBay's limit).
+    expect(years[1].from?.toISOString()).toBe(ago(EBAY_MAX_HISTORY_DAYS));
+  });
+
+  it("asks eBay for that year and its money records up to three months later", () => {
+    const w = yearWindow(2025, now)!;
+    expect(w.mode).toBe("history");
+    expect(w.orderFilter).toBe("creationdate:[2025-01-01T00:00:00.000Z..2025-12-31T23:59:59.999Z]");
+    expect(w.ordersFrom.toISOString()).toBe("2025-01-01T00:00:00.000Z");
+    expect(w.financeOrdersUntil.toISOString()).toBe("2025-12-31T23:59:59.999Z");
+    expect(w.until.toISOString()).toBe(new Date(Date.UTC(2026, 0, 1) - 1 + HISTORY_FINANCE_TAIL_DAYS * DAY).toISOString());
+  });
+
+  it("never goes past eBay's two-year limit", () => {
+    const w = yearWindow(2024, now)!;
+    expect(w.orderFilter.startsWith(`creationdate:[${ago(EBAY_MAX_HISTORY_DAYS)}..`)).toBe(true);
+    expect(yearWindow(2023, now)).toBeNull();
+    expect(yearWindow(2026, now)).toBeNull();
+  });
+
+  it("only saves money totals for orders inside the chosen year", () => {
+    const w = yearWindow(2025, now)!;
+    expect(financeCovers("2025-06-01T00:00:00Z", w.financeStart, w.financeOrdersUntil)).toBe(true);
+    // An early-2026 order only has part of its records in this window.
+    expect(financeCovers("2026-02-01T00:00:00Z", w.financeStart, w.financeOrdersUntil)).toBe(false);
+  });
+});
+
+describe("eBay charge months when bringing in a past year", () => {
+  it("stops at the end of the chosen year", () => {
+    expect(chargeMonthsBefore(yearWindow(2025, now)!)).toBe("2026-01");
+  });
+  it("has no limit on a normal sync", () => {
+    expect(chargeMonthsBefore(planSyncWindow({ now }))).toBeNull();
   });
 });

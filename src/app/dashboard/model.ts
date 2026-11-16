@@ -90,7 +90,7 @@ export type ApiOrder = {
 export type SyncResponse = {
   success?: boolean;
   // "quick": only orders created or changed since the last sync.
-  mode?: "full" | "quick";
+  mode?: "full" | "quick" | "history";
   found?: number;
   imported?: number;
   skipped?: number;

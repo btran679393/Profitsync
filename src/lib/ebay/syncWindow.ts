@@ -4,7 +4,8 @@
 // eBay money records (fees, refunds, labels, ad fees) from that same year.
 // A "quick" sync only asks for orders created or changed since the last
 // sync, plus the last few months of money records, so a store with
-// thousands of orders syncs in seconds.
+// thousands of orders syncs in seconds. A "history" sync brings in one
+// chosen past year, back to eBay's two-year limit (Settings → Syncing).
 //
 // Money records are added up per order (a label bought, then voided; ad
 // fees charged after the sale…). Adding up only part of an order's records
@@ -28,17 +29,30 @@ export const QUICK_MAX_GAP_DAYS = 60;
 // can't (older photos, eBay-side refund adjustments on old orders).
 export const FULL_SYNC_EVERY_DAYS = 7;
 
-export type SyncMode = "full" | "quick";
+// eBay's getOrders only returns orders up to two years old; one day of
+// margin keeps the request inside that.
+export const EBAY_MAX_HISTORY_DAYS = 729;
+// Money records for an order (fees, labels, refunds) land within this long
+// after the sale; a past-year import reads this far past the year's end.
+export const HISTORY_FINANCE_TAIL_DAYS = 90;
+
+// "history" = bringing in one chosen past year (Settings → Syncing).
+export type SyncMode = "full" | "quick" | "history";
 
 export type SyncWindow = {
   mode: SyncMode;
   // Why this mode was picked (for the logs).
-  reason: "requested" | "first" | "stale" | "weekly" | "recent";
+  reason: "requested" | "first" | "stale" | "weekly" | "recent" | "year";
   // The eBay getOrders filter.
   orderFilter: string;
   // Money records are read from here to `until`.
   financeStart: Date;
   until: Date;
+  // New orders older than this aren't added.
+  ordersFrom: Date;
+  // Orders created after this don't have all their money records in the
+  // window, so their totals aren't saved (see financeCovers).
+  financeOrdersUntil: Date;
 };
 
 function validDate(value: unknown): Date | null {
@@ -77,6 +91,8 @@ export function planSyncWindow({
       // A little extra so a sale right at the edge still has its fee record.
       financeStart: new Date(historyStart.getTime() - 2 * DAY_MS),
       until,
+      ordersFrom: historyStart,
+      financeOrdersUntil: until,
     };
   }
 
@@ -87,6 +103,44 @@ export function planSyncWindow({
     orderFilter: `lastmodifieddate:[${since.toISOString()}..${until.toISOString()}]`,
     financeStart: new Date(now.getTime() - QUICK_FINANCE_DAYS * DAY_MS),
     until,
+    ordersFrom: new Date(now.getTime() - ORDER_HISTORY_DAYS * DAY_MS),
+    financeOrdersUntil: until,
+  };
+}
+
+// The oldest moment eBay will still return orders from.
+function ebayOldest(now: Date) {
+  return new Date(now.getTime() - EBAY_MAX_HISTORY_DAYS * DAY_MS);
+}
+
+// Past years a seller can bring in, newest first. A year eBay only partly
+// keeps comes with the date it starts from.
+export function historyYears(now: Date): Array<{ year: number; from: Date | null }> {
+  const oldest = ebayOldest(now);
+  const years: Array<{ year: number; from: Date | null }> = [];
+  for (let year = now.getUTCFullYear() - 1; year >= oldest.getUTCFullYear(); year--) {
+    const start = Date.UTC(year, 0, 1);
+    years.push({ year, from: start < oldest.getTime() ? oldest : null });
+  }
+  return years;
+}
+
+// The window for bringing in one past year: that year's orders (back to
+// eBay's two-year limit) and their money records, which can land up to
+// three months after the year ends. null = a year eBay no longer keeps.
+export function yearWindow(year: number, now: Date): SyncWindow | null {
+  if (!historyYears(now).some((option) => option.year === year)) return null;
+  const start = new Date(Math.max(Date.UTC(year, 0, 1), ebayOldest(now).getTime()));
+  const end = new Date(Math.min(Date.UTC(year + 1, 0, 1) - 1, now.getTime()));
+  const until = new Date(Math.min(end.getTime() + HISTORY_FINANCE_TAIL_DAYS * DAY_MS, now.getTime()));
+  return {
+    mode: "history",
+    reason: "year",
+    orderFilter: `creationdate:[${start.toISOString()}..${end.toISOString()}]`,
+    financeStart: new Date(start.getTime() - 2 * DAY_MS),
+    until,
+    ordersFrom: start,
+    financeOrdersUntil: end,
   };
 }
 
@@ -97,10 +151,12 @@ export function financeFilter(transactionType: string, window: Pick<SyncWindow, 
 }
 
 // True when all of an order's money records fall inside the downloaded
-// window, so their totals are complete and safe to save.
-export function financeCovers(orderDate: unknown, financeStart: Date): boolean {
+// window, so their totals are complete and safe to save: created on or
+// after the window's start and, for a past-year import, within that year.
+export function financeCovers(orderDate: unknown, financeStart: Date, financeOrdersUntil?: Date): boolean {
   const date = validDate(orderDate);
-  return date !== null && date.getTime() >= financeStart.getTime();
+  if (date === null || date.getTime() < financeStart.getTime()) return false;
+  return !financeOrdersUntil || date.getTime() <= financeOrdersUntil.getTime();
 }
 
 function toCents(value: unknown): number | null {
@@ -147,4 +203,15 @@ export function orderNeedsUpdate(
     if (status !== saved.status) return true;
   }
   return false;
+}
+
+// eBay charges not tied to an order are saved as one expense per month.
+// Bringing in a past year must only touch that year's months (the months
+// after it weren't downloaded): the first month it must leave alone, as
+// "YYYY-MM". null = no upper limit (normal syncs run up to today).
+export function chargeMonthsBefore(window: Pick<SyncWindow, "mode" | "financeOrdersUntil">): string | null {
+  if (window.mode !== "history") return null;
+  const end = window.financeOrdersUntil;
+  const next = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 1));
+  return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}`;
 }

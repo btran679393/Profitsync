@@ -64,7 +64,7 @@ export const PLANS: Record<PlanId, Plan> = {
     limits: {
       maxStores: 3,
       monthlyOrders: null,
-      historyDays: 365,
+      historyDays: 730,
       exports: true,
       autoSync: true,
       allStoresView: true,
@@ -72,7 +72,7 @@ export const PLANS: Record<PlanId, Plan> = {
     features: [
       "Up to 3 eBay stores",
       "Unlimited orders",
-      "A full year of order history",
+      "Up to 2 years of order history",
       "Tax report you can print or save as PDF",
       "CSV download and shipping-cost import",
       "Automatic sync every 30 minutes, plus daily",
@@ -88,7 +88,7 @@ export const PLANS: Record<PlanId, Plan> = {
     limits: {
       maxStores: null,
       monthlyOrders: null,
-      historyDays: 365,
+      historyDays: 730,
       exports: true,
       autoSync: true,
       allStoresView: true,
