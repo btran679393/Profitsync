@@ -10,7 +10,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Badge, Button, ConfirmProvider, Notice, PageHeader, SegmentedControl, ToastProvider, useConfirm, useToast } from "@/components/ui";
+import { Badge, Button, ConfirmProvider, Notice, PageHeader, SegmentedControl, Select, ToastProvider, useConfirm, useToast } from "@/components/ui";
 import Sidebar from "./shell/Sidebar";
 import Topbar from "./shell/Topbar";
 import DashboardView, { type Attention, type CostSlice } from "./dashboard/DashboardView";
@@ -47,7 +47,7 @@ import BillingSection from "./BillingSection";
 import TaxReport, { type TaxOrder } from "./TaxReport";
 import { PLANS, type BillingStatus } from "@/lib/billing/plans";
 
-import { type ApiListing, type Order, type ApiOrder, type SyncResponse, type OrderFilter, type DateRange, money, isValidCost, formatOrders, isFullyRefunded, isCanceled, refundNeedsReview, isReturnPolicy, type ReturnPolicy, getRefundLoss, isPartiallyRefunded, hasRecordedCost, getShippingCost, getOrderProfit, type View, subscribeToHash, viewFromHash, VIEW_COPY, isOrderInListingRange, normalizeTitle, buildListingRows, getDateRangeStart, isOrderInDateRange, dateRangeLabel, localDateKey, startOfLocalDay, computeTotals, previousRange, feesPending } from "./dashboard/model";
+import { type ApiListing, type Order, type ApiOrder, type SyncResponse, type OrderFilter, type DateRange, money, isValidCost, formatOrders, isFullyRefunded, isCanceled, refundNeedsReview, isReturnPolicy, type ReturnPolicy, getRefundLoss, isPartiallyRefunded, hasRecordedCost, getShippingCost, getOrderProfit, type View, subscribeToHash, viewFromHash, VIEW_COPY, isOrderInListingRange, normalizeTitle, buildListingRows, getDateRangeStart, getDateRangeEnd, rangeYear, isOrderInDateRange, dateRangeLabel, localDateKey, startOfLocalDay, computeTotals, previousRange, feesPending } from "./dashboard/model";
 import { OrderDetailsPanel } from "./dashboard/OrderParts";
 import CommandPalette, { type PaletteAction } from "./shell/CommandPalette";
 import ShortcutsDialog from "./shell/ShortcutsDialog";
@@ -1570,7 +1570,8 @@ function Dashboard() {
       .filter((date): date is Date => date !== null && !Number.isNaN(date.getTime()))
       .sort((a, b) => a.getTime() - b.getTime())[0];
     const startDate = dateRange === "all" ? startOfLocalDay(firstOrder ?? now) : getDateRangeStart(dateRange, now) ?? startOfLocalDay(now);
-    const endDate = startOfLocalDay(now);
+    // A past year's chart ends on December 31.
+    const endDate = startOfLocalDay(getDateRangeEnd(dateRange, now));
     const days: Date[] = [];
     for (let current = new Date(startDate); current <= endDate; current.setDate(current.getDate() + 1)) days.push(new Date(current));
 
@@ -1685,6 +1686,16 @@ function Dashboard() {
     { value: "all", label: "All time" },
   ] as const;
   const showsDateRange = view === "dashboard" || view === "orders" || view === "expenses";
+  // Calendar years that have orders (and this year), newest first.
+  const orderYears = [
+    ...new Set([
+      (now ?? new Date()).getFullYear(),
+      ...orders
+        .map((order) => (order.orderDate ? new Date(order.orderDate).getFullYear() : NaN))
+        .filter((year) => Number.isInteger(year)),
+    ]),
+  ].sort((a, b) => b - a);
+  const selectedYear = rangeYear(dateRange);
 
   return (
     <div className="ps-app min-h-screen bg-bg text-ink-2">
@@ -1806,7 +1817,23 @@ function Dashboard() {
             }
             actions={
               showsDateRange ? (
-                <SegmentedControl label="Date range" value={dateRange} options={dateRangeOptions} onChange={setDateRange} />
+                <div className="flex flex-wrap items-center gap-2">
+                  <SegmentedControl label="Date range" value={dateRange} options={dateRangeOptions} onChange={setDateRange} />
+                  <span className="w-28">
+                    <Select
+                      aria-label="Calendar year"
+                      value={selectedYear ?? ""}
+                      onChange={(e) => e.target.value && setDateRange(`y${Number(e.target.value)}`)}
+                    >
+                      <option value="">Year…</option>
+                      {orderYears.map((year) => (
+                        <option key={year} value={year}>
+                          {year}
+                        </option>
+                      ))}
+                    </Select>
+                  </span>
+                </div>
               ) : view === "listings" ? (
                 <>
                   <SegmentedControl label="Sales period" value={listingRange} options={LISTING_RANGES} onChange={setListingRange} />
@@ -1891,7 +1918,7 @@ function Dashboard() {
               hasOrders={orders.length > 0}
               totals={totals}
               previous={previousTotals}
-              comparisonLabel={dateRange === "7d" ? "vs prior 7 days" : dateRange === "30d" ? "vs prior 30 days" : "vs prior 90 days"}
+              comparisonLabel={selectedYear !== null ? `vs ${selectedYear - 1}` : dateRange === "7d" ? "vs prior 7 days" : dateRange === "30d" ? "vs prior 30 days" : "vs prior 90 days"}
               rangeLabel={dateRangeLabel(dateRange)}
               trend={trendPoints}
               topListings={topListings}

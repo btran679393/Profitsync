@@ -13,6 +13,11 @@ import {
   refundNeedsReview,
   isValidCost,
   previousRange,
+  dateRangeLabel,
+  getDateRangeEnd,
+  getDateRangeStart,
+  isOrderInDateRange,
+  rangeYear,
   percentChange,
   type ApiOrder,
   type Order,
@@ -275,5 +280,30 @@ describe("feesPending (no $0-fee sales shown as if fees were counted)", () => {
   it("is counted in the totals", () => {
     const totals = computeTotals([order({ ebayFees: 0 }), order({ id: 2 })], []);
     expect(totals.feesPendingCount).toBe(1);
+  });
+});
+
+describe("calendar year ranges", () => {
+  const now = new Date(2026, 10, 16, 12);
+  const at = (y: number, m: number, d: number) => order({ orderDate: new Date(y, m, d, 12).toISOString() });
+
+  it("keeps only that year's orders", () => {
+    expect(isOrderInDateRange(at(2025, 0, 1), "y2025", now)).toBe(true);
+    expect(isOrderInDateRange(at(2025, 11, 31), "y2025", now)).toBe(true);
+    expect(isOrderInDateRange(at(2026, 0, 1), "y2025", now)).toBe(false);
+  });
+
+  it("is labelled, starts and ends on the year", () => {
+    expect(rangeYear("y2025")).toBe(2025);
+    expect(rangeYear("30d")).toBeNull();
+    expect(dateRangeLabel("y2025")).toBe("2025");
+    expect(getDateRangeStart("y2025", now)?.getTime()).toBe(new Date(2025, 0, 1).getTime());
+    expect(getDateRangeEnd("y2025", now).getMonth()).toBe(11);
+    // This year ends today.
+    expect(getDateRangeEnd("y2026", now).getTime()).toBe(now.getTime());
+  });
+
+  it("is compared with the year before", () => {
+    expect(previousRange("y2025", now)).toEqual({ start: new Date(2024, 0, 1), end: new Date(2025, 0, 1) });
   });
 });

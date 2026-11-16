@@ -110,7 +110,24 @@ export type SyncResponse = {
 
 export type OrderFilter = "all" | "completed" | "pending" | "refunded";
 
-export type DateRange = "7d" | "30d" | "90d" | "all";
+// A calendar year is written "y2025".
+export type DateRange = "7d" | "30d" | "90d" | "all" | `y${number}`;
+
+// The calendar year a range covers, or null for the rolling ranges.
+export function rangeYear(range: DateRange): number | null {
+  if (!range.startsWith("y")) return null;
+  const year = Number(range.slice(1));
+  return Number.isInteger(year) ? year : null;
+}
+
+// The last moment a range covers: the end of a past year, else now.
+export function getDateRangeEnd(range: DateRange, now: Date): Date {
+  const year = rangeYear(range);
+  if (year === null) return now;
+  const end = new Date(year + 1, 0, 1);
+  end.setMilliseconds(-1);
+  return end < now ? end : now;
+}
 
 
 // ============================================================
@@ -454,6 +471,8 @@ export function getDateRangeStart(
   now: Date
 ): Date | null {
   if (range === "all") return null;
+  const year = rangeYear(range);
+  if (year !== null) return new Date(year, 0, 1);
 
   const days =
     range === "7d" ? 7 : range === "30d" ? 30 : 90;
@@ -478,6 +497,9 @@ export function isOrderInDateRange(
 
   if (Number.isNaN(date.getTime())) return false;
 
+  const year = rangeYear(range);
+  if (year !== null) return date.getFullYear() === year;
+
   const start = getDateRangeStart(range, now);
 
   if (!start) return true;
@@ -486,6 +508,8 @@ export function isOrderInDateRange(
 }
 
 export function dateRangeLabel(range: DateRange) {
+  const year = rangeYear(range);
+  if (year !== null) return String(year);
   switch (range) {
     case "7d":
       return "Last 7 Days";
@@ -576,6 +600,9 @@ export type Totals = ReturnType<typeof computeTotals>;
 
 // The window just before the chosen range, same length (null for "All time").
 export function previousRange(range: DateRange, now: Date): { start: Date; end: Date } | null {
+  // A calendar year is compared with the year before it.
+  const year = rangeYear(range);
+  if (year !== null) return { start: new Date(year - 1, 0, 1), end: new Date(year, 0, 1) };
   const start = getDateRangeStart(range, now);
   if (!start) return null;
   const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
