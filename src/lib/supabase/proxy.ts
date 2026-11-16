@@ -81,9 +81,11 @@ export async function updateSession(request: NextRequest) {
 
   // eBay must be able to deliver account-deletion notifications, and Stripe
   // payment events. Both check their own signatures.
+  // The daily background sync (Vercel Cron) checks its own secret.
   const isEbayWebhook =
     pathname === "/api/ebay/account-deletion" ||
-    pathname === "/api/billing/webhook";
+    pathname === "/api/billing/webhook" ||
+    pathname === "/api/cron/sync";
 
   // Protect all other pages and API routes.
   if (!isAuthenticated && !isPublicPage && !isEbayWebhook) {

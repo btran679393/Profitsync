@@ -16,6 +16,8 @@ export type EbayStore = {
   // the whole year (ISO dates; null before the first sync).
   lastSyncAt?: string | null;
   lastFullSyncAt?: string | null;
+  // Earliest day ProfitSync has this store's orders from (ISO).
+  dataFrom?: string | null;
 };
 
 // Starts eBay's sign-in. eBay always asks which account to use, so this

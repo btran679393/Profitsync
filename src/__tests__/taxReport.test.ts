@@ -6,6 +6,7 @@ import {
   ordersCsv,
   periodLabel,
   profitAndLossCsv,
+  storesMissingStartOfYear,
   type TaxExpense,
   type TaxOrder,
 } from "@/lib/taxReport";
@@ -173,5 +174,41 @@ describe("cancelled orders on the statement", () => {
     expect(r.grossSales).toBe(230);
     expect(r.refunds).toBe(80);
     expect(ordersCsv(withCancel, { business: "Shop A", year: 2025, preparedOn: new Date() })).not.toContain("26-1");
+  });
+});
+
+describe("before-you-file checks", () => {
+  it("names stores whose orders start after the year began", () => {
+    const stores = [
+      { name: "Old shop", dataFrom: "2024-06-01T00:00:00.000Z" },
+      { name: "New shop", dataFrom: "2025-04-20T00:00:00.000Z" },
+      { name: "Unknown", dataFrom: null },
+    ];
+    expect(storesMissingStartOfYear(stores, 2025).map((s) => s.name)).toEqual(["New shop"]);
+    expect(storesMissingStartOfYear(stores, 2024).map((s) => s.name)).toEqual(["Old shop", "New shop"]);
+    expect(storesMissingStartOfYear(stores, 2026)).toEqual([]);
+  });
+
+  it("counts kept orders still waiting for eBay's fees", () => {
+    const report = buildTaxReport(
+      [order({ ebayFees: 0, feesPending: true }), order({}), order({ refunded: true, feesPending: true })],
+      [],
+      2025
+    );
+    expect(report.feesPending).toBe(1);
+  });
+
+  it("spots a Store subscription typed in by hand next to the one added from eBay", () => {
+    const report = buildTaxReport(
+      [],
+      [
+        { date: "2025-03-01", category: "eBay Store subscription", amount: "27.95", fromEbay: true },
+        { date: "2025-03-05", category: "eBay Store subscription", amount: "27.95" },
+        { date: "2025-04-01", category: "eBay Store subscription", amount: "27.95", fromEbay: true },
+        { date: "2025-05-05", category: "eBay Store subscription", amount: "27.95" },
+      ],
+      2025
+    );
+    expect(report.doubleSubscriptionMonths).toBe(1);
   });
 });

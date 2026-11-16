@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   computeTotals,
+  feesPending,
   formatOrders,
   getOrderProfit,
   getRefundLoss,
@@ -259,5 +260,20 @@ describe("return policy estimates", () => {
   it("never applies to cancelled orders or partial refunds", () => {
     expect(getRefundLoss(refunded({ status: "CANCELED", storeReturnPolicy: "none", listingCost: 40 }))).toBe(0);
     expect(getRefundLoss(order({ refundAmount: 10, storeReturnPolicy: "none", listingCost: 40 }))).toBe(0);
+  });
+});
+
+describe("feesPending (no $0-fee sales shown as if fees were counted)", () => {
+  it("flags a sale whose eBay fees haven't arrived", () => {
+    expect(feesPending(order({ ebayFees: 0 }))).toBe(true);
+  });
+  it("leaves alone sales with fees, cancellations and full refunds", () => {
+    expect(feesPending(order())).toBe(false);
+    expect(feesPending(order({ ebayFees: 0, status: "CANCELED" }))).toBe(false);
+    expect(feesPending(order({ ebayFees: 0, status: "REFUNDED", refundAmount: 100 }))).toBe(false);
+  });
+  it("is counted in the totals", () => {
+    const totals = computeTotals([order({ ebayFees: 0 }), order({ id: 2 })], []);
+    expect(totals.feesPendingCount).toBe(1);
   });
 });

@@ -32,6 +32,9 @@ export type Expense = {
   note: string | null;
   repeatMonthly?: boolean;
   endedOn?: string | null;
+  // Kept up to date from eBay by each sync (store subscription, insertion
+  // fees…), so it can't be edited or deleted here.
+  fromEbay?: boolean;
 };
 
 // One line in the list: a one-off expense, or one month of a repeating one.
@@ -457,7 +460,7 @@ export default function ExpensesSection({
         ) : expenses.length === 0 ? (
           <EmptyState
             title="No expenses in this period"
-            description="Add packing supplies, your eBay Store subscription, software and other costs that aren't tied to one sale."
+            description="Add packing supplies, software and other costs that aren't tied to one sale. eBay charges like your Store subscription and insertion fees are added from eBay when you sync."
             action={
               <Button variant="primary" onClick={openNew}>
                 Add your first expense
@@ -482,6 +485,7 @@ export default function ExpensesSection({
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-2">
                       <span className="truncate text-sm font-medium text-ink">{expense.category}</span>
+                      {expense.fromEbay && <Badge tone="neutral">From eBay</Badge>}
                       {expense.repeatMonthly && (
                         <Badge tone={stopped ? "neutral" : "accent"}>
                           <RepeatIcon />
@@ -495,6 +499,9 @@ export default function ExpensesSection({
                     </span>
                   </span>
                   <span className="ps-num text-sm font-semibold text-loss">−{money(Number(expense.amount))}</span>
+                  {expense.fromEbay ? (
+                    <span className="w-[4.5rem] shrink-0" aria-hidden="true" />
+                  ) : (
                   <span className="flex shrink-0 items-center opacity-100 transition-opacity sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100">
                     {expense.repeatMonthly && !stopped && (
                       <Button variant="ghost" size="sm" onClick={() => void stopRepeating(expense)} disabled={busyId === expense.id} title="Stop repeating from today (past months stay)">
@@ -515,6 +522,7 @@ export default function ExpensesSection({
                       </svg>
                     </IconButton>
                   </span>
+                  )}
                 </li>
               );
             })}

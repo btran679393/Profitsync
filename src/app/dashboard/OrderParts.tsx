@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Badge, Button, Drawer, Field, MoneyInput, Select, cn, useConfirm } from "@/components/ui";
-import { type Order, money, isValidCost, isCanceled, isFullyRefunded, isPartiallyRefunded, getRefundLoss, getShippingCost, formatOrderDate, refundNeedsReview } from "./model";
+import { type Order, money, isValidCost, isCanceled, isFullyRefunded, isPartiallyRefunded, getRefundLoss, getShippingCost, formatOrderDate, refundNeedsReview, feesPending } from "./model";
 import { Icon } from "./Icon";
 import { ListingImage } from "./ListingImage";
 
@@ -500,7 +500,11 @@ export function OrderDetailsPanel({
         <h4 className="text-xs font-semibold uppercase tracking-wider text-subtle">Breakdown</h4>
         <div className="mt-1 divide-y divide-line">
           <Line label="Sale price" value={money(order.salePrice)} />
-          <Line label="eBay fees" value={`−${money(order.ebayFees)}`} tone="loss" />
+          {feesPending(order) ? (
+            <Line label="eBay fees" value="Waiting for eBay" />
+          ) : (
+            <Line label="eBay fees" value={`−${money(order.ebayFees)}`} tone="loss" />
+          )}
           {order.otherFees > 0 && <Line label="Other eBay charges" value={`−${money(order.otherFees)}`} tone="loss" />}
           <Line
             label={

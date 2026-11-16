@@ -47,7 +47,7 @@ import BillingSection from "./BillingSection";
 import TaxReport, { type TaxOrder } from "./TaxReport";
 import { PLANS, type BillingStatus } from "@/lib/billing/plans";
 
-import { type ApiListing, type Order, type ApiOrder, type SyncResponse, type OrderFilter, type DateRange, money, isValidCost, formatOrders, isFullyRefunded, isCanceled, refundNeedsReview, isReturnPolicy, type ReturnPolicy, getRefundLoss, isPartiallyRefunded, hasRecordedCost, getShippingCost, getOrderProfit, type View, subscribeToHash, viewFromHash, VIEW_COPY, isOrderInListingRange, normalizeTitle, buildListingRows, getDateRangeStart, isOrderInDateRange, dateRangeLabel, localDateKey, startOfLocalDay, computeTotals, previousRange } from "./dashboard/model";
+import { type ApiListing, type Order, type ApiOrder, type SyncResponse, type OrderFilter, type DateRange, money, isValidCost, formatOrders, isFullyRefunded, isCanceled, refundNeedsReview, isReturnPolicy, type ReturnPolicy, getRefundLoss, isPartiallyRefunded, hasRecordedCost, getShippingCost, getOrderProfit, type View, subscribeToHash, viewFromHash, VIEW_COPY, isOrderInListingRange, normalizeTitle, buildListingRows, getDateRangeStart, isOrderInDateRange, dateRangeLabel, localDateKey, startOfLocalDay, computeTotals, previousRange, feesPending } from "./dashboard/model";
 import { OrderDetailsPanel } from "./dashboard/OrderParts";
 import CommandPalette, { type PaletteAction } from "./shell/CommandPalette";
 import ShortcutsDialog from "./shell/ShortcutsDialog";
@@ -1007,7 +1007,9 @@ function Dashboard() {
 
   // Most syncs only bring in orders created or changed since the last one;
   // `full` re-checks the whole year with eBay.
-  async function syncEbayOrders({ full = false }: { full?: boolean } = {}) {
+  // quiet: an automatic sync. It only speaks up when something changed or
+  // went wrong.
+  async function syncEbayOrders({ full = false, quiet = false }: { full?: boolean; quiet?: boolean } = {}) {
     if (syncing || syncInFlightRef.current || savingRef.current || loggingOut) {
       return;
     }
@@ -1036,7 +1038,7 @@ function Dashboard() {
         );
         // Another tab or an auto-sync is already on it: nothing went wrong.
         if (status === 409 && result.busy) {
-          toast.info("Already syncing", result.message);
+          if (!quiet) toast.info("Already syncing", result.message);
           return;
         }
         if (status >= 400 || !result.success) {
@@ -1084,10 +1086,15 @@ function Dashboard() {
       const overLimit = results.reduce((sum, r) => sum + (r.ordersOverPlanLimit ?? 0), 0);
       // A quick sync only looks at what changed, so its count is small.
       const quick = results.every((r) => r.mode === "quick");
-      toast.success(
-        quick ? "Synced with eBay" : `Synced ${found} order${found === 1 ? "" : "s"}`,
-        changes.length ? changes.join(" · ") : "Everything is up to date."
-      );
+      if (!quiet || changes.length > 0) {
+        toast.success(
+          quick ? "Synced with eBay" : `Synced ${found} order${found === 1 ? "" : "s"}`,
+          changes.length ? changes.join(" · ") : "Everything is up to date."
+        );
+      }
+      // eBay charges not tied to an order (Store subscription, insertion
+      // fees…) were added to Expenses.
+      if (results.some((r) => (r.ebayChargesSaved ?? 0) > 0)) void loadExpenses();
       if (overLimit > 0) {
         toast.info(
           `${overLimit} more order${overLimit === 1 ? "" : "s"} not imported`,
@@ -1111,11 +1118,14 @@ function Dashboard() {
   }
 
   // ----------------------------------------------------------
-  // AUTOMATIC SYNC when the dashboard opens (at most every 6 hours per
-  // store, remembered in this browser)
+  // AUTOMATIC SYNC while ProfitSync is open: when it opens, when you come
+  // back to the tab, and every so often while it's showing, at most every
+  // 30 minutes per store. Quick syncs only ask eBay for what changed, so
+  // they take seconds. A daily background sync (api/cron/sync) covers the
+  // days the app isn't opened.
   // ----------------------------------------------------------
 
-  const AUTO_SYNC_MS = 6 * 60 * 60 * 1000;
+  const AUTO_SYNC_MS = 30 * 60 * 1000;
   const syncKey = `profitsync:lastSync:${allStores ? "all" : activeStoreId ?? "none"}`;
 
   // "Synced 2h ago" in the top bar.
@@ -1130,24 +1140,45 @@ function Dashboard() {
     window.dispatchEvent(new Event(SYNC_EVENT));
   }
 
-  useEffect(() => {
-    if (storesLoading || stores.length === 0) return;
-    // Automatic sync is a paid-plan feature (Free syncs with the button).
-    if (billingLoading || !limits.autoSync) return;
+  // The latest sync function, for the timers below.
+  const autoSyncRef = useRef<() => void>(() => {});
+  function autoSyncIfDue() {
+    // The last sync from this browser, or from anywhere (another device,
+    // the background sync), whichever is newer.
     let last = 0;
     try {
       last = Number(window.localStorage.getItem(syncKey) ?? 0);
     } catch {
       last = 0;
     }
+    const targets = allStores ? stores.filter((s) => !s.locked) : activeStore ? [activeStore] : [];
+    const serverTimes = targets.map((s) => (s.lastSyncAt ? new Date(s.lastSyncAt).getTime() : 0));
+    if (serverTimes.length > 0) last = Math.max(last, Math.min(...serverTimes));
     if (Date.now() - last < AUTO_SYNC_MS) return;
-    void (async () => {
-      await Promise.resolve();
-      await syncEbayOrders();
-    })();
-    // Re-check only when the store (or All stores view) or plan changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storesLoading, syncKey, billingLoading, limits.autoSync]);
+    void syncEbayOrders({ quiet: true });
+  }
+  useEffect(() => {
+    autoSyncRef.current = autoSyncIfDue;
+  });
+
+  useEffect(() => {
+    if (storesLoading || stores.length === 0) return;
+    // Automatic sync is a paid-plan feature (Free syncs with the button).
+    if (billingLoading || !limits.autoSync) return;
+    const check = () => {
+      if (document.visibilityState === "visible") autoSyncRef.current();
+    };
+    const first = window.setTimeout(check, 0);
+    const timer = window.setInterval(check, 5 * 60 * 1000);
+    document.addEventListener("visibilitychange", check);
+    window.addEventListener("focus", check);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", check);
+      window.removeEventListener("focus", check);
+    };
+  }, [storesLoading, stores.length, syncKey, billingLoading, limits.autoSync]);
 
   // Coming back from eBay after adding a store: show the result, and bring
   // in the new store's orders and listings straight away.
@@ -1269,6 +1300,7 @@ function Dashboard() {
         refundLoss: getRefundLoss(order),
         // For the report's "before you file" warnings.
         refundUnreviewed: refundNeedsReview(order),
+        feesPending: feesPending(order),
         storeName: stores.find((s) => s.id === order.ebayUserId)?.name ?? null,
         storeId: order.ebayUserId,
         // A partial refund (the buyer kept the item) comes off the sale.
@@ -1581,11 +1613,12 @@ function Dashboard() {
     const ranked = now ? buildListingRows(orders, listings, orders, now, preferences) : [];
     return {
       needsCost: totals.pendingOrders,
+      feesPending: totals.feesPendingCount,
       lowStock: ranked.filter((row) => row.alert === "low").length,
       stale: ranked.filter((row) => row.alert === "stale").length,
       reconnect: stores.filter((store) => store.needsReconnect && !store.locked).map((store) => store.name),
     };
-  }, [orders, listings, now, preferences, totals.pendingOrders, stores]);
+  }, [orders, listings, now, preferences, totals.pendingOrders, totals.feesPendingCount, stores]);
 
   // ----------------------------------------------------------
   // SELECTED ORDER
@@ -1938,6 +1971,7 @@ function Dashboard() {
                 shipping: () => goToOrders(),
                 refunds: (storeId) => void openOrdersFromTaxes("refunded", storeId),
               }}
+              stores={allStores || useBusiness ? stores.filter((s) => !s.locked) : activeStore ? [activeStore] : []}
             />
           )}
 

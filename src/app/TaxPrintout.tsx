@@ -231,7 +231,11 @@ export default function TaxPrintout({
         <ul className="mt-[3pt] list-disc space-y-[1pt] pl-[14pt]">
           <li>Amounts are grouped by order date. Sales are what buyers paid, not counting sales tax that eBay collects and pays for you.</li>
           <li>Fully refunded orders are taken out of sales. Only what the refund cost you (an item not returned, return shipping, fees eBay kept) counts as a loss. Partial refunds come off the sale.</li>
-          <li>eBay fees and charges come from eBay&apos;s own payment records. Product costs, shipping you paid outside eBay and business expenses are as entered in ProfitSync.</li>
+          <li>eBay fees and charges come from eBay&apos;s own payment records, including charges not tied to an order (Store subscription, insertion fees), which are listed with business expenses. Product costs, shipping you paid outside eBay and other expenses are as entered in ProfitSync.</li>
+          <li>
+            Profit from selling is taxable whether or not eBay sends a Form 1099-K (federally it only does above $20,000 and 200 sales in a year; some
+            states use lower limits).
+          </li>
           <li>This statement isn&apos;t tax advice. Check it with a tax professional before you file.</li>
         </ul>
       </section>

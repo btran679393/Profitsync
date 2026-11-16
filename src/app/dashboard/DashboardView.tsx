@@ -12,6 +12,7 @@ export type CostSlice = { label: string; amount: number; color: string };
 
 export type Attention = {
   needsCost: number; // orders in this period without a product cost
+  feesPending: number; // orders whose eBay fees haven't arrived yet
   lowStock: number;
   stale: number;
   reconnect: string[]; // store names whose eBay sign-in expired
@@ -92,7 +93,7 @@ export default function DashboardView({
   const costTotal = costs.reduce((sum, slice) => sum + slice.amount, 0);
   const costsRecorded = totals.orderCount > 0 ? (totals.completedCount / totals.orderCount) * 100 : 0;
   const attentionCount =
-    (attention.needsCost > 0 ? 1 : 0) + (attention.lowStock > 0 ? 1 : 0) + (attention.stale > 0 ? 1 : 0) + attention.reconnect.length;
+    (attention.needsCost > 0 ? 1 : 0) + (attention.feesPending > 0 ? 1 : 0) + (attention.lowStock > 0 ? 1 : 0) + (attention.stale > 0 ? 1 : 0) + attention.reconnect.length;
 
   if (!loading && !hasOrders) {
     return (
@@ -200,6 +201,14 @@ export default function DashboardView({
                       title={`${attention.needsCost} order${attention.needsCost === 1 ? " needs" : "s need"} a product cost`}
                       detail="Profit leaves these out until you add one"
                       onClick={() => onGoOrders("pending")}
+                    />
+                  )}
+                  {attention.feesPending > 0 && (
+                    <AttentionRow
+                      tone="warn"
+                      title={`${attention.feesPending} order${attention.feesPending === 1 ? " is" : "s are"} waiting for eBay's fees`}
+                      detail="Profit shows them before fees for now; sync again later"
+                      onClick={onSync}
                     />
                   )}
                   {attention.lowStock > 0 && (

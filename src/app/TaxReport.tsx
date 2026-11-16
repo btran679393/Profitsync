@@ -11,6 +11,7 @@ import {
   ordersCsv,
   periodLabel,
   profitAndLossCsv,
+  storesMissingStartOfYear,
   yearOf,
   type Line,
   type TaxOrder,
@@ -46,6 +47,7 @@ export default function TaxReport({
   onScopeChange,
   currentStoreName = "This store",
   onFix,
+  stores = [],
 }: {
   orders: TaxOrder[];
   expenses: ExpenseEntry[];
@@ -61,6 +63,9 @@ export default function TaxReport({
   // Buttons on the "before you file" warnings.
   // costs / refunds get the store to open when every such order is in one store.
   onFix?: { costs?: (storeId?: string) => void; shipping?: () => void; refunds?: (storeId?: string) => void };
+  // The stores in this report, with the earliest day ProfitSync has their
+  // orders from (warns when the year starts before that).
+  stores?: Array<{ name: string; dataFrom?: string | null }>;
 }) {
   const years = useMemo(() => {
     const found = new Set<number>([new Date().getFullYear()]);
@@ -163,6 +168,25 @@ export default function TaxReport({
       key: "refunds",
       text: `${plural(report.unreviewed, "refund", "refunds")}${report.unreviewedWhere} ${report.unreviewed === 1 ? "has" : "have"} a loss ProfitSync can't work out yet. Set your return policy on the Orders page, or review ${report.unreviewed === 1 ? "it" : "them"}.`,
       fix: onFix?.refunds && { label: "Review refunds", onClick: () => onFix.refunds?.(report.unreviewedStore) },
+    });
+  }
+  for (const store of storesMissingStartOfYear(stores, year)) {
+    const from = new Date(store.dataFrom).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
+    warnings.push({
+      key: `coverage-${store.name}`,
+      text: `${stores.length > 1 ? `${store.name}: ` : ""}ProfitSync only has orders from ${from} on, because eBay shares the last 12 months of orders. If you sold before then in ${year}, those sales aren't in this report: add them from eBay's own reports (Seller Hub → Reports) when you file.`,
+    });
+  }
+  if (report.feesPending > 0) {
+    warnings.push({
+      key: "fees",
+      text: `${plural(report.feesPending, "order is", "orders are")} still waiting for eBay's fees, so profit looks a little higher than it is. eBay usually reports them within a day; sync again later.`,
+    });
+  }
+  if (report.doubleSubscriptionMonths > 0) {
+    warnings.push({
+      key: "subscription",
+      text: `Your eBay Store subscription was typed in by hand for ${plural(report.doubleSubscriptionMonths, "month", "months")} where ProfitSync already added it from eBay. Delete the one you typed on the Expenses page so it isn't counted twice.`,
     });
   }
   if (report.orderCount > 0 && report.expenseCount === 0) {
@@ -328,8 +352,9 @@ export default function TaxReport({
               </p>
             )}
             <p>
-              Sales are what buyers paid, not counting sales tax that eBay collects and pays for you. This summary isn&apos;t tax advice: check it with a tax professional
-              before you file.
+              Sales are what buyers paid, not counting sales tax that eBay collects and pays for you. Profit from selling is taxable whether or not eBay
+              sends you a Form 1099-K (federally it only does above $20,000 and 200 sales in a year; some states use lower limits). This summary isn&apos;t
+              tax advice: check it with a tax professional before you file.
             </p>
           </div>
         </section>

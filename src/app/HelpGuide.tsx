@@ -277,7 +277,7 @@ export default function HelpGuide({
           <div className="space-y-2">
             <Q q="Why does an order say Pending?">It has no product cost yet. Add what you paid for the item and its profit appears.</Q>
             <Q q="How often do my orders update?">
-              Press Sync any time. On paid plans ProfitSync also syncs by itself when you open it (at most every 6 hours).
+              Press Sync any time. On paid plans ProfitSync also syncs by itself every 30 minutes while it&apos;s open (and when you come back to it), plus once a day in the background. Each sync only asks eBay for what changed, so it takes seconds.
             </Q>
             <Q q="Does ProfitSync change anything on eBay?">
               No. It only reads your orders, fees and listings. It never edits listings, messages buyers or moves money.
@@ -286,6 +286,10 @@ export default function HelpGuide({
               eBay sign-ins expire after about 18 months. Use Reconnect in the store menu; your data stays where it is.
             </Q>
             <Q q="Are shipping labels I buy on eBay counted?">Yes, automatically, on the order they belong to.</Q>
+            <Q q="What about my eBay Store subscription and insertion fees?">
+              Counted too. eBay charges that aren&apos;t tied to one order (Store subscription, insertion fees, ad fees billed by the day) are added to
+              Expenses as one line per month, marked From eBay, and kept up to date on every sync. You don&apos;t need to type them in.
+            </Q>
             <Q q="Are there keyboard shortcuts?">
               <B>Enter</B> saves a product cost and moves to the next order. <B>Escape</B> undoes what you were typing and leaves the box;
               press it again to go back to the Dashboard. Escape also closes panels, menus and pop-ups.

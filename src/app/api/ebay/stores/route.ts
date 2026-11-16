@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { existingColumns } from "@/lib/db/optionalColumns";
 import { ALL_STORES, activeStoreId, isAllStores, pickConnection } from "@/lib/ebay/activeStore";
 import { getUserPlan, lockedStoreIds } from "@/lib/billing/server";
+import { ORDER_HISTORY_DAYS } from "@/lib/ebay/syncWindow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,9 +18,17 @@ type StoreRow = {
   ebayUsername?: string | null;
   lastOrderSyncAt?: Date | null;
   lastFullOrderSyncAt?: Date | null;
+  createdAt: Date;
+  firstOrderAt: Date | null;
 };
 
 const iso = (value: Date | null | undefined) => (value ? new Date(value).toISOString() : null);
+
+function dataFrom(row: StoreRow): string {
+  const connected = new Date(row.createdAt).getTime() - ORDER_HISTORY_DAYS * 24 * 60 * 60 * 1000;
+  const firstOrder = row.firstOrderAt ? new Date(row.firstOrderAt).getTime() : Infinity;
+  return new Date(Math.min(connected, firstOrder)).toISOString();
+}
 
 function newPool() {
   return getPool();
@@ -32,13 +41,18 @@ async function loadStores(pool: Pool, userId: string) {
     "lastOrderSyncAt",
     "lastFullOrderSyncAt",
   ]);
-  const extra = [...optional].map((c) => `, "${c}"`).join("");
+  const extra = [...optional].map((c) => `, c."${c}"`).join("");
   const result = await pool.query<StoreRow>(
     `
-    SELECT "ebayUserId", "updatedAt", "refreshTokenExpiresAt"${extra}
-    FROM public."ebayConnection"
-    WHERE "userId" = $1 AND environment = 'PRODUCTION' AND "ebayUserId" IS NOT NULL
-    ORDER BY "createdAt" ASC, id ASC
+    SELECT c."ebayUserId", c."updatedAt", c."refreshTokenExpiresAt", c."createdAt"${extra},
+      (
+        SELECT min(o."orderDate")
+        FROM public."order" o
+        WHERE o."userId" = c."userId" AND o."ebayUserId" = c."ebayUserId"
+      ) AS "firstOrderAt"
+    FROM public."ebayConnection" c
+    WHERE c."userId" = $1 AND c.environment = 'PRODUCTION' AND c."ebayUserId" IS NOT NULL
+    ORDER BY c."createdAt" ASC, c.id ASC
     `,
     [userId]
   );
@@ -82,6 +96,11 @@ export async function GET() {
           // Shown in Settings → Syncing.
           lastSyncAt: iso(row.lastOrderSyncAt),
           lastFullSyncAt: iso(row.lastFullOrderSyncAt),
+          // The earliest day ProfitSync has this store's orders from: eBay
+          // only hands over the last year of orders, counted from when the
+          // store was connected. The Taxes page warns when a year starts
+          // before this.
+          dataFrom: dataFrom(row),
         })),
       },
       { headers: { "Cache-Control": "private, no-store" } }

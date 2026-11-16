@@ -12,6 +12,15 @@ export const dynamic = "force-dynamic";
 
 // Added by docs/sql/2026-11-08_expense_repeat.sql.
 const REPEAT_COLUMNS = ["repeatMonthly", "endedOn"];
+// Added by docs/sql/2026-11-16_ebay_charge_expenses.sql: set on rows each
+// sync keeps up to date from eBay, which sellers can't edit or delete.
+const EBAY_CHARGE_COLUMN = "ebayChargeKey";
+
+async function hasEbayCharges(pool: Pool) {
+  return (await existingColumns(pool, "expense", [EBAY_CHARGE_COLUMN])).has(EBAY_CHARGE_COLUMN);
+}
+
+const FROM_EBAY_ERROR = "This expense comes from eBay and updates on every sync, so it can't be changed here.";
 
 // Postgres "undefined table": the expenses SQL hasn't been run yet.
 function isMissingTable(error: unknown) {
@@ -49,6 +58,14 @@ function parseAmount(value: unknown): number | null {
   return amount >= 0 && amount <= 1_000_000 ? amount : null;
 }
 
+async function isFromEbay(pool: Pool, id: number, userId: string) {
+  const result = await pool.query(
+    `SELECT 1 FROM public."expense" WHERE id = $1 AND "userId" = $2 AND "ebayChargeKey" IS NOT NULL`,
+    [id, userId]
+  );
+  return Boolean(result.rowCount);
+}
+
 async function canRepeat(pool: Pool) {
   const columns = await existingColumns(pool, "expense", REPEAT_COLUMNS);
   return REPEAT_COLUMNS.every((c) => columns.has(c));
@@ -66,7 +83,10 @@ export async function GET(request: Request) {
     const wholeBusiness = new URL(request.url).searchParams.get("scope") === "business";
     const store = wholeBusiness ? null : await resolveActiveEbayUserId(pool, user);
     const repeat = await canRepeat(pool);
-    const extra = repeat ? `, "repeatMonthly", to_char("endedOn", 'YYYY-MM-DD') AS "endedOn"` : "";
+    const ebayCharges = await hasEbayCharges(pool);
+    const extra =
+      (repeat ? `, "repeatMonthly", to_char("endedOn", 'YYYY-MM-DD') AS "endedOn"` : "") +
+      (ebayCharges ? `, ("ebayChargeKey" IS NOT NULL) AS "fromEbay"` : "");
     const result = await pool.query(
       `
       SELECT id, "ebayUserId", to_char("spentOn", 'YYYY-MM-DD') AS "spentOn", category, amount, note${extra}
@@ -190,11 +210,17 @@ export async function PATCH(request: Request) {
         { status: 409 }
       );
     }
+    const ebayCharges = await hasEbayCharges(pool);
     const result = await pool.query(
-      `UPDATE public."expense" SET ${sets.join(", ")} WHERE id = $1 AND "userId" = $2`,
+      `UPDATE public."expense" SET ${sets.join(", ")} WHERE id = $1 AND "userId" = $2${ebayCharges ? ` AND "ebayChargeKey" IS NULL` : ""}`,
       values
     );
-    if (!result.rowCount) return NextResponse.json({ error: "Expense not found." }, { status: 404 });
+    if (!result.rowCount) {
+      if (ebayCharges && (await isFromEbay(pool, id, user.id))) {
+        return NextResponse.json({ error: FROM_EBAY_ERROR }, { status: 409 });
+      }
+      return NextResponse.json({ error: "Expense not found." }, { status: 404 });
+    }
     return NextResponse.json({ success: true });
   } catch (e) {
     console.error("Updating expense failed:", e);
@@ -213,8 +239,17 @@ export async function DELETE(request: Request) {
 
   const pool = newPool();
   try {
-    const result = await pool.query(`DELETE FROM public."expense" WHERE id = $1 AND "userId" = $2`, [id, user.id]);
-    if (!result.rowCount) return NextResponse.json({ error: "Expense not found." }, { status: 404 });
+    const ebayCharges = await hasEbayCharges(pool);
+    const result = await pool.query(
+      `DELETE FROM public."expense" WHERE id = $1 AND "userId" = $2${ebayCharges ? ` AND "ebayChargeKey" IS NULL` : ""}`,
+      [id, user.id]
+    );
+    if (!result.rowCount) {
+      if (ebayCharges && (await isFromEbay(pool, id, user.id))) {
+        return NextResponse.json({ error: FROM_EBAY_ERROR }, { status: 409 });
+      }
+      return NextResponse.json({ error: "Expense not found." }, { status: 404 });
+    }
     return NextResponse.json({ success: true });
   } catch (e) {
     console.error("Deleting expense failed:", e);

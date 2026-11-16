@@ -1877,51 +1877,53 @@ export async function syncOrders(
         // kind, kept up to date on every sync (and removed if eBay credits
         // it all back). Needs docs/sql/2026-11-16_ebay_charge_expenses.sql;
         // skipped until then.
-        if (unattachedCharges) try {
-          const columns = await existingColumns(client, "expense", ["ebayChargeKey"]);
-          if (columns.has("ebayChargeKey")) {
-            const kept = unattachedCharges.filter((charge) => charge.cents > 0);
-            if (kept.length > 0) {
-              const result = await client.query(
+        if (unattachedCharges) {
+          try {
+            const columns = await existingColumns(client, "expense", ["ebayChargeKey"]);
+            if (columns.has("ebayChargeKey")) {
+              const kept = unattachedCharges.filter((charge) => charge.cents > 0);
+              if (kept.length > 0) {
+                const result = await client.query(
+                  `
+                    INSERT INTO public."expense"
+                      ("userId", "ebayUserId", "spentOn", category, amount, note, "ebayChargeKey")
+                    SELECT $1, $2, (v.month || '-01')::date, v.category, v.amount, v.note, v.key
+                    FROM unnest($3::text[], $4::text[], $5::text[], $6::numeric[], $7::text[])
+                      AS v(key, month, category, amount, note)
+                    ON CONFLICT ("userId", "ebayUserId", "ebayChargeKey") WHERE "ebayChargeKey" IS NOT NULL
+                    DO UPDATE SET amount = EXCLUDED.amount, note = EXCLUDED.note, category = EXCLUDED.category
+                    WHERE public."expense".amount IS DISTINCT FROM EXCLUDED.amount
+                       OR public."expense".note IS DISTINCT FROM EXCLUDED.note
+                  `,
+                  [
+                    userId,
+                    ebayUserId,
+                    kept.map((charge) => charge.key),
+                    kept.map((charge) => charge.month),
+                    kept.map((charge) => charge.category),
+                    kept.map((charge) => formatMoney(charge.cents)),
+                    kept.map((charge) => chargeNote(charge.count)),
+                  ]
+                );
+                ebayChargesSaved = result.rowCount ?? 0;
+              }
+              // Months that were fully downloaded but no longer have a charge.
+              await client.query(
                 `
-                  INSERT INTO public."expense"
-                    ("userId", "ebayUserId", "spentOn", category, amount, note, "ebayChargeKey")
-                  SELECT $1, $2, (v.month || '-01')::date, v.category, v.amount, v.note, v.key
-                  FROM unnest($3::text[], $4::text[], $5::text[], $6::numeric[], $7::text[])
-                    AS v(key, month, category, amount, note)
-                  ON CONFLICT ("userId", "ebayUserId", "ebayChargeKey") WHERE "ebayChargeKey" IS NOT NULL
-                  DO UPDATE SET amount = EXCLUDED.amount, note = EXCLUDED.note, category = EXCLUDED.category
-                  WHERE public."expense".amount IS DISTINCT FROM EXCLUDED.amount
-                     OR public."expense".note IS DISTINCT FROM EXCLUDED.note
+                  DELETE FROM public."expense"
+                  WHERE "userId" = $1
+                    AND "ebayUserId" = $2
+                    AND "ebayChargeKey" IS NOT NULL
+                    AND "spentOn" >= ($3 || '-01')::date
+                    AND NOT ("ebayChargeKey" = ANY($4::text[]))
                 `,
-                [
-                  userId,
-                  ebayUserId,
-                  kept.map((charge) => charge.key),
-                  kept.map((charge) => charge.month),
-                  kept.map((charge) => charge.category),
-                  kept.map((charge) => formatMoney(charge.cents)),
-                  kept.map((charge) => chargeNote(charge.count)),
-                ]
+                [userId, ebayUserId, firstFullMonth(window.financeStart), kept.map((charge) => charge.key)]
               );
-              ebayChargesSaved = result.rowCount ?? 0;
             }
-            // Months that were fully downloaded but no longer have a charge.
-            await client.query(
-              `
-                DELETE FROM public."expense"
-                WHERE "userId" = $1
-                  AND "ebayUserId" = $2
-                  AND "ebayChargeKey" IS NOT NULL
-                  AND "spentOn" >= ($3 || '-01')::date
-                  AND NOT ("ebayChargeKey" = ANY($4::text[]))
-              `,
-              [userId, ebayUserId, firstFullMonth(window.financeStart), kept.map((charge) => charge.key)]
-            );
+          } catch (error) {
+            // Never fails the sync: the orders are already saved.
+            console.error("Saving eBay charges as expenses failed:", error);
           }
-        } catch (error) {
-          // Never fails the sync: the orders are already saved.
-          console.error("Saving eBay charges as expenses failed:", error);
         }
         // ====================================================
         // DEFAULT SHIPPING FROM LISTINGS (new orders only)

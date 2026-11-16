@@ -75,7 +75,8 @@ export const PLANS: Record<PlanId, Plan> = {
       "A full year of order history",
       "Tax report you can print or save as PDF",
       "CSV download and shipping-cost import",
-      "Automatic sync and the All stores view",
+      "Automatic sync every 30 minutes, plus daily",
+      "The All stores view",
     ],
   },
   ultimate: {

@@ -18,6 +18,9 @@ export type TaxOrder = {
   refundLoss: number;
   // A refunded order whose outcome (item back, lost…) hasn't been set yet.
   refundUnreviewed?: boolean;
+  // eBay hasn't reported this order's fees yet (they usually arrive within
+  // a day), so its fees count as $0 for now.
+  feesPending?: boolean;
   // Which store it's from (shown in warnings when covering several stores).
   storeName?: string | null;
   storeId?: string | null;
@@ -37,6 +40,8 @@ export type TaxExpense = {
   note?: string | null;
   ebayUserId?: string | null;
   repeatMonthly?: boolean;
+  // Added from eBay by the sync (store subscription, insertion fees…).
+  fromEbay?: boolean;
 };
 
 export type Line = { label: string; amount: number; strong?: boolean; negative?: boolean };
@@ -68,6 +73,11 @@ export type TaxReportData = {
   missingCost: number;
   noShipping: number;
   unreviewed: number;
+  // Kept orders still waiting for eBay's fees.
+  feesPending: number;
+  // Months where a hand-entered "eBay Store subscription" expense sits next
+  // to the one ProfitSync added from eBay: probably counted twice.
+  doubleSubscriptionMonths: number;
   expenseCount: number;
   grossSales: number;
   refunds: number;
@@ -89,6 +99,22 @@ export type TaxReportData = {
   costs: Line[];
   months: MonthRow[];
 };
+
+// The category sellers (and the sync) use for the eBay Store subscription.
+export const EBAY_SUBSCRIPTION_CATEGORY = "eBay Store subscription";
+
+// Stores whose orders in ProfitSync start after the year began, so the
+// report is missing the start of the year. eBay only hands over the last
+// 12 months of orders, counted from when a store was connected.
+export function storesMissingStartOfYear<T extends { name: string; dataFrom?: string | null }>(
+  stores: T[],
+  year: number
+): Array<T & { dataFrom: string }> {
+  const startOfYear = `${year}-01-01`;
+  return stores.filter(
+    (store): store is T & { dataFrom: string } => typeof store.dataFrom === "string" && store.dataFrom.slice(0, 10) > startOfYear
+  );
+}
 
 export function yearOf(date: string | null | undefined): number | null {
   if (!date) return null;
@@ -175,6 +201,13 @@ export function buildTaxReport(orders: TaxOrder[], expenses: TaxExpense[], year:
     (expenseCategoryMonths[expense.category] ??= new Array(12).fill(0))[month] += amount;
     months[month].expenses += amount;
   }
+  const subscriptionMonths = { typed: new Set<number>(), fromEbay: new Set<number>() };
+  for (const expense of expenses) {
+    if (yearOf(expense.date) !== year || expense.category !== EBAY_SUBSCRIPTION_CATEGORY) continue;
+    const month = monthOf(expense.date) ?? 0;
+    (expense.fromEbay ? subscriptionMonths.fromEbay : subscriptionMonths.typed).add(month);
+  }
+  const doubleSubscriptionMonths = [...subscriptionMonths.typed].filter((m) => subscriptionMonths.fromEbay.has(m)).length;
   for (const list of Object.values(expenseCategoryMonths)) {
     list.forEach((value, i) => (list[i] = cents(value)));
   }
@@ -213,6 +246,8 @@ export function buildTaxReport(orders: TaxOrder[], expenses: TaxExpense[], year:
     missingCost: kept.filter((o) => o.productCost === null).length,
     noShipping: kept.filter((o) => o.shipping <= 0).length,
     unreviewed: refunded.filter((o) => o.refundUnreviewed).length,
+    feesPending: kept.filter((o) => o.feesPending).length,
+    doubleSubscriptionMonths,
     expenseCount: byCategory.size,
     grossSales,
     refunds,

@@ -102,6 +102,8 @@ export type SyncResponse = {
   // Free plan: new orders left out because the month's allowance is used.
   ordersOverPlanLimit?: number;
   monthlyOrderLimit?: number | null;
+  // Months of eBay charges not tied to an order saved to Expenses.
+  ebayChargesSaved?: number;
   error?: string;
   message?: string;
 };
@@ -181,6 +183,14 @@ export function isFullyRefunded(order: Order) {
 // sales everywhere.
 export function isCanceled(order: Order) {
   return orderIsCanceled(order);
+}
+
+// eBay hasn't reported this sale's fees yet. Every eBay sale has at least a
+// per-order fee, so $0 fees on a sale that wasn't cancelled or refunded
+// means the fees just haven't arrived (usually within a day). Until then
+// profit is shown before fees, and the order says so.
+export function feesPending(order: Order) {
+  return !isFullyRefunded(order) && !isCanceled(order) && order.salePrice > 0 && order.ebayFees === 0;
 }
 
 export function getRefundLoss(order: Order) {
@@ -551,9 +561,10 @@ export function computeTotals(periodOrders: Order[], periodExpenses: Array<{ amo
   const profitMargin = completedRevenue > 0
     ? (netProfit / completedRevenue) * 100 : 0;
   const pendingOrders = activeOrders.length - completedOrders.length;
+  const feesPendingCount = activeOrders.filter(feesPending).length;
   return {
     totalRevenue, totalFees, totalLabels, totalOtherFees, totalProductCosts, netProfit, expensesTotal, refundLosses, profitMargin,
-    completedCount: completedOrders.length, pendingOrders,
+    completedCount: completedOrders.length, pendingOrders, feesPendingCount,
     orderCount: activeOrders.length, refundedCount,
     // Display only: average profit of the orders that have a cost.
     completedProfit,
