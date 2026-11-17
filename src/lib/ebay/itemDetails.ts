@@ -52,22 +52,74 @@ export async function appToken(apiBase: string): Promise<string | null> {
   }
 }
 
-// Details for one listing, or null when eBay can't show it (ended,
-// private, or a multi-variation listing).
+// eBay's answer when a listing has options (sizes, colours): it has to be
+// read as an "item group" instead.
+const ITEM_GROUP_ERROR = 11006;
+
+// The first few failed lookups are logged (status and eBay's error id),
+// so a problem shows up in the server logs.
+let failuresLogged = 0;
+function logFailure(itemId: string, step: string, status: number, errorIds: number[]) {
+  if (failuresLogged >= 5) return;
+  failuresLogged += 1;
+  console.warn("eBay item details unavailable:", { itemId, step, status, errorIds });
+}
+
+type BrowseError = { errors?: Array<{ errorId?: number }> };
+
+// Details for one listing, or null when eBay can't show it (ended or
+// private). Listings with options are read through their item group.
 export async function fetchItemDetails(apiBase: string, token: string, itemId: string): Promise<ItemDetails | null> {
+  const headers = { Authorization: `Bearer ${token}`, Accept: "application/json", "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" };
   try {
-    const response = await fetch(
-      `${apiBase}/buy/browse/v1/item/get_item_by_legacy_id?${new URLSearchParams({ legacy_item_id: itemId })}`,
-      {
-        headers: { Authorization: `Bearer ${token}`, Accept: "application/json", "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" },
-        cache: "no-store",
-      }
-    );
-    if (!response.ok) return null;
-    return parseItemDetails(await response.json());
-  } catch {
+    const response = await fetch(`${apiBase}/buy/browse/v1/item/get_item_by_legacy_id?${new URLSearchParams({ legacy_item_id: itemId })}`, {
+      headers,
+      cache: "no-store",
+    });
+    if (response.ok) return parseItemDetails(await response.json());
+
+    const body = (await response.json().catch(() => ({}))) as BrowseError;
+    const errorIds = (body.errors ?? []).map((e) => e.errorId ?? 0);
+    if (!errorIds.includes(ITEM_GROUP_ERROR)) {
+      logFailure(itemId, "item", response.status, errorIds);
+      return null;
+    }
+
+    const group = await fetch(`${apiBase}/buy/browse/v1/item/get_items_by_item_group?${new URLSearchParams({ item_group_id: itemId })}`, {
+      headers,
+      cache: "no-store",
+    });
+    if (!group.ok) {
+      const groupBody = (await group.json().catch(() => ({}))) as BrowseError;
+      logFailure(itemId, "item group", group.status, (groupBody.errors ?? []).map((e) => e.errorId ?? 0));
+      return null;
+    }
+    return parseItemGroup(await group.json());
+  } catch (error) {
+    logFailure(itemId, "network", 0, []);
+    console.warn("eBay item details request failed:", error instanceof Error ? error.message : error);
     return null;
   }
+}
+
+// An item group (a listing with options): category and brand are the same
+// for every option, so the first one with them is used.
+export function parseItemGroup(data: unknown): ItemDetails | null {
+  const items = ((data ?? {}) as { items?: unknown[] }).items ?? [];
+  let found: ItemDetails | null = null;
+  for (const item of items) {
+    const details = parseItemDetails(item);
+    if (!found) found = details;
+    else {
+      found = {
+        category: found.category ?? details.category,
+        categoryPath: found.categoryPath ?? details.categoryPath,
+        brand: found.brand ?? details.brand,
+      };
+    }
+    if (found.category && found.brand) break;
+  }
+  return found;
 }
 
 // Look up several listings, a few at a time.

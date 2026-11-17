@@ -69,6 +69,15 @@ export function monthlyReport(
   });
 }
 
+// The chart starts at the first month with any sales or expenses, so
+// months before the seller's history don't look like a blank chart.
+// Keeps at least 3 months.
+export function trimEmptyStart(months: MonthRow[]): MonthRow[] {
+  const first = months.findIndex((m) => m.orders > 0 || m.profit !== 0);
+  if (first <= 0) return months;
+  return months.slice(Math.min(first, Math.max(0, months.length - 3)));
+}
+
 // Best and worst months among finished months that had sales (the last row
 // is the month in progress, which would always look slow).
 export function bestAndWorst(rows: MonthRow[]) {

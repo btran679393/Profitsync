@@ -11,12 +11,12 @@ import {
   monthlyReport,
   profitBy,
   repeatBuyers,
+  trimEmptyStart,
   type GroupRow,
   type MonthRow,
 } from "@/lib/reports";
 
 const money = (value: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
-const money0 = (value: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
 
 function shortDate(iso: string | null) {
   if (!iso) return "—";
@@ -25,6 +25,15 @@ function shortDate(iso: string | null) {
 }
 
 type Span = "12" | "24";
+
+// "$739", "$1.2k", "−$45" for labels on the bars.
+function barLabel(value: number) {
+  const sign = value < 0 ? "−" : "";
+  const v = Math.abs(value);
+  if (v >= 10_000) return `${sign}$${Math.round(v / 1000)}k`;
+  if (v >= 1000) return `${sign}$${(v / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+  return `${sign}$${Math.round(v)}`;
+}
 
 // Reports: how the business is doing over time. Months, categories,
 // brands and repeat buyers, for the store (or all stores) being viewed.
@@ -220,8 +229,10 @@ function MiniStat({ label, value }: { label: string; value: string }) {
 }
 
 // Profit per month as bars (green above zero, red below), with a table.
-function MonthChart({ months, best, worst }: { months: MonthRow[]; best: string | null; worst: string | null }) {
+function MonthChart({ months: allMonths, best, worst }: { months: MonthRow[]; best: string | null; worst: string | null }) {
   const [showTable, setShowTable] = useState(false);
+  const months = trimEmptyStart(allMonths);
+  const trimmed = months.length < allMonths.length;
   const top = Math.max(1, ...months.map((m) => Math.max(0, m.profit)));
   const bottom = Math.max(0, ...months.map((m) => Math.max(0, -m.profit)));
   const range = top + bottom;
@@ -268,22 +279,40 @@ function MonthChart({ months, best, worst }: { months: MonthRow[]; best: string 
           </div>
         ) : (
           <div>
-            <div className="flex h-48 items-stretch gap-1 sm:gap-1.5" role="img" aria-label="Profit by month">
+            <div className={cn("flex h-56 items-stretch gap-1 pt-6 sm:gap-1.5", bottom > 0 && "pb-5")} role="img" aria-label="Profit by month">
               {months.map((m) => {
                 const up = (Math.max(0, m.profit) / range) * 100;
                 const down = (Math.max(0, -m.profit) / range) * 100;
+                const label = (
+                  <span
+                    className={cn(
+                      "ps-num pointer-events-none absolute left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-semibold sm:text-xs",
+                      m.profit < 0 ? "top-full mt-1 text-loss" : "bottom-full mb-1",
+                      m.profit > 0 && (m.key === best ? "text-profit" : "text-ink-2"),
+                      m.profit === 0 && "text-subtle"
+                    )}
+                  >
+                    {m.orders === 0 && m.profit === 0 ? "" : barLabel(m.profit)}
+                  </span>
+                );
                 return (
-                  <div key={m.key} className="group relative flex min-w-0 flex-1 flex-col" title={`${monthLabel(m.key)}: ${money(m.profit)} profit on ${money(m.sales)} sales`}>
+                  <div key={m.key} className="group relative flex min-w-0 flex-1 flex-col" title={`${monthLabel(m.key)}: ${money(m.profit)} profit on ${money(m.sales)} sales, ${m.orders} orders`}>
                     <div className="flex flex-col justify-end" style={{ height: `${(top / range) * 100}%` }}>
                       <div
-                        className={cn("rounded-t-sm transition-opacity group-hover:opacity-80", m.key === best ? "bg-profit" : "bg-accent/70")}
+                        className={cn("relative rounded-t-sm transition-opacity group-hover:opacity-80", m.key === best ? "bg-profit" : "bg-accent/70")}
                         style={{ height: `${m.profit > 0 ? Math.max(up / (top / range), 1) : 0}%` }}
-                      />
+                      >
+                        {m.profit >= 0 && label}
+                      </div>
                     </div>
                     <div className="border-t border-line-strong" />
                     {bottom > 0 && (
                       <div style={{ height: `${(bottom / range) * 100}%` }}>
-                        {down > 0 && <div className="rounded-b-sm bg-loss/80" style={{ height: `${(down / (bottom / range)) }%` }} />}
+                        {down > 0 && (
+                          <div className="relative rounded-b-sm bg-loss/80" style={{ height: `${down / (bottom / range)}%` }}>
+                            {label}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -299,8 +328,8 @@ function MonthChart({ months, best, worst }: { months: MonthRow[]; best: string 
               ))}
             </div>
             <p className="mt-3 text-xs text-subtle">
-              Highest bar {best ? `${monthLabel(best)} (${money0(months.find((m) => m.key === best)?.profit ?? 0)})` : "—"}. Hover a bar for the numbers, or
-              show it as a table.
+              {trimmed ? `Starts in ${monthLabel(months[0].key)}, your first month with sales in ProfitSync. ` : ""}
+              Hover a bar for sales and orders, or show it as a table.
             </p>
           </div>
         )}

@@ -401,8 +401,13 @@ async function syncListings(request: Request) {
           `
           SELECT "ebayItemId" FROM public."EbayListing"
           WHERE "userId" = $1 AND "ebayUserId" = $2 AND environment = $3
-            AND ("detailsCheckedAt" IS NULL OR "detailsCheckedAt" < NOW() - INTERVAL '30 days')
-          ORDER BY status = 'ACTIVE' DESC, "updatedAt" DESC
+            AND (
+              "detailsCheckedAt" IS NULL
+              -- eBay didn't give details last time: try again after a day.
+              OR ("categoryName" IS NULL AND "detailsCheckedAt" < NOW() - INTERVAL '1 day')
+              OR "detailsCheckedAt" < NOW() - INTERVAL '30 days'
+            )
+          ORDER BY "detailsCheckedAt" IS NULL DESC, status = 'ACTIVE' DESC, "updatedAt" DESC
           LIMIT 60
           `,
           [user.id, connection.ebayUserId, environment]

@@ -151,3 +151,33 @@ describe("eBay item details", () => {
     expect([PLANS.free.limits.reports, PLANS.pro.limits.reports, PLANS.ultimate.limits.reports]).toEqual([false, true, true]);
   });
 });
+
+describe("Reports polish", () => {
+  it("starts the chart at the first month with sales (keeping at least 3)", async () => {
+    const { trimEmptyStart } = await import("@/lib/reports");
+    const row = (key: string, orders: number, profit: number) => ({ key, orders, profit, sales: 0, margin: null, missingCost: 0 });
+    const months = [row("2026-01", 0, 0), row("2026-02", 0, 0), row("2026-03", 0, -5), row("2026-04", 2, 50), row("2026-05", 1, 20)];
+    // March had an expense (a loss), so the chart starts there.
+    expect(trimEmptyStart(months).map((m) => m.key)).toEqual(["2026-03", "2026-04", "2026-05"]);
+    const late = [row("2026-01", 0, 0), row("2026-02", 0, 0), row("2026-03", 0, 0), row("2026-04", 0, 0), row("2026-05", 3, 20)];
+    expect(trimEmptyStart(late).map((m) => m.key)).toEqual(["2026-03", "2026-04", "2026-05"]);
+    expect(trimEmptyStart([row("2026-05", 1, 1)])).toHaveLength(1);
+  });
+
+  it("reads category and brand from a listing with options (an item group)", async () => {
+    const { parseItemGroup } = await import("@/lib/ebay/itemDetails");
+    expect(
+      parseItemGroup({
+        items: [
+          { categoryPath: "Sports Mem, Cards & Fan Shop|Fan Apparel & Souvenirs|Soccer-National Teams" },
+          { categoryPath: "Sports Mem, Cards & Fan Shop|Fan Apparel & Souvenirs|Soccer-National Teams", brand: "ABA Sport" },
+        ],
+      })
+    ).toEqual({
+      category: "Soccer-National Teams",
+      categoryPath: "Sports Mem, Cards & Fan Shop|Fan Apparel & Souvenirs|Soccer-National Teams",
+      brand: "ABA Sport",
+    });
+    expect(parseItemGroup({ items: [] })).toBeNull();
+  });
+});
