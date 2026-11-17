@@ -6,12 +6,14 @@ import { conversionText, listingSignals } from "@/lib/listingSignals";
 import {
   Badge,
   Button,
+  buttonClasses,
   Card,
   Checkbox,
   EmptyState,
   Input,
   LoadingRegion,
   MoneyInput,
+  Notice,
   SegmentedControl,
   Select,
   Skeleton,
@@ -58,8 +60,8 @@ export type ListingRow = {
   lowestOffer: number | null;
 };
 
-type SortKey = "profit" | "units" | "revenue" | "margin" | "recent" | "stock";
-type StatusFilter = "all" | "ACTIVE" | "selling" | "unsold" | "ENDED" | "low" | "stale";
+type SortKey = "profit" | "units" | "revenue" | "margin" | "recent" | "stock" | "watchers" | "views";
+type StatusFilter = "all" | "ACTIVE" | "selling" | "unsold" | "watched" | "ENDED" | "low" | "stale";
 
 export type ListingRange = "all" | "year" | "90d" | "30d" | "7d";
 
@@ -85,6 +87,7 @@ const FILTERS: ReadonlyArray<readonly [StatusFilter, string]> = [
   ["selling", "Sold"],
   ["ACTIVE", "Active"],
   ["unsold", "Active, not sold"],
+  ["watched", "Has watchers"],
   ["ENDED", "Ended"],
   ["low", "Running low"],
   ["stale", "Not selling"],
@@ -415,9 +418,7 @@ function ListingMeta({ row, staleAfterDays }: { row: ListingRow; staleAfterDays:
       )}
       {signals.includes("viewsNoSales") && (
         <Badge tone="warn">
-          <span title="Lots of people open it but nobody buys. The price or photos may be holding it back.">
-            {row.views30} views, no sales
-          </span>
+          <span title="Lots of people open it but nobody buys. The price or photos may be holding it back.">Views, no sales</span>
         </Badge>
       )}
       {signals.includes("watchers") && (
@@ -425,11 +426,11 @@ function ListingMeta({ row, staleAfterDays }: { row: ListingRow; staleAfterDays:
           <span
             title={
               row.lowestOffer !== null
-                ? `Send these watchers an offer on eBay. You still make your target profit down to ${money(row.lowestOffer)}.`
+                ? `Send these watchers an offer on eBay (Seller Hub → Listings → Send offer). You still make your target profit down to ${money(row.lowestOffer)}.`
                 : "Send these watchers an offer on eBay. Add a cost to see the lowest price you can offer."
             }
           >
-            {row.watchers} watching{row.lowestOffer !== null ? ` · offer from ${money(row.lowestOffer)}` : ""}
+            Send watchers an offer
           </span>
         </Badge>
       )}
@@ -438,17 +439,83 @@ function ListingMeta({ row, staleAfterDays }: { row: ListingRow; staleAfterDays:
           <span title="A high share of views turn into sales. There may be room to raise the price.">Selling fast</span>
         </Badge>
       )}
-      {(row.views30 !== null || row.watchers !== null) && (
-        <span className="ps-num" title="From eBay, last 30 days">
-          {[
-            row.views30 !== null && `${row.views30.toLocaleString("en-US")} views`,
-            row.watchers !== null && `${row.watchers} watching`,
-            conversionText(row.views30, row.sales30) && `${conversionText(row.views30, row.sales30)} bought`,
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-        </span>
-      )}
+    </div>
+  );
+}
+
+function EyeIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-subtle" aria-hidden="true">
+      <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function HeartIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill={active ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cn("shrink-0", active ? "text-accent" : "text-subtle")} aria-hidden="true">
+      <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 0 0 0-7.8Z" />
+    </svg>
+  );
+}
+
+const VIEWS_HELP = "How many times buyers opened this listing on eBay in the last 30 days.";
+const OFFER_HELP =
+  "The lowest price you can accept (an offer or a price cut) and still make your target profit after eBay fees, ad fees, shipping and the item's cost. Set your target in Settings.";
+
+// Buyer interest from eBay: views (30 days), watchers, and how low an offer
+// can go. Only for listings that are still for sale.
+function InterestCell({ row, viewsOff, compact = false }: { row: ListingRow; viewsOff: boolean; compact?: boolean }) {
+  if (row.status !== "ACTIVE") return compact ? null : <span className="text-xs text-subtle">—</span>;
+  const watchers = row.watchers ?? 0;
+  const conversion = conversionText(row.views30, row.sales30);
+  const views =
+    row.views30 !== null ? (
+      <span className="inline-flex items-center gap-1.5 whitespace-nowrap" title={VIEWS_HELP}>
+        <EyeIcon />
+        <span className="ps-num font-semibold text-ink">{row.views30.toLocaleString("en-US")}</span>
+        <span className="text-subtle">views</span>
+        {conversion && (
+          <span className="text-subtle" title="Share of views that turned into a sale (last 30 days)">
+            · {conversion} buy
+          </span>
+        )}
+      </span>
+    ) : (
+      <span className="inline-flex items-center gap-1.5 text-subtle" title={viewsOff ? "Reconnect eBay once to see views (see the note above the list)." : VIEWS_HELP}>
+        <EyeIcon />
+        {viewsOff ? "Views off" : "No views yet"}
+      </span>
+    );
+  const watching = (
+    <span className="inline-flex items-center gap-1.5" title="People who saved this listing to their eBay watch list. They're often waiting for an offer.">
+      <HeartIcon active={watchers >= 2} />
+      <span className={cn("ps-num font-semibold", watchers >= 2 ? "text-accent-ink" : watchers > 0 ? "text-ink" : "text-subtle")}>{row.watchers ?? "—"}</span>
+      <span className="text-subtle">watching</span>
+    </span>
+  );
+  const offer =
+    row.lowestOffer !== null ? (
+      <span className="ps-num text-accent-ink" title={OFFER_HELP}>
+        Lowest offer {money(row.lowestOffer)}
+      </span>
+    ) : null;
+
+  if (compact) {
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        {views}
+        {watching}
+        {offer}
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-1 text-xs">
+      <div>{views}</div>
+      <div>{watching}</div>
+      {offer && <div className="text-[11px]">{offer}</div>}
     </div>
   );
 }
@@ -480,6 +547,7 @@ export default function ListingsSection({
   onSaveStoreShipping,
   canSetStoreShipping = true,
   staleAfterDays = 60,
+  reconnectHref = "/api/ebay/auth",
 }: {
   rows: ListingRow[];
   loading: boolean;
@@ -495,6 +563,8 @@ export default function ListingsSection({
   canSetStoreShipping?: boolean;
   // Settings → Listing alerts: days without a sale before "Not selling".
   staleAfterDays?: number;
+  // Where "Reconnect eBay" goes (turns on listing views).
+  reconnectHref?: string;
 }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -508,8 +578,14 @@ export default function ListingsSection({
     const bestSeller = [...selling].sort((a, b) => b.unitsSold - a.unitsSold)[0];
     const topEarner = [...selling].sort((a, b) => b.netProfit - a.netProfit)[0];
     const stockValue = active.reduce((sum, r) => sum + (r.price ?? 0) * (r.available ?? 0), 0);
+    const watched = active.filter((r) => (r.watchers ?? 0) > 0);
     return {
       activeCount: active.length,
+      // eBay sends views once the store has allowed it (Reconnect eBay).
+      viewsOff: active.length > 0 && active.every((r) => r.views30 === null),
+      views: active.reduce((sum, r) => sum + (r.views30 ?? 0), 0),
+      watchers: active.reduce((sum, r) => sum + (r.watchers ?? 0), 0),
+      watchedCount: watched.length,
       unsoldActive: active.filter((r) => r.unitsSold === 0).length,
       sellingCount: selling.length,
       bestSeller,
@@ -525,6 +601,7 @@ export default function ListingsSection({
       selling: rows.filter((r) => r.unitsSold > 0).length,
       ACTIVE: rows.filter((r) => r.status === "ACTIVE").length,
       unsold: rows.filter((r) => r.status === "ACTIVE" && r.unitsSold === 0).length,
+      watched: rows.filter((r) => r.status === "ACTIVE" && (r.watchers ?? 0) > 0).length,
       ENDED: rows.filter((r) => r.status !== "ACTIVE").length,
       low: rows.filter((r) => r.alert === "low").length,
       stale: rows.filter((r) => r.alert === "stale").length,
@@ -540,6 +617,7 @@ export default function ListingsSection({
       if (status === "ENDED") return r.status !== "ACTIVE";
       if (status === "selling") return r.unitsSold > 0;
       if (status === "unsold") return r.status === "ACTIVE" && r.unitsSold === 0;
+      if (status === "watched") return r.status === "ACTIVE" && (r.watchers ?? 0) > 0;
       if (status === "low") return r.alert === "low";
       if (status === "stale") return r.alert === "stale";
       return true;
@@ -551,6 +629,8 @@ export default function ListingsSection({
       margin: (r) => r.margin ?? -Infinity,
       recent: (r) => (r.lastSold ? new Date(r.lastSold).getTime() : 0),
       stock: (r) => r.available ?? -1,
+      watchers: (r) => (r.status === "ACTIVE" ? r.watchers ?? 0 : -1),
+      views: (r) => (r.status === "ACTIVE" ? r.views30 ?? 0 : -1),
     };
     return filtered.sort((a, b) => by[sort](b) - by[sort](a) || a.title.localeCompare(b.title));
   }, [rows, query, status, sort]);
@@ -603,12 +683,24 @@ export default function ListingsSection({
   return (
     <div className="space-y-5">
       {/* Summary */}
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-5">
         <StatCard
           label="Active listings"
           loading={loading}
           value={hasSyncedListings ? String(summary.activeCount) : "—"}
           note={hasSyncedListings ? `${summary.unsoldActive} with no sales in this period` : "Load your listings to see them"}
+        />
+        <StatCard
+          label="Buyer interest"
+          loading={loading}
+          value={hasSyncedListings ? `${summary.watchers.toLocaleString("en-US")} watching` : "—"}
+          note={
+            !hasSyncedListings
+              ? "Watchers and views from eBay"
+              : summary.viewsOff
+                ? `On ${summary.watchedCount} listing${summary.watchedCount === 1 ? "" : "s"} · views off`
+                : `On ${summary.watchedCount} listing${summary.watchedCount === 1 ? "" : "s"} · ${summary.views.toLocaleString("en-US")} views in 30 days`
+          }
         />
         <StatCard
           label="Stock on hand"
@@ -623,6 +715,7 @@ export default function ListingsSection({
           note={<span className="line-clamp-1" title={summary.bestSeller?.title}>{summary.bestSeller?.title ?? "No sales in this period"}</span>}
         />
         <StatCard
+          className="col-span-2 xl:col-span-1"
           label="Top earner"
           loading={loading}
           tone={summary.topEarner ? (summary.topEarner.netProfit < 0 ? "loss" : "profit") : "neutral"}
@@ -630,6 +723,21 @@ export default function ListingsSection({
           note={<span className="line-clamp-1" title={summary.topEarner?.title}>{summary.topEarner?.title ?? "No sales in this period"}</span>}
         />
       </div>
+
+      {hasSyncedListings && !loading && summary.viewsOff && (
+        <Notice
+          tone="accent"
+          title="Turn on listing views"
+          action={
+            <a href={reconnectHref} className={buttonClasses("primary", "sm")}>
+              Reconnect eBay
+            </a>
+          }
+        >
+          See how many buyers open each listing and how many of them buy. eBay needs your OK once: reconnect, approve, and views show after
+          your next listing refresh. Your data stays as it is.
+        </Notice>
+      )}
 
       <Card className="overflow-hidden">
         {/* Toolbar */}
@@ -651,6 +759,8 @@ export default function ListingsSection({
                 <option value="margin">Best margin</option>
                 <option value="recent">Recently sold</option>
                 <option value="stock">Most stock left</option>
+                <option value="watchers">Most watchers</option>
+                {!summary.viewsOff && <option value="views">Most views</option>}
               </Select>
             </span>
             {shippingEnabled && canSetStoreShipping && <StoreShippingSetting value={storeShipping} onSave={onSaveStoreShipping} />}
@@ -711,12 +821,13 @@ export default function ListingsSection({
                   <col className="w-11" />
                   <col />
                   <col className="w-24" />
+                  <col className="hidden w-44 xl:table-column" />
                   <col className="w-36" />
                   <col className="w-20" />
-                  <col className="hidden w-28 xl:table-column" />
+                  <col className="hidden w-28 2xl:table-column" />
                   <col className="w-28" />
-                  <col className="hidden w-32 xl:table-column" />
                   <col className="hidden w-28 xl:table-column" />
+                  <col className="hidden w-28 2xl:table-column" />
                 </colgroup>
                 <thead className="sticky top-0 z-10 bg-surface-2 text-left text-xs text-muted">
                   <tr className="[&>th]:border-b [&>th]:border-line [&>th]:px-3 [&>th]:py-2.5 [&>th]:font-medium">
@@ -733,12 +844,15 @@ export default function ListingsSection({
                     </th>
                     <th scope="col">Listing</th>
                     <th scope="col" className="text-right">Price · stock</th>
+                    <th scope="col" className="hidden xl:table-cell" title="From eBay: views in the last 30 days, watchers, and the lowest offer you can accept">
+                      Buyer interest
+                    </th>
                     <th scope="col">Costs</th>
                     <th scope="col" className="text-right">Sold</th>
-                    <th scope="col" className="hidden text-right xl:table-cell">Revenue</th>
+                    <th scope="col" className="hidden text-right 2xl:table-cell">Revenue</th>
                     <th scope="col" className="text-right">Net profit</th>
                     <th scope="col" className="hidden xl:table-cell">Margin</th>
-                    <th scope="col" className="hidden pr-4 text-right xl:table-cell">Last sale</th>
+                    <th scope="col" className="hidden pr-4 text-right 2xl:table-cell">Last sale</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -765,20 +879,20 @@ export default function ListingsSection({
                                 {row.title}
                               </p>
                               <ListingMeta row={row} staleAfterDays={staleAfterDays} />
+                              {row.status === "ACTIVE" && (
+                                <div className="mt-1.5 xl:hidden">
+                                  <InterestCell row={row} viewsOff={summary.viewsOff} compact />
+                                </div>
+                              )}
                             </div>
                           </div>
                         </td>
                         <td className="text-right">
                           <p className="ps-num font-medium text-ink">{row.price !== null ? money(row.price) : "—"}</p>
                           <p className="mt-0.5 text-xs text-subtle">{row.available === null ? "" : row.available === 0 ? "Out of stock" : `${row.available} left`}</p>
-                          {row.status === "ACTIVE" && row.lowestOffer !== null && (
-                            <p
-                              className="ps-num mt-0.5 text-[11px] text-accent-ink"
-                              title="The lowest price you can accept (an offer or a price cut) and still make your target profit after eBay fees, ad fees, shipping and the item's cost. Set your target in Settings."
-                            >
-                              Lowest offer {money(row.lowestOffer)}
-                            </p>
-                          )}
+                        </td>
+                        <td className="hidden xl:table-cell">
+                          <InterestCell row={row} viewsOff={summary.viewsOff} />
                         </td>
                         <td>
                           <CostsCell row={row} onSave={onSaveCost} shippingEnabled={shippingEnabled} storeShipping={storeShipping} />
@@ -789,7 +903,7 @@ export default function ListingsSection({
                             {row.orderCount} order{row.orderCount === 1 ? "" : "s"}
                           </p>
                         </td>
-                        <td className="ps-num hidden text-right font-medium text-ink-2 xl:table-cell">{money(row.revenue)}</td>
+                        <td className="ps-num hidden text-right font-medium text-ink-2 2xl:table-cell">{money(row.revenue)}</td>
                         <td className="text-right">
                           <p className={cn("ps-num font-semibold", row.netProfit < 0 ? "text-loss" : row.netProfit > 0 ? "text-profit" : "text-subtle")}>{money(row.netProfit)}</p>
                           {row.costMissing > 0 ? (
@@ -801,7 +915,7 @@ export default function ListingsSection({
                         <td className="hidden xl:table-cell">
                           <MarginBar margin={row.margin} />
                         </td>
-                        <td className="hidden pr-4 text-right text-xs text-muted xl:table-cell">{relativeDate(row.lastSold)}</td>
+                        <td className="hidden pr-4 text-right text-xs text-muted 2xl:table-cell">{relativeDate(row.lastSold)}</td>
                       </tr>
                     );
                   })}
@@ -848,11 +962,13 @@ export default function ListingsSection({
                           {row.price !== null ? money(row.price) : "—"}
                           {row.available !== null && ` · ${row.available}`}
                         </dd>
-                        {row.status === "ACTIVE" && row.lowestOffer !== null && (
-                          <dd className="ps-num text-[11px] text-accent-ink">Lowest offer {money(row.lowestOffer)}</dd>
-                        )}
                       </div>
                     </dl>
+                    {row.status === "ACTIVE" && (
+                      <div className="mt-3 pl-7">
+                        <InterestCell row={row} viewsOff={summary.viewsOff} compact />
+                      </div>
+                    )}
                     <div className="mt-3 pl-7">
                       <CostsCell row={row} onSave={onSaveCost} shippingEnabled={shippingEnabled} storeShipping={storeShipping} />
                     </div>
