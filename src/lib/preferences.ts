@@ -19,6 +19,9 @@ export type Preferences = {
   // Profit (whole dollars) the seller wants from every sale: the Listings
   // page shows the lowest offer price that still makes it.
   offerTargetProfit: number;
+  // Dollars per business mile for mileage expenses (the IRS standard
+  // rate, which changes each year).
+  mileageRate: number;
 };
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -29,6 +32,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   staleAfterDays: 60,
   setupGuideHidden: false,
   offerTargetProfit: 0,
+  mileageRate: 0.7,
 };
 
 export const THEME_STORAGE_KEY = "profitsync:theme";
@@ -43,6 +47,12 @@ function whole(value: unknown, min: number, max: number, fallback: number) {
   return Number.isInteger(n) && n >= min && n <= max ? n : fallback;
 }
 
+// A rate per mile between 1 cent and $2, to a tenth of a cent.
+function rate(value: unknown, fallback: number) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0.01 && n <= 2 ? Math.round(n * 1000) / 1000 : fallback;
+}
+
 export function readPreferences(meta: Record<string, unknown> | undefined): Preferences {
   const raw = (meta?.preferences ?? {}) as Record<string, unknown>;
   const d = DEFAULT_PREFERENCES;
@@ -54,6 +64,7 @@ export function readPreferences(meta: Record<string, unknown> | undefined): Pref
     staleAfterDays: whole(raw.staleAfterDays, 7, 365, d.staleAfterDays),
     setupGuideHidden: raw.setupGuideHidden === true,
     offerTargetProfit: whole(raw.offerTargetProfit, 0, 10000, d.offerTargetProfit),
+    mileageRate: rate(raw.mileageRate, d.mileageRate),
   };
 }
 

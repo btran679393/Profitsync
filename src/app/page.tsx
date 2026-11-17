@@ -2103,6 +2103,8 @@ function Dashboard() {
               onAdd={addExpense}
               onUpdate={updateExpense}
               onDelete={deleteExpense}
+              mileageRate={preferences.mileageRate}
+              onMileageRateChange={(mileageRate) => void savePreferences({ mileageRate }).catch(() => {})}
             />
           )}
 

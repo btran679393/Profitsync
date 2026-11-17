@@ -1,7 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { EXPENSE_CATEGORIES, MAX_CATEGORY_LENGTH } from "@/lib/expenses";
+import {
+  EXPENSE_CATEGORIES,
+  MAX_CATEGORY_LENGTH,
+  MILEAGE_CATEGORY,
+  cleanMiles,
+  cleanRate,
+  mileageAmount,
+  mileageNote,
+  parseMileageNote,
+  rateText,
+} from "@/lib/expenses";
 import {
   Badge,
   Button,
@@ -99,6 +109,8 @@ export default function ExpensesSection({
   onAdd,
   onUpdate,
   onDelete,
+  mileageRate = 0.7,
+  onMileageRateChange,
 }: {
   expenses: ExpenseEntry[]; // already filtered to the chosen date range
   categories: string[]; // every category the seller has used (for suggestions)
@@ -110,6 +122,9 @@ export default function ExpensesSection({
   onAdd: (expense: NewExpense) => Promise<void>;
   onUpdate: (id: number, changes: ExpenseChanges) => Promise<void>;
   onDelete: (id: number) => Promise<void>;
+  // Dollars per mile for Mileage expenses, and saving a new one.
+  mileageRate?: number;
+  onMileageRateChange?: (rate: number) => void;
 }) {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Expense | null>(null);
@@ -118,6 +133,8 @@ export default function ExpensesSection({
   const [customCategory, setCustomCategory] = useState("");
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
+  const [miles, setMiles] = useState("");
+  const [rate, setRate] = useState(rateText(mileageRate));
   const [wholeBusiness, setWholeBusiness] = useState(false);
   const [repeatMonthly, setRepeatMonthly] = useState(false);
   const [state, setState] = useState<"idle" | "saving" | "error">("idle");
@@ -140,7 +157,14 @@ export default function ExpensesSection({
   };
 
   const chosenCategory = category === CUSTOM ? customCategory.trim() : category;
-  const amountValid = /^\d+(\.\d{1,2})?$/.test(amount.trim());
+  const isMileage = chosenCategory === MILEAGE_CATEGORY;
+  const milesValue = cleanMiles(miles);
+  const rateValue = cleanRate(rate);
+  const mileageTotal = milesValue !== null && rateValue !== null ? mileageAmount(milesValue, rateValue) : null;
+  // What gets saved: typed dollars, or miles × rate for Mileage.
+  const finalAmount = isMileage ? mileageTotal ?? "" : amount.trim();
+  const finalNote = isMileage && milesValue !== null && rateValue !== null ? mileageNote(milesValue, rateValue, note) : note;
+  const amountValid = /^\d+(\.\d{1,2})?$/.test(finalAmount) && (!isMileage || Number(finalAmount) > 0);
   const categoryValid = chosenCategory.length > 0 && chosenCategory.length <= MAX_CATEGORY_LENGTH;
 
   const shown = useMemo(() => {
@@ -161,6 +185,10 @@ export default function ExpensesSection({
     return [...totals].sort((a, b) => b[1] - a[1]);
   }, [expenses]);
   const periodTotal = byCategory.reduce((sum, [, value]) => sum + value, 0);
+  const milesInPeriod = useMemo(
+    () => expenses.reduce((sum, e) => sum + (e.category === MILEAGE_CATEGORY ? parseMileageNote(e.note)?.miles ?? 0 : 0), 0),
+    [expenses]
+  );
   const shownTotal = shown.reduce((sum, e) => sum + Number(e.amount), 0);
   const filtering = Boolean(search.trim() || categoryFilter);
 
@@ -171,6 +199,8 @@ export default function ExpensesSection({
     setCustomCategory("");
     setAmount("");
     setNote("");
+    setMiles("");
+    setRate(rateText(mileageRate));
     setRepeatMonthly(false);
     setError("");
     setState("idle");
@@ -194,6 +224,12 @@ export default function ExpensesSection({
     }
     setAmount(Number(expense.amount).toFixed(2));
     setNote(expense.note ?? "");
+    const trip = expense.category === MILEAGE_CATEGORY ? parseMileageNote(expense.note) : null;
+    if (trip) {
+      setMiles(String(trip.miles));
+      setRate(rateText(trip.rate));
+      setNote(trip.note);
+    }
     setRepeatMonthly(Boolean(expense.repeatMonthly));
     setFormOpen(true);
   }
@@ -208,15 +244,19 @@ export default function ExpensesSection({
         await onUpdate(editing.id, {
           spentOn,
           category: chosenCategory,
-          amount: amount.trim(),
-          note,
+          amount: finalAmount,
+          note: finalNote,
           ...(canRepeat ? { repeatMonthly } : {}),
         });
         toast.success("Expense updated");
       } else {
-        await onAdd({ spentOn, category: chosenCategory, amount: amount.trim(), note, wholeBusiness, repeatMonthly });
-        toast.success(repeatMonthly ? "Monthly expense added" : "Expense added", `${chosenCategory} · ${money(Number(amount))}`);
+        await onAdd({ spentOn, category: chosenCategory, amount: finalAmount, note: finalNote, wholeBusiness, repeatMonthly: isMileage ? false : repeatMonthly });
+        toast.success(
+          isMileage ? "Trip added" : repeatMonthly ? "Monthly expense added" : "Expense added",
+          isMileage ? `${milesValue} miles · ${money(Number(finalAmount))}` : `${chosenCategory} · ${money(Number(finalAmount))}`
+        );
       }
+      if (isMileage && rateValue !== null && rateValue !== mileageRate) onMileageRateChange?.(rateValue);
       resetForm();
       setFormOpen(false);
     } catch (e) {
@@ -318,9 +358,23 @@ export default function ExpensesSection({
     >
       <form id="expense-form" onSubmit={submit} className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Amount">
-            <MoneyInput data-autofocus required value={amount} placeholder="12.50" onChange={(e) => setAmount(e.target.value)} aria-invalid={Boolean(amount) && !amountValid} />
-          </Field>
+          {isMileage ? (
+            <Field label="Miles driven">
+              <Input
+                data-autofocus
+                required
+                inputMode="decimal"
+                value={miles}
+                placeholder="42"
+                onChange={(e) => setMiles(e.target.value)}
+                aria-invalid={Boolean(miles) && milesValue === null}
+              />
+            </Field>
+          ) : (
+            <Field label="Amount">
+              <MoneyInput data-autofocus required value={amount} placeholder="12.50" onChange={(e) => setAmount(e.target.value)} aria-invalid={Boolean(amount) && !amountValid} />
+            </Field>
+          )}
           <Field label={repeatMonthly ? "First date" : "Date"}>
             <Input type="date" required value={spentOn} max={todayKey()} onChange={(e) => setSpentOn(e.target.value)} />
           </Field>
@@ -359,13 +413,39 @@ export default function ExpensesSection({
             </Select>
           )}
         </Field>
+        {isMileage && (
+          <div className="space-y-2 rounded-lg border border-line bg-surface-2 p-3">
+            <div className="flex items-end gap-3">
+              <Field label="Rate per mile" className="w-28">
+                <MoneyInput value={rate} placeholder="0.70" onChange={(e) => setRate(e.target.value)} aria-invalid={Boolean(rate) && rateValue === null} />
+              </Field>
+              <p className="pb-2 text-sm text-muted">
+                {mileageTotal !== null ? (
+                  <>
+                    = <span className="ps-num font-semibold text-ink">{money(Number(mileageTotal))}</span> expense
+                  </>
+                ) : (
+                  "Enter the miles to see the amount"
+                )}
+              </p>
+            </div>
+            <p className="text-xs text-subtle">
+              Most sellers use the IRS standard mileage rate (70¢ a mile for 2025). It changes each year, so check irs.gov. Your rate is remembered.
+            </p>
+          </div>
+        )}
         <Field label="Note" optional>
-          <Input value={note} maxLength={200} placeholder="e.g. 100 poly mailers" onChange={(e) => setNote(e.target.value)} />
+          <Input
+            value={note}
+            maxLength={isMileage ? 150 : 200}
+            placeholder={isMileage ? "e.g. Goodwill and post office" : "e.g. 100 poly mailers"}
+            onChange={(e) => setNote(e.target.value)}
+          />
         </Field>
         {/* Repeating expenses only show once that feature is switched on. */}
-        {(canRepeat || (showWholeBusiness && !editing)) && (
+        {((canRepeat && !isMileage) || (showWholeBusiness && !editing)) && (
         <div className="space-y-2.5 rounded-lg border border-line bg-surface-2 p-3">
-          {canRepeat && (
+          {canRepeat && !isMileage && (
             <Checkbox checked={repeatMonthly} onChange={(e) => setRepeatMonthly(e.target.checked)} label="Repeats every month (like a subscription)" />
           )}
           {showWholeBusiness && !editing && (
@@ -388,6 +468,11 @@ export default function ExpensesSection({
             <p className="text-xs font-medium text-muted">Expenses · {periodLabel}</p>
             <p className="ps-num mt-1 text-2xl font-semibold tracking-tight text-ink">{money(filtering ? shownTotal : periodTotal)}</p>
             {filtering && <p className="ps-num text-xs text-subtle">of {money(periodTotal)} in this period</p>}
+            {milesInPeriod > 0 && (
+              <p className="ps-num mt-0.5 text-xs text-subtle">
+                Includes {milesInPeriod.toLocaleString("en-US", { maximumFractionDigits: 1 })} business miles
+              </p>
+            )}
           </div>
           <Button variant="primary" onClick={openNew} icon={<span className="text-base leading-none">+</span>}>
             Add expense
