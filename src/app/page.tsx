@@ -79,6 +79,31 @@ function expandExpenses(expenses: Expense[]): ExpenseEntry[] {
 }
 
 // The page: shared toast and confirm-dialog providers around the dashboard.
+// "Get started" remembers pages the seller has opened, in this browser.
+const VISITED_EVENT = "profitsync:visited";
+function subscribeVisited(onChange: () => void) {
+  window.addEventListener(VISITED_EVENT, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(VISITED_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+function readVisited(page: string) {
+  try {
+    return window.localStorage.getItem(`profitsync:visited:${page}`) === "1";
+  } catch {
+    return false;
+  }
+}
+function markVisited(page: string) {
+  try {
+    if (window.localStorage.getItem(`profitsync:visited:${page}`) === "1") return;
+    window.localStorage.setItem(`profitsync:visited:${page}`, "1");
+    window.dispatchEvent(new Event(VISITED_EVENT));
+  } catch {}
+}
+
 export default function Home() {
   return (
     <ToastProvider>
@@ -1513,6 +1538,31 @@ function Dashboard() {
   // GET STARTED checklist (new sellers): ticks off from real data
   // ----------------------------------------------------------
 
+  // Get started: whether the seller has opened Payouts (remembered in this
+  // browser) and logged a purchase in Inventory.
+  const visitedPayouts = useSyncExternalStore(
+    subscribeVisited,
+    () => readVisited("payouts"),
+    () => true
+  );
+  useEffect(() => {
+    if (view === "payouts" && limits.payouts) markVisited("payouts");
+  }, [view, limits.payouts]);
+  const [purchaseCount, setPurchaseCount] = useState<number | null>(null);
+  useEffect(() => {
+    if (!limits.inventory || preferences.setupGuideHidden || view !== "dashboard") return;
+    let active = true;
+    fetch("/api/inventory", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { purchases?: unknown[] } | null) => {
+        if (active && body) setPurchaseCount(body.purchases?.length ?? 0);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [limits.inventory, preferences.setupGuideHidden, view]);
+
   const setupSteps = useMemo<SetupStep[]>(() => {
     const hasCost = orders.some((order) => !isFullyRefunded(order) && hasRecordedCost(order));
     const missingCosts = orders.filter((order) => !isFullyRefunded(order) && !hasRecordedCost(order)).length;
@@ -1565,9 +1615,42 @@ function Dashboard() {
         done: listings.length > 0,
         action: { label: "Open Listings", onClick: () => navigate("listings") },
       },
+      ...(limits.buyerInterest && listings.length > 0
+        ? [
+            {
+              id: "views",
+              title: "Turn on listing views",
+              description: "Reconnect eBay once and approve, so ProfitSync can show how many buyers look at each listing.",
+              done: listings.some((listing) => listing.views30 !== null && listing.views30 !== undefined),
+              action: { label: "Reconnect eBay", href: "/api/ebay/auth" },
+            },
+          ]
+        : []),
+      ...(limits.payouts
+        ? [
+            {
+              id: "payouts",
+              title: "Check your payouts",
+              description: "See the money still at eBay, and what's inside each payout to your bank.",
+              done: visitedPayouts,
+              action: { label: "Open Payouts", onClick: () => navigate("payouts") },
+            },
+          ]
+        : []),
+      ...(limits.inventory
+        ? [
+            {
+              id: "inventory",
+              title: "Log a purchase",
+              description: "Add a sourcing trip or lot with what you paid, to see unsold stock and which buys paid off.",
+              done: (purchaseCount ?? 0) > 0,
+              action: { label: "Open Inventory", onClick: () => navigate("inventory") },
+            },
+          ]
+        : []),
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orders, stores, storeShipping, monthlyGoal, listings]);
+  }, [orders, stores, storeShipping, monthlyGoal, listings, limits, visitedPayouts, purchaseCount]);
 
   const showSetup = !preferences.setupGuideHidden && !storesLoading && !loading;
 

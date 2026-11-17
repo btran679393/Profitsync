@@ -285,10 +285,30 @@ export default function PayoutsSection({
               </div>
             </LoadingRegion>
           ) : !data || data.payouts.length === 0 ? (
-            <EmptyState
-              title="No payouts in this period"
-              description={error ? "Fix the problem above, then try again." : `eBay hasn't sent any payouts in the last ${rangeLabel}. Try a longer period.`}
-            />
+            error ? (
+              <EmptyState title="No payouts to show" description="Fix the problem above, then try again." />
+            ) : days !== "365" ? (
+              <EmptyState
+                title={`No payouts in the last ${rangeLabel}`}
+                description="eBay may have paid you earlier than this. Look further back to see your older payouts."
+                action={
+                  <Button variant="secondary" onClick={() => setDays("365")}>
+                    Show the last 12 months
+                  </Button>
+                }
+              />
+            ) : (
+              <div className="mx-auto max-w-xl px-6 py-10 text-center">
+                <h3 className="text-base font-semibold text-ink">No payouts yet</h3>
+                <p className="mt-2 text-sm text-muted">
+                  After a buyer pays, eBay holds the money briefly, then sends it to your bank on your payout schedule (daily or weekly). Each payout
+                  will show here with the sales and fees inside it.
+                </p>
+                <p className="mt-3 text-sm text-muted">
+                  Nothing arriving? Check that a bank account is set up in eBay Seller Hub → <span className="font-medium text-ink-2">Payments</span>.
+                </p>
+              </div>
+            )
           ) : (
             <ul className="divide-y divide-line border-t border-line">
               {data.payouts.map((p) => {

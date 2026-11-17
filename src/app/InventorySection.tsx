@@ -245,6 +245,7 @@ export default function InventorySection({
         </Button>
       </div>
 
+      {(!data || report.purchases.length > 0) && (
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Unsold stock"
@@ -267,6 +268,7 @@ export default function InventorySection({
           loading={!data}
         />
       </div>
+      )}
 
       {totals.agedUnits > 0 && (
         <Notice tone="warn" title={`${totals.agedUnits} unit${totals.agedUnits === 1 ? " hasn't" : "s haven't"} sold in ${staleAfterDays}+ days`}>
@@ -288,16 +290,29 @@ export default function InventorySection({
           </LoadingRegion>
         </Card>
       ) : report.purchases.length === 0 ? (
-        <Card>
-          <EmptyState
-            title="Track your stock from the moment you buy it"
-            description="Add a sourcing trip, a lot or a single item with what you paid. Link items to their eBay listings and ProfitSync shows what's left, how fast it sells and whether each purchase paid off."
-            action={
-              <Button variant="primary" onClick={() => setPurchaseForm({ editing: null })}>
-                Add your first purchase
-              </Button>
-            }
-          />
+        <Card className="p-6 sm:p-8">
+          <div className="mx-auto max-w-2xl">
+            <h3 className="text-lg font-semibold text-ink">Track your stock from the moment you buy it</h3>
+            <p className="mt-1 text-sm text-muted">Three steps, and ProfitSync shows what&apos;s left, how fast it sells and whether each purchase paid off.</p>
+            <ol className="mt-5 space-y-4">
+              {[
+                ["Add a purchase", "A thrift run, a lot or a single item: the date, where, and what you paid in total."],
+                ["List what's in it", "Each item and how many. The total is shared across them (pricier items can carry more)."],
+                ["Link items to listings", "Pick the eBay listing each item sells through. Sales then count against it automatically."],
+              ].map(([title, text], i) => (
+                <li key={title} className="flex gap-3">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent-soft text-sm font-semibold text-accent-ink">{i + 1}</span>
+                  <span>
+                    <span className="block text-sm font-medium text-ink">{title}</span>
+                    <span className="block text-sm text-muted">{text}</span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+            <Button variant="primary" className="mt-6" onClick={() => setPurchaseForm({ editing: null })}>
+              Add your first purchase
+            </Button>
+          </div>
         </Card>
       ) : show === "unsold" ? (
         <Card className="overflow-hidden">
