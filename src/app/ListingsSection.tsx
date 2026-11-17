@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import StoreShippingSetting from "./StoreShippingSetting";
+import { conversionText, listingSignals } from "@/lib/listingSignals";
 import {
   Badge,
   Button,
@@ -45,6 +46,16 @@ export type ListingRow = {
   lastSold: string | null;
   // Stock alert: "low" = selling but only 1–2 left; "stale" = no sale in 60+ days.
   alert: "low" | "stale" | null;
+  // Promoted-listing ad fees and other eBay charges on its sales.
+  adFees: number;
+  // From eBay: people watching, and the last 30 days of traffic (null =
+  // not known, e.g. the store hasn't granted the analytics permission).
+  watchers: number | null;
+  views30: number | null;
+  impressions30: number | null;
+  sales30: number | null;
+  // Lowest price that still makes the seller's target profit (null = no cost yet).
+  lowestOffer: number | null;
 };
 
 type SortKey = "profit" | "units" | "revenue" | "margin" | "recent" | "stock";
@@ -371,6 +382,7 @@ const STATUS_BADGE: Record<ListingRow["status"], { label: string; tone: "profit"
 
 function ListingMeta({ row, staleAfterDays }: { row: ListingRow; staleAfterDays: number }) {
   const badge = STATUS_BADGE[row.status];
+  const signals = listingSignals(row);
   return (
     <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-subtle">
       <Badge tone={badge.tone}>{badge.label}</Badge>
@@ -400,6 +412,42 @@ function ListingMeta({ row, staleAfterDays }: { row: ListingRow; staleAfterDays:
         <Badge tone="neutral">
           <span title={`No sale in ${staleAfterDays}+ days. A lower price or better photos might help.`}>Not selling · {staleAfterDays}+ days</span>
         </Badge>
+      )}
+      {signals.includes("viewsNoSales") && (
+        <Badge tone="warn">
+          <span title="Lots of people open it but nobody buys. The price or photos may be holding it back.">
+            {row.views30} views, no sales
+          </span>
+        </Badge>
+      )}
+      {signals.includes("watchers") && (
+        <Badge tone="accent">
+          <span
+            title={
+              row.lowestOffer !== null
+                ? `Send these watchers an offer on eBay. You still make your target profit down to ${money(row.lowestOffer)}.`
+                : "Send these watchers an offer on eBay. Add a cost to see the lowest price you can offer."
+            }
+          >
+            {row.watchers} watching{row.lowestOffer !== null ? ` · offer from ${money(row.lowestOffer)}` : ""}
+          </span>
+        </Badge>
+      )}
+      {signals.includes("sellingFast") && (
+        <Badge tone="profit">
+          <span title="A high share of views turn into sales. There may be room to raise the price.">Selling fast</span>
+        </Badge>
+      )}
+      {(row.views30 !== null || row.watchers !== null) && (
+        <span className="ps-num" title="From eBay, last 30 days">
+          {[
+            row.views30 !== null && `${row.views30.toLocaleString("en-US")} views`,
+            row.watchers !== null && `${row.watchers} watching`,
+            conversionText(row.views30, row.sales30) && `${conversionText(row.views30, row.sales30)} bought`,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
       )}
     </div>
   );
@@ -723,6 +771,14 @@ export default function ListingsSection({
                         <td className="text-right">
                           <p className="ps-num font-medium text-ink">{row.price !== null ? money(row.price) : "—"}</p>
                           <p className="mt-0.5 text-xs text-subtle">{row.available === null ? "" : row.available === 0 ? "Out of stock" : `${row.available} left`}</p>
+                          {row.status === "ACTIVE" && row.lowestOffer !== null && (
+                            <p
+                              className="ps-num mt-0.5 text-[11px] text-accent-ink"
+                              title="The lowest price you can accept (an offer or a price cut) and still make your target profit after eBay fees, ad fees, shipping and the item's cost. Set your target in Settings."
+                            >
+                              Lowest offer {money(row.lowestOffer)}
+                            </p>
+                          )}
                         </td>
                         <td>
                           <CostsCell row={row} onSave={onSaveCost} shippingEnabled={shippingEnabled} storeShipping={storeShipping} />
@@ -792,6 +848,9 @@ export default function ListingsSection({
                           {row.price !== null ? money(row.price) : "—"}
                           {row.available !== null && ` · ${row.available}`}
                         </dd>
+                        {row.status === "ACTIVE" && row.lowestOffer !== null && (
+                          <dd className="ps-num text-[11px] text-accent-ink">Lowest offer {money(row.lowestOffer)}</dd>
+                        )}
                       </div>
                     </dl>
                     <div className="mt-3 pl-7">

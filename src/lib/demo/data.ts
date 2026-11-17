@@ -127,6 +127,14 @@ export function demoListings(): ApiListing[] {
     unitCost: p.cost,
     shippingCost: p.ship,
     createdAt: iso(120 - i * 3, 10),
+    // Sample eBay traffic: one with lots of views and no sales, a few with
+    // watchers, the rest ordinary.
+    listedAt: iso(120 - i * 3, 10),
+    watchCount: [0, 4, 1, 6, 0, 0, 2, 3, 0, 1, 0, 5][i] ?? 0,
+    views30: p.stock > 0 ? [64, 212, 48, 133, 380, 0, 95, 176, 140, 72, 0, 58][i] ?? 40 : 0,
+    impressions30: p.stock > 0 ? [1800, 5200, 950, 3400, 7600, 0, 2100, 4100, 2600, 1500, 0, 1300][i] ?? 900 : 0,
+    sales30: p.stock > 0 ? [2, 6, 0, 3, 9, 0, 0, 4, 5, 1, 0, 0][i] ?? 0 : 0,
+    trafficUpdatedAt: iso(0, 6),
   }));
 }
 

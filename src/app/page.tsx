@@ -490,6 +490,12 @@ function Dashboard() {
       ? shippingDefaults.byStore[activeStoreId]
       : shippingDefaults.legacy;
 
+  // For the Listings page's lowest offer price.
+  const offerSettings = useMemo(
+    () => ({ targetProfit: preferences.offerTargetProfit, storeShipping: storeShipping ?? 0 }),
+    [preferences.offerTargetProfit, storeShipping]
+  );
+
   // Each listing's saved cost per item, for refund estimates.
   const listingUnitCosts = useMemo(() => {
     const costs = new Map<string, number>();
@@ -819,7 +825,8 @@ function Dashboard() {
     setListingsSyncing(true);
     try {
       // In the "All stores" view, refresh each store's listings in turn.
-      let data: { success?: boolean; message?: string; error?: string } = {};
+      let data: { success?: boolean; message?: string; error?: string; trafficNeedsReconnect?: boolean } = {};
+      let trafficNeedsReconnect = false;
       for (const target of allStores ? stores.filter((s) => !s.locked) : [activeStore]) {
         const response = await fetch(
           target ? `/api/ebay/listings/sync?store=${encodeURIComponent(target.id)}` : "/api/ebay/listings/sync",
@@ -830,10 +837,27 @@ function Dashboard() {
           const reason = data.error || "Couldn't load your eBay listings.";
           throw new Error(target ? `${target.name}: ${reason}` : reason);
         }
+        if (data.trafficNeedsReconnect) trafficNeedsReconnect = true;
       }
       if (allStores) data.message = `Refreshed listings for ${stores.length} stores.`;
       await loadListings();
       if (!quiet) toast.success("Listings refreshed", data.message ?? undefined);
+      // Views and impressions need eBay's analytics permission: say so once
+      // per visit, not on every sync.
+      let told = false;
+      try {
+        told = window.sessionStorage.getItem("profitsync:traffic-reconnect") === "1";
+        if (trafficNeedsReconnect) window.sessionStorage.setItem("profitsync:traffic-reconnect", "1");
+      } catch {
+        // Private browsing: just say it.
+      }
+      if (trafficNeedsReconnect && !told) {
+        toast.info(
+          "See views for every listing",
+          "Reconnect eBay once to add listing views and impressions to the Listings page. Your data stays as it is.",
+          { label: "Reconnect eBay", href: "/api/ebay/auth" }
+        );
+      }
     } catch (error) {
       const reason = error instanceof Error ? error.message : "Couldn't load your eBay listings.";
       if (/reconnect/i.test(reason)) {
@@ -1453,8 +1477,8 @@ function Dashboard() {
   const listingRows = useMemo(() => {
     if (!now) return [];
     const inRange = orders.filter((order) => isOrderInListingRange(order, listingRange, now));
-    return buildListingRows(inRange, listings, orders, now, preferences);
-  }, [orders, listings, listingRange, now, preferences]);
+    return buildListingRows(inRange, listings, orders, now, preferences, offerSettings);
+  }, [orders, listings, listingRange, now, preferences, offerSettings]);
 
   const filteredOrders = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -1599,11 +1623,11 @@ function Dashboard() {
   // Top 5 listings by profit in the chosen period.
   const topListings = useMemo(() => {
     if (!now) return [];
-    return buildListingRows(periodOrders, listings, orders, now, preferences)
+    return buildListingRows(periodOrders, listings, orders, now, preferences, offerSettings)
       .filter((row) => row.netProfit > 0)
       .sort((a, b) => b.netProfit - a.netProfit)
       .slice(0, 5);
-  }, [periodOrders, listings, orders, now, preferences]);
+  }, [periodOrders, listings, orders, now, preferences, offerSettings]);
 
   // Where the money went in the chosen period.
   const costSlices = useMemo<CostSlice[]>(() => {
@@ -1621,7 +1645,7 @@ function Dashboard() {
   }, [totals, periodExpenses]);
 
   const attention = useMemo<Attention>(() => {
-    const ranked = now ? buildListingRows(orders, listings, orders, now, preferences) : [];
+    const ranked = now ? buildListingRows(orders, listings, orders, now, preferences, offerSettings) : [];
     return {
       needsCost: totals.pendingOrders,
       feesPending: totals.feesPendingCount,
@@ -1629,7 +1653,7 @@ function Dashboard() {
       stale: ranked.filter((row) => row.alert === "stale").length,
       reconnect: stores.filter((store) => store.needsReconnect && !store.locked).map((store) => store.name),
     };
-  }, [orders, listings, now, preferences, totals.pendingOrders, totals.feesPendingCount, stores]);
+  }, [orders, listings, now, preferences, offerSettings, totals.pendingOrders, totals.feesPendingCount, stores]);
 
   // ----------------------------------------------------------
   // SELECTED ORDER

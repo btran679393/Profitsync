@@ -26,8 +26,12 @@ export async function GET() {
   const pool = getPool();
   try {
     // "shippingCost" is added by docs/sql/2026-11-07_shipping_cost.sql.
-    const optional = await existingColumns(pool, "EbayListing", ["shippingCost"]);
-    const shipping = optional.has("shippingCost") ? `"shippingCost",` : "";
+    // Watchers and 30-day traffic come from docs/sql/2026-11-16_listing_traffic.sql.
+    const traffic = ["watchCount", "listedAt", "views30", "impressions30", "sales30", "trafficUpdatedAt"];
+    const optional = await existingColumns(pool, "EbayListing", ["shippingCost", ...traffic]);
+    const shipping =
+      (optional.has("shippingCost") ? `"shippingCost",` : "") +
+      traffic.filter((column) => optional.has(column)).map((column) => `"${column}",`).join(" ");
     const store = await resolveActiveEbayUserId(pool, user);
     const result = await pool.query(
       `

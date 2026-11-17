@@ -16,6 +16,9 @@ export type Preferences = {
   staleAfterDays: number;
   // The Get started checklist was hidden by the seller.
   setupGuideHidden: boolean;
+  // Profit (whole dollars) the seller wants from every sale: the Listings
+  // page shows the lowest offer price that still makes it.
+  offerTargetProfit: number;
 };
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -25,6 +28,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   lowStockAt: 2,
   staleAfterDays: 60,
   setupGuideHidden: false,
+  offerTargetProfit: 0,
 };
 
 export const THEME_STORAGE_KEY = "profitsync:theme";
@@ -49,6 +53,7 @@ export function readPreferences(meta: Record<string, unknown> | undefined): Pref
     lowStockAt: whole(raw.lowStockAt, 0, 50, d.lowStockAt),
     staleAfterDays: whole(raw.staleAfterDays, 7, 365, d.staleAfterDays),
     setupGuideHidden: raw.setupGuideHidden === true,
+    offerTargetProfit: whole(raw.offerTargetProfit, 0, 10000, d.offerTargetProfit),
   };
 }
 

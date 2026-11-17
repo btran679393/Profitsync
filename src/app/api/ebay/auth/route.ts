@@ -1,6 +1,7 @@
 import { createHmac, randomBytes } from "crypto";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { ANALYTICS_SCOPE } from "@/lib/ebay/traffic";
 
 export const runtime = "nodejs";
 
@@ -51,6 +52,9 @@ export async function GET() {
 
       // NEW: Retrieve and synchronize active eBay listings.
       "https://api.ebay.com/oauth/api_scope/sell.inventory",
+
+      // Listing views, impressions and sales from views (read-only).
+      ANALYTICS_SCOPE,
     ];
 
     // STEP 4: Generate a secure OAuth state.

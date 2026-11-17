@@ -1,6 +1,7 @@
 // Moved out of page.tsx unchanged (redesign phase 1).
 import type { ListingRange, ListingRow } from "../ListingsSection";
 import { orderIsCanceled, refundIsFull, refundIsPartial } from "@/lib/refunds";
+import { lowestOfferPrice, observedRate } from "@/lib/offers";
 
 // ============================================================
 // TYPES
@@ -17,6 +18,13 @@ export type ApiListing = {
   unitCost: string | number | null;
   shippingCost?: string | number | null;
   createdAt?: string | null;
+  // From docs/sql/2026-11-16_listing_traffic.sql (missing until it runs).
+  watchCount?: number | null;
+  listedAt?: string | null;
+  views30?: number | null;
+  impressions30?: number | null;
+  sales30?: number | null;
+  trafficUpdatedAt?: string | null;
 };
 
 export type Order = {
@@ -362,9 +370,23 @@ export function buildListingRows(
   listings: ApiListing[],
   allOrders: Order[] = orders,
   now: Date = new Date(),
-  alerts: { lowStockAt: number; staleAfterDays: number } = { lowStockAt: 2, staleAfterDays: 60 }
+  alerts: { lowStockAt: number; staleAfterDays: number } = { lowStockAt: 2, staleAfterDays: 60 },
+  // For the lowest offer price: the profit wanted per sale, and the store's
+  // usual shipping when a listing has none of its own.
+  offers: { targetProfit: number; storeShipping: number } = { targetProfit: 0, storeShipping: 0 }
 ): ListingRow[] {
-  const rows = new Map<string, ListingRow & { completedRevenue: number; completedProfit: number }>();
+  type Totals = {
+    completedRevenue: number;
+    completedProfit: number;
+    // Kept sales: what was sold, eBay fees and ad fees charged on it, shipping
+    // paid and product costs recorded (for the lowest offer price).
+    soldTotal: number;
+    feeTotal: number;
+    shipTotal: number;
+    costTotal: number;
+    costUnits: number;
+  };
+  const rows = new Map<string, ListingRow & Totals>();
   const listingIdByTitle = new Map<string, string>();
 
   const blankRow = (key: string, title: string) => ({
@@ -373,8 +395,12 @@ export function buildListingRows(
     price: null, available: null, unitCost: null, shippingDefault: null, unitsSold: 0, orderCount: 0,
     revenue: 0, fees: 0, shipping: 0, costs: 0, refundedCount: 0, refundLoss: 0,
     netProfit: 0, margin: null, costMissing: 0, shippingMissing: 0, lastSold: null, alert: null,
+    adFees: 0, watchers: null, views30: null, impressions30: null, sales30: null, lowestOffer: null,
     completedRevenue: 0, completedProfit: 0,
+    soldTotal: 0, feeTotal: 0, shipTotal: 0, costTotal: 0, costUnits: 0,
   });
+  const count = (value: number | null | undefined) =>
+    value === null || value === undefined || !Number.isFinite(Number(value)) ? null : Number(value);
 
   for (const listing of listings) {
     const key = `item:${listing.ebayItemId}`;
@@ -387,6 +413,10 @@ export function buildListingRows(
       available: listing.status === "ACTIVE" ? listing.quantity : 0,
       unitCost: listing.unitCost === null || listing.unitCost === undefined ? null : Number(listing.unitCost),
       shippingDefault: listing.shippingCost === null || listing.shippingCost === undefined ? null : Number(listing.shippingCost),
+      watchers: count(listing.watchCount),
+      views30: count(listing.views30),
+      impressions30: count(listing.impressions30),
+      sales30: count(listing.sales30),
     });
     listingIdByTitle.set(normalizeTitle(listing.title), listing.ebayItemId);
   }
@@ -416,10 +446,16 @@ export function buildListingRows(
     const revenue = Math.max(0, order.salePrice - order.refundAmount);
     row.revenue += revenue;
     row.fees += order.ebayFees + order.otherFees;
+    row.adFees += order.otherFees;
     row.shipping += getShippingCost(order);
+    row.soldTotal += order.salePrice;
+    row.feeTotal += order.ebayFees;
+    row.shipTotal += getShippingCost(order);
     if (order.savedShippingCost === "") row.shippingMissing++;
     if (hasRecordedCost(order)) {
       row.costs += Number(order.savedProductCost);
+      row.costTotal += Number(order.savedProductCost);
+      row.costUnits += Math.max(1, order.quantity);
       row.completedRevenue += revenue;
       row.completedProfit += getOrderProfit(order) ?? 0;
     } else {
@@ -441,8 +477,19 @@ export function buildListingRows(
   const staleBefore = now.getTime() - alerts.staleAfterDays * 86400000;
   const firstSeen = new Map(listings.map((listing) => [listing.ebayItemId, listing.createdAt ?? null]));
 
-  return [...rows.values()].map(({ completedRevenue, completedProfit, ...row }) => {
+  return [...rows.values()].map(({ completedRevenue, completedProfit, soldTotal, feeTotal, shipTotal, costTotal, costUnits, ...row }) => {
     const netProfit = completedProfit - row.refundLoss;
+    // Lowest offer: the listing's saved cost per item (else its average
+    // recorded cost), its own shipping (else its average, else the store's)
+    // and the fee and ad rates from its past sales (else eBay's standard).
+    const sales = row.orderCount;
+    const lowestOffer = lowestOfferPrice({
+      itemCost: row.unitCost ?? (costUnits > 0 ? costTotal / costUnits : null),
+      shipping: row.shippingDefault ?? (sales > 0 ? shipTotal / sales : offers.storeShipping),
+      feeRate: observedRate(feeTotal, soldTotal),
+      adRate: observedRate(row.adFees, soldTotal) ?? 0,
+      targetProfit: offers.targetProfit,
+    });
     let alert: ListingRow["alert"] = null;
     if (row.status === "ACTIVE" && row.ebayItemId) {
       const ever = lifetime.get(row.ebayItemId);
@@ -461,6 +508,7 @@ export function buildListingRows(
       ...row,
       netProfit,
       alert,
+      lowestOffer,
       margin: completedRevenue > 0 ? (netProfit / completedRevenue) * 100 : null,
     };
   });

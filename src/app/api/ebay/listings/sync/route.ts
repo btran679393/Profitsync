@@ -6,6 +6,8 @@ import { tryAcquireSyncLock } from "@/lib/db/syncLock";
 import { db } from "@/prisma/db";
 import { fetchSellerProfile, saveSellerProfile } from "@/lib/ebay/sellerProfile";
 import { pickConnection, storeAllowedByPlan, storeForSync } from "@/lib/ebay/activeStore";
+import { existingColumns } from "@/lib/db/optionalColumns";
+import { TrafficPermissionError, fetchListingTraffic } from "@/lib/ebay/traffic";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,6 +32,9 @@ type ParsedListing = {
   imageUrl: string | null;
   price: string;
   quantityAvailable: number;
+  // People watching the listing, and when it started (null if eBay didn't say).
+  watchCount: number | null;
+  listedAt: string | null;
 };
 
 function decodeXml(value: string) {
@@ -87,6 +92,14 @@ function parseItem(itemXml: string): ParsedListing | null {
     imageUrl: safeImageUrl(tag(tag(xml, "PictureDetails") ?? "", "GalleryURL")),
     price: price.toFixed(2),
     quantityAvailable: Math.max(0, Math.trunc(Number.isFinite(available) ? available : 0)),
+    watchCount: (() => {
+      const watchers = Number(tag(xml, "WatchCount"));
+      return Number.isInteger(watchers) && watchers >= 0 ? watchers : null;
+    })(),
+    listedAt: (() => {
+      const start = tag(tag(xml, "ListingDetails") ?? "", "StartTime");
+      return start && !Number.isNaN(Date.parse(start)) ? new Date(start).toISOString() : null;
+    })(),
   };
 }
 
@@ -319,6 +332,62 @@ async function syncListings(request: Request) {
       client.release();
     }
 
+    // Watchers, start dates and 30-day traffic. Needs
+    // docs/sql/2026-11-16_listing_traffic.sql; skipped until then. Never
+    // fails the listing sync.
+    let trafficNeedsReconnect = false;
+    let trafficListings = 0;
+    try {
+      const columns = await existingColumns(pool, "EbayListing", ["watchCount", "views30"]);
+      if (columns.has("watchCount") && listings.length > 0) {
+        await pool.query(
+          `
+          UPDATE public."EbayListing" l
+          SET "watchCount" = v.watchers, "listedAt" = COALESCE(v.listed, l."listedAt")
+          FROM unnest($4::text[], $5::int[], $6::timestamptz[]) AS v(item_id, watchers, listed)
+          WHERE l."userId" = $1 AND l."ebayUserId" = $2 AND l.environment = $3 AND l."ebayItemId" = v.item_id
+          `,
+          [
+            user.id,
+            connection.ebayUserId,
+            environment,
+            listings.map((l) => l.itemId),
+            listings.map((l) => l.watchCount),
+            listings.map((l) => l.listedAt),
+          ]
+        );
+      }
+      if (columns.has("views30") && listings.length > 0) {
+        try {
+          const traffic = await fetchListingTraffic(connection.accessToken, listings.map((l) => l.itemId));
+          const ids = [...traffic.keys()];
+          await pool.query(
+            `
+            UPDATE public."EbayListing" l
+            SET "views30" = v.views, "impressions30" = v.impressions, "sales30" = v.sales, "trafficUpdatedAt" = NOW()
+            FROM unnest($4::text[], $5::int[], $6::int[], $7::int[]) AS v(item_id, views, impressions, sales)
+            WHERE l."userId" = $1 AND l."ebayUserId" = $2 AND l.environment = $3 AND l."ebayItemId" = v.item_id
+            `,
+            [
+              user.id,
+              connection.ebayUserId,
+              environment,
+              ids,
+              ids.map((id) => traffic.get(id)!.views),
+              ids.map((id) => traffic.get(id)!.impressions),
+              ids.map((id) => traffic.get(id)!.sales),
+            ]
+          );
+          trafficListings = ids.length;
+        } catch (error) {
+          if (error instanceof TrafficPermissionError) trafficNeedsReconnect = true;
+          else console.error("Loading listing traffic failed:", error);
+        }
+      }
+    } catch (error) {
+      console.error("Saving listing watchers and traffic failed:", error);
+    }
+
     // Keep the seller's eBay username / store name current for the greeting.
     // Never fails the listing sync.
     try {
@@ -333,6 +402,10 @@ async function syncListings(request: Request) {
       environment,
       active: listings.length,
       ended,
+      trafficListings,
+      // The store hasn't granted the analytics permission: reconnecting
+      // eBay turns on views and impressions.
+      trafficNeedsReconnect,
       message: `Loaded ${listings.length} active eBay listing${listings.length === 1 ? "" : "s"}.`,
     });
   } catch (error) {

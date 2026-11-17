@@ -34,6 +34,7 @@ import {
   parseMoney,
   sellerSaleCents,
 } from "@/lib/ebay/money";
+import { ANALYTICS_SCOPE } from "@/lib/ebay/traffic";
 
 // Listing photos for new orders are looked up one by one. On a first sync
 // of thousands of orders that alone could hit the time limit, so each run
@@ -1187,28 +1188,36 @@ export async function syncOrders(
         "https\://api.ebay.com/oauth/api_scope/commerce.identity.readonly",
         "https\://api.ebay.com/oauth/api_scope/sell.finances",
       ];
-      const body = new URLSearchParams({
-        grant_type: "refresh_token",
-        refresh_token:
-          connection.refreshToken,
-        scope: scopes.join(" "),
-      });
-      const tokenResponse = await fetch(
-        `${ebayApiBase}/identity/v1/oauth2/token`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              "application/x-www-form-urlencoded",
-            Authorization:
-              `Basic ${credentials}`,
-          },
-          body: body.toString(),
-          cache: "no-store",
-        }
-      );
-      const tokenData: EbayTokenResponse =
-        await tokenResponse.json();
+      const requestToken = async (scopeList: string[]) => {
+        const response = await fetch(
+          `${ebayApiBase}/identity/v1/oauth2/token`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/x-www-form-urlencoded",
+              Authorization:
+                `Basic ${credentials}`,
+            },
+            body: new URLSearchParams({
+              grant_type: "refresh_token",
+              refresh_token: connection.refreshToken,
+              scope: scopeList.join(" "),
+            }).toString(),
+            cache: "no-store",
+          }
+        );
+        return { response, data: (await response.json()) as EbayTokenResponse };
+      };
+      // Listing views and impressions need the analytics permission, which
+      // stores connected before it was added haven't granted. eBay refuses
+      // a renewal that asks for more than was granted, so try with it and
+      // fall back to the original permissions (those stores just don't get
+      // traffic numbers until they reconnect).
+      let { response: tokenResponse, data: tokenData } = await requestToken([...scopes, ANALYTICS_SCOPE]);
+      if (!tokenResponse.ok && tokenData.error === "invalid_scope") {
+        ({ response: tokenResponse, data: tokenData } = await requestToken(scopes));
+      }
       if (
         !tokenResponse.ok ||
         !tokenData.access_token ||

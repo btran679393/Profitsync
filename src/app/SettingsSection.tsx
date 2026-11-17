@@ -80,6 +80,7 @@ export default function SettingsSection({
   const [error, setError] = useState("");
   const [lowStock, setLowStock] = useState(String(preferences.lowStockAt));
   const [staleDays, setStaleDays] = useState(String(preferences.staleAfterDays));
+  const [targetProfit, setTargetProfit] = useState(String(preferences.offerTargetProfit));
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteText, setDeleteText] = useState("");
   const [deleting, setDeleting] = useState(false);
@@ -96,7 +97,13 @@ export default function SettingsSection({
     }
   }
 
-  function saveNumber(raw: string, key: "lowStockAt" | "staleAfterDays", min: number, max: number, reset: (v: string) => void) {
+  function saveNumber(
+    raw: string,
+    key: "lowStockAt" | "staleAfterDays" | "offerTargetProfit",
+    min: number,
+    max: number,
+    reset: (v: string) => void
+  ) {
     const n = Number(raw);
     if (!Number.isInteger(n) || n < min || n > max) {
       reset(String(preferences[key]));
@@ -269,6 +276,23 @@ export default function SettingsSection({
                 className={`w-20 text-center ${field}`}
               />
               days
+            </label>
+          </Row>
+          <Row
+            title="Profit you want from every sale"
+            hint="The Listings page shows the lowest offer you can accept and still make this, after fees, ad fees, shipping and the item’s cost. 0 = break even."
+          >
+            <label className="flex items-center gap-2 text-sm text-muted">
+              $
+              <input
+                inputMode="numeric"
+                value={targetProfit}
+                onChange={(e) => setTargetProfit(e.target.value)}
+                onBlur={() => saveNumber(targetProfit, "offerTargetProfit", 0, 10000, setTargetProfit)}
+                onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+                aria-label="Profit you want from every sale, in dollars"
+                className={`w-20 text-center ${field}`}
+              />
             </label>
           </Row>
         </div>
