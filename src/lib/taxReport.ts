@@ -430,3 +430,44 @@ export function expensesCsv(expenses: TaxExpense[], header: Header, storeName: (
     ["Total", "", `${inYear.length} entries`, "", "", total],
   ]);
 }
+
+// ------------------------------------------------------------
+// Form 1099-K check: eBay sends a 1099-K to the IRS (and the seller) for
+// each eBay account with more than $20,000 in sales AND more than 200
+// sales in a calendar year (the federal rule restored in 2025). Some
+// states use lower limits. Sales here are before fees and refunds, which
+// is how the form counts them.
+// ------------------------------------------------------------
+
+export const FORM_1099K_DOLLARS = 20_000;
+export const FORM_1099K_SALES = 200;
+// "Getting close" from this share of either limit.
+const CLOSE_SHARE = 0.75;
+
+export type Form1099kStore = {
+  key: string;
+  name: string;
+  gross: number;
+  sales: number;
+  status: "over" | "close" | "under";
+};
+
+export function form1099kCheck(orders: TaxOrder[], year: number, fallbackName: string): Form1099kStore[] {
+  const stores = new Map<string, Form1099kStore>();
+  for (const order of orders) {
+    if (order.canceled || yearOf(order.orderDate) !== year) continue;
+    const key = order.storeId ?? order.storeName ?? "store";
+    const entry = stores.get(key) ?? { key, name: order.storeName ?? fallbackName, gross: 0, sales: 0, status: "under" as const };
+    entry.gross += order.salePrice;
+    entry.sales += 1;
+    stores.set(key, entry);
+  }
+  return [...stores.values()]
+    .map((s) => {
+      const gross = Math.round(s.gross * 100) / 100;
+      const over = gross > FORM_1099K_DOLLARS && s.sales > FORM_1099K_SALES;
+      const close = gross >= FORM_1099K_DOLLARS * CLOSE_SHARE || s.sales >= FORM_1099K_SALES * CLOSE_SHARE;
+      return { ...s, gross, status: over ? ("over" as const) : close ? ("close" as const) : ("under" as const) };
+    })
+    .sort((a, b) => b.gross - a.gross);
+}

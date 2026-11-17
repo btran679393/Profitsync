@@ -5,6 +5,9 @@ import type { ExpenseEntry } from "./ExpensesSection";
 import TaxPrintout from "./TaxPrintout";
 import { Button, LoadingRegion, Menu, Notice, SegmentedControl, Select, Skeleton } from "@/components/ui";
 import {
+  FORM_1099K_DOLLARS,
+  FORM_1099K_SALES,
+  form1099kCheck,
   buildTaxReport,
   expensesCsv,
   exportFileName,
@@ -81,6 +84,7 @@ export default function TaxReport({
   }, [orders, expenses]);
   const [year, setYear] = useState(() => new Date().getFullYear());
 
+  const form1099k = useMemo(() => form1099kCheck(orders, year, storeLabel), [orders, year, storeLabel]);
   const report = useMemo(() => {
     const base = buildTaxReport(orders, expenses, year);
     const inYear = orders.filter((order) => !order.canceled && yearOf(order.orderDate) === year);
@@ -376,8 +380,68 @@ export default function TaxReport({
       </div>
       )}
 
+      {!loading && form1099k.length > 0 && <Form1099kCard stores={form1099k} year={year} />}
+
       {/* Only appears when printing. */}
       {allowed && !loading && <TaxPrintout report={report} business={storeLabel} notes={warnings.map((w) => w.text)} />}
     </div>
+  );
+}
+
+const money0 = (value: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+
+function Meter({ label, value, limit, text }: { label: string; value: number; limit: number; text: string }) {
+  const share = Math.min(1, value / limit);
+  const over = value > limit;
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2 text-xs">
+        <span className="text-muted">{label}</span>
+        <span className="ps-num text-ink-2">{text}</span>
+      </div>
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-2" aria-hidden="true">
+        <div className={`h-full rounded-full ${over ? "bg-warn" : share >= 0.75 ? "bg-accent" : "bg-profit"}`} style={{ width: `${Math.max(2, share * 100)}%` }} />
+      </div>
+    </div>
+  );
+}
+
+const STATUS_1099K = {
+  over: { title: "eBay should send you a Form 1099-K", tone: "text-warn" },
+  close: { title: "Getting close to a Form 1099-K", tone: "text-accent-ink" },
+  under: { title: "Below the federal 1099-K limit", tone: "text-profit" },
+} as const;
+
+// How close each eBay account is to getting a Form 1099-K for the year.
+function Form1099kCard({ stores, year }: { stores: ReturnType<typeof form1099kCheck>; year: number }) {
+  return (
+    <section className="no-print rounded-xl border border-line bg-surface p-5" aria-labelledby="form-1099k-title">
+      <h4 id="form-1099k-title" className="text-sm font-semibold text-ink">
+        Form 1099-K check · {year}
+      </h4>
+      <p className="mt-1 text-xs text-muted">
+        eBay sends a 1099-K for each eBay account with more than {money0(FORM_1099K_DOLLARS)} in sales <strong>and</strong> more than{" "}
+        {FORM_1099K_SALES} sales in a year. It counts sales before fees and refunds, so it&apos;s bigger than your profit.
+      </p>
+      <ul className="mt-4 grid gap-4 md:grid-cols-2">
+        {stores.map((store) => {
+          const status = STATUS_1099K[store.status];
+          return (
+            <li key={store.key} className="rounded-lg border border-line p-4">
+              <p className="truncate text-sm font-medium text-ink">{store.name}</p>
+              <p className={`mt-0.5 text-xs font-medium ${status.tone}`}>{status.title}</p>
+              <div className="mt-3 space-y-2.5">
+                <Meter label="Sales" value={store.gross} limit={FORM_1099K_DOLLARS} text={`${money0(store.gross)} of ${money0(FORM_1099K_DOLLARS)}`} />
+                <Meter label="Number of sales" value={store.sales} limit={FORM_1099K_SALES} text={`${store.sales.toLocaleString("en-US")} of ${FORM_1099K_SALES}`} />
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="mt-4 text-[11px] leading-5 text-subtle">
+        Some states send the form at lower amounts (for example $600 in Massachusetts and Maryland). Either way, profit from selling is taxable
+        whether or not you get a form. Compare the form&apos;s total with the Sales line above when it arrives. Not tax advice.
+      </p>
+    </section>
   );
 }
