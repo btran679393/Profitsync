@@ -7,6 +7,8 @@ import { PLANS, type BillingStatus } from "@/lib/billing/plans";
 import type { ApiOrder } from "@/app/dashboard/model";
 import type { Expense } from "@/app/ExpensesSection";
 import { DEMO_STORE_ID, DEMO_STORE_NAME, demoExpenses, demoListings, demoOrders } from "./data";
+import { demoPayouts } from "./payouts";
+import { breakdown } from "@/lib/ebay/payouts";
 
 export const DEMO_MESSAGE = "This is a demo with sample data. Create a free account to do this with your own store.";
 
@@ -121,6 +123,19 @@ async function handle(url: URL, init?: RequestInit): Promise<Response> {
         },
       ],
     });
+  }
+  if (path === "/api/ebay/payouts" && method === "GET") {
+    const days = Number(url.searchParams.get("days")) || 90;
+    const { response, details } = demoPayouts(d.orders, Math.max(days, 365));
+    const payoutId = url.searchParams.get("payout");
+    if (payoutId) {
+      const lines = details.get(payoutId) ?? [];
+      const titles: Record<string, string> = {};
+      for (const o of d.orders) if (o.ebayOrderId && o.item) titles[String(o.ebayOrderId)] = String(o.item);
+      return json({ lines, breakdown: breakdown(lines), titles });
+    }
+    const from = Date.now() - days * 86_400_000;
+    return json({ ...response, payouts: response.payouts.filter((p) => p.date && Date.parse(p.date) >= from) });
   }
   if (path === "/api/ebay/profile") return json({ storeName: DEMO_STORE_NAME, username: "demo_collectibles" });
   if (path === "/api/billing" && method === "GET") return json(billing());

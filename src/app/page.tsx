@@ -26,6 +26,7 @@ import StoreShippingSetting from "./StoreShippingSetting";
 import StoreReturnPolicySetting from "./StoreReturnPolicySetting";
 import { buildInsights } from "@/lib/insights";
 import StoreSwitcher, { type EbayStore } from "./StoreSwitcher";
+import PayoutsSection from "./PayoutsSection";
 import OrderTools, { type ToolOrder } from "./OrderTools";
 import ExpensesSection, {
   todayKey,
@@ -309,7 +310,7 @@ function Dashboard() {
   const goPressedAt = useRef(0);
   useEffect(() => {
     const G_KEYS: Record<string, View> = {
-      d: "dashboard", o: "orders", l: "listings", e: "expenses", t: "taxes", b: "billing", s: "settings", h: "help",
+      d: "dashboard", o: "orders", l: "listings", p: "payouts", e: "expenses", t: "taxes", b: "billing", s: "settings", h: "help",
     };
     function onKey(event: KeyboardEvent) {
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "k") {
@@ -2026,6 +2027,14 @@ function Dashboard() {
           {/* =================================================
               LISTINGS
           ================================================= */}
+
+          {view === "payouts" && (
+            <PayoutsSection
+              storeKey={allStores ? "all" : activeStore?.id ?? "none"}
+              hasStore={stores.length > 0}
+              multiStore={allStores}
+            />
+          )}
 
           {view === "taxes" && (
             <TaxReport

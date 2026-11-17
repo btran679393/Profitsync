@@ -14,6 +14,7 @@ const PAGE_HINTS: Partial<Record<View, string>> = {
   dashboard: "G then D",
   orders: "G then O",
   listings: "G then L",
+  payouts: "G then P",
   expenses: "G then E",
   taxes: "G then T",
   billing: "G then B",
