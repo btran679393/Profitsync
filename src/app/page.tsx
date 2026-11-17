@@ -27,6 +27,7 @@ import StoreReturnPolicySetting from "./StoreReturnPolicySetting";
 import { buildInsights } from "@/lib/insights";
 import StoreSwitcher, { type EbayStore } from "./StoreSwitcher";
 import PayoutsSection from "./PayoutsSection";
+import ReportsSection from "./ReportsSection";
 import LockedFeature from "./LockedFeature";
 import MoneyCards from "./dashboard/MoneyCards";
 import OrderTools, { type ToolOrder } from "./OrderTools";
@@ -338,7 +339,7 @@ function Dashboard() {
   const goPressedAt = useRef(0);
   useEffect(() => {
     const G_KEYS: Record<string, View> = {
-      d: "dashboard", o: "orders", l: "listings", i: "inventory", p: "payouts", e: "expenses", t: "taxes", b: "billing", s: "settings", h: "help",
+      d: "dashboard", r: "reports", o: "orders", l: "listings", i: "inventory", p: "payouts", e: "expenses", t: "taxes", b: "billing", s: "settings", h: "help",
     };
     function onKey(event: KeyboardEvent) {
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "k") {
@@ -1836,6 +1837,7 @@ function Dashboard() {
         onNavigate={(target) => (target === "orders" ? goToOrders() : navigate(target))}
         badges={{
           taxes: onFreePlan ? <Badge tone="accent">Pro</Badge> : null,
+          reports: limits.reports ? null : <Badge tone="accent">Pro</Badge>,
           inventory: limits.inventory ? null : <Badge tone="accent">Pro</Badge>,
           payouts: limits.payouts ? null : <Badge tone="accent">Pro</Badge>,
           billing: billing?.enabled ? (
@@ -2126,6 +2128,33 @@ function Dashboard() {
           {/* =================================================
               LISTINGS
           ================================================= */}
+
+          {view === "reports" && !limits.reports && (
+            <LockedFeature
+              title="See how your business is doing over time"
+              plan="Pro"
+              onUpgrade={goToPlans}
+              points={[
+                "Your best and slowest months, month by month",
+                "Profit by eBay category and by brand",
+                "Repeat buyers and how much of your sales they bring",
+              ]}
+            >
+              Reports turn your orders into the big picture: what&apos;s growing, what sells best and who comes back.
+            </LockedFeature>
+          )}
+
+          {view === "reports" && limits.reports && (
+            <ReportsSection
+              orders={orders}
+              listings={listings}
+              expenses={expenseEntries}
+              now={now}
+              loading={loading}
+              onGoOrders={() => goToOrders("pending")}
+              onRefreshListings={() => void syncListings()}
+            />
+          )}
 
           {view === "payouts" && !limits.payouts && (
             <LockedFeature

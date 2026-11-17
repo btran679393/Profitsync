@@ -25,6 +25,8 @@ export type PlanLimits = {
   inventory: boolean;
   // Pro and up: listing views and watchers from eBay.
   buyerInterest: boolean;
+  // Pro and up: the Reports page (months, categories, brands, buyers).
+  reports: boolean;
   // Ultimate: mileage expenses (miles × rate).
   mileage: boolean;
   // Ultimate: the Form 1099-K check on the Taxes page.
@@ -59,6 +61,7 @@ export const PLANS: Record<PlanId, Plan> = {
       payouts: false,
       inventory: false,
       buyerInterest: false,
+      reports: false,
       mileage: false,
       form1099k: false,
     },
@@ -86,6 +89,7 @@ export const PLANS: Record<PlanId, Plan> = {
       payouts: true,
       inventory: true,
       buyerInterest: true,
+      reports: true,
       mileage: false,
       form1099k: false,
     },
@@ -100,6 +104,7 @@ export const PLANS: Record<PlanId, Plan> = {
       "Payouts: money waiting at eBay and what's in every payout",
       "Inventory: purchases, unsold stock and what paid off",
       "Listing views and watchers from eBay",
+      "Reports: best months, profit by category and brand, repeat buyers",
     ],
   },
   ultimate: {
@@ -118,6 +123,7 @@ export const PLANS: Record<PlanId, Plan> = {
       payouts: true,
       inventory: true,
       buyerInterest: true,
+      reports: true,
       mileage: true,
       form1099k: true,
     },

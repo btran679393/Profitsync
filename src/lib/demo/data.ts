@@ -116,6 +116,22 @@ export function demoOrders(): ApiOrder[] {
   return orders;
 }
 
+// Category and brand for each catalog item, in the same order.
+const DETAILS: Array<[string, string | null]> = [
+  ["Film Cameras", "Canon"],
+  ["Sealed Booster Boxes", "Pokémon"],
+  ["Athletic Shoes", "Nike"],
+  ["LEGO Complete Sets & Packs", "LEGO"],
+  ["Sports Trading Card Lots", "Upper Deck"],
+  ["Headphones", "Apple"],
+  ["Jeans", "Levi's"],
+  ["Video Game Consoles", "Nintendo"],
+  ["Funko Pop!", "Funko"],
+  ["Sweaters", "Patagonia"],
+  ["CCG Sealed Decks & Kits", "Wizards of the Coast"],
+  ["Headphones", "Sony"],
+];
+
 export function demoListings(): ApiListing[] {
   return CATALOG.map((p, i) => ({
     ebayItemId: p.itemId,
@@ -136,6 +152,9 @@ export function demoListings(): ApiListing[] {
     impressions30: p.stock > 0 ? [1800, 5200, 950, 3400, 7600, 0, 2100, 4100, 2600, 1500, 0, 1300][i] ?? 900 : 0,
     sales30: p.stock > 0 ? [2, 6, 0, 3, 9, 0, 0, 4, 5, 1, 0, 0][i] ?? 0 : 0,
     trafficUpdatedAt: iso(0, 6),
+    // Sample eBay item details for Reports.
+    categoryName: DETAILS[i]?.[0] ?? null,
+    brand: DETAILS[i]?.[1] ?? null,
   }));
 }
 

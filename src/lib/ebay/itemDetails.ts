@@ -1,0 +1,82 @@
+// Category and brand for listings, from eBay's public item lookup (the
+// Browse API, with ProfitSync's own app sign-in, not the seller's). Used by
+// the Reports page to show profit by category and by brand. Read once per
+// listing and saved; a listing is looked up again after 30 days.
+
+export type ItemDetails = { category: string | null; categoryPath: string | null; brand: string | null };
+
+type BrowseItem = {
+  categoryPath?: string;
+  brand?: string;
+  localizedAspects?: Array<{ name?: string; value?: string }>;
+};
+
+const clean = (value: string | undefined | null, max: number) => {
+  const text = (value ?? "").replace(/\s+/g, " ").trim();
+  return text ? text.slice(0, max) : null;
+};
+
+// eBay's category path looks like "Sports Mem, Cards & Fan Shop|Fan
+// Apparel & Souvenirs|Soccer-International Clubs". The last part is the
+// most useful name for a report.
+export function parseItemDetails(data: unknown): ItemDetails {
+  const item = (data ?? {}) as BrowseItem;
+  const path = clean(item.categoryPath, 300);
+  const parts = path ? path.split("|").map((p) => p.trim()).filter(Boolean) : [];
+  const aspectBrand = item.localizedAspects?.find((a) => a.name?.trim().toLowerCase() === "brand")?.value;
+  let brand = clean(item.brand ?? aspectBrand, 80);
+  // Sellers often fill Brand with placeholders.
+  if (brand && /^(unbranded|unknown|n\/?a|none|no brand|generic|does not apply)$/i.test(brand)) brand = null;
+  return { category: parts.length ? parts[parts.length - 1].slice(0, 120) : null, categoryPath: path, brand };
+}
+
+export async function appToken(apiBase: string): Promise<string | null> {
+  const clientId = process.env.EBAY_CLIENT_ID;
+  const clientSecret = process.env.EBAY_CLIENT_SECRET;
+  if (!clientId || !clientSecret) return null;
+  try {
+    const response = await fetch(`${apiBase}/identity/v1/oauth2/token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+      },
+      body: new URLSearchParams({ grant_type: "client_credentials", scope: "https://api.ebay.com/oauth/api_scope" }).toString(),
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    const data = (await response.json()) as { access_token?: string };
+    return data.access_token ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// Details for one listing, or null when eBay can't show it (ended,
+// private, or a multi-variation listing).
+export async function fetchItemDetails(apiBase: string, token: string, itemId: string): Promise<ItemDetails | null> {
+  try {
+    const response = await fetch(
+      `${apiBase}/buy/browse/v1/item/get_item_by_legacy_id?${new URLSearchParams({ legacy_item_id: itemId })}`,
+      {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json", "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" },
+        cache: "no-store",
+      }
+    );
+    if (!response.ok) return null;
+    return parseItemDetails(await response.json());
+  } catch {
+    return null;
+  }
+}
+
+// Look up several listings, a few at a time.
+export async function fetchManyItemDetails(apiBase: string, token: string, itemIds: string[], parallel = 5) {
+  const found = new Map<string, ItemDetails | null>();
+  for (let i = 0; i < itemIds.length; i += parallel) {
+    const batch = itemIds.slice(i, i + parallel);
+    const results = await Promise.all(batch.map((id) => fetchItemDetails(apiBase, token, id)));
+    batch.forEach((id, j) => found.set(id, results[j]));
+  }
+  return found;
+}

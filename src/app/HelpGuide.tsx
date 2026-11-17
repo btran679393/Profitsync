@@ -10,6 +10,7 @@ const SECTIONS: ReadonlyArray<readonly [string, string]> = [
   ["guide-start", "Getting started"],
   ["guide-profit", "How profit is worked out"],
   ["guide-dashboard", "Dashboard"],
+  ["guide-reports", "Reports"],
   ["guide-orders", "Orders"],
   ["guide-listings", "Listings"],
   ["guide-inventory", "Inventory"],
@@ -212,6 +213,22 @@ export default function HelpGuide({
           </ul>
         </Section>
 
+        <Section id="guide-reports" title="Reports">
+          <ul className="list-disc space-y-1.5 pl-5">
+            <li>
+              <B>Month by month</B> shows your profit each month for the last 12 or 24 months, with your best and slowest months. Switch to a
+              table to see sales, margin and orders.
+            </li>
+            <li>
+              <B>What sells best</B> groups profit by eBay category or by brand. ProfitSync reads both from eBay when you refresh your listings,
+              a few dozen at a time, so they fill in over your first few refreshes.
+            </li>
+            <li>
+              <B>Repeat buyers</B> shows who bought more than once and how much of your sales they bring.
+            </li>
+          </ul>
+        </Section>
+
         <Section id="guide-inventory" title="Inventory">
           <ul className="list-disc space-y-1.5 pl-5">
             <li>
@@ -301,7 +318,7 @@ export default function HelpGuide({
               buyer, and runs actions like Sync.
             </li>
             <li>
-              Press <B>G</B> then a letter to go to a page: <B>G O</B> Orders, <B>G L</B> Listings, <B>G I</B> Inventory, <B>G P</B> Payouts,{" "}
+              Press <B>G</B> then a letter to go to a page: <B>G R</B> Reports, <B>G O</B> Orders, <B>G L</B> Listings, <B>G I</B> Inventory, <B>G P</B> Payouts,{" "}
               <B>G E</B> Expenses, <B>G T</B> Taxes, <B>G D</B> Dashboard.
             </li>
             <li>

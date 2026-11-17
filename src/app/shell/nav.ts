@@ -7,7 +7,13 @@ export type NavItem = { id: View; label: string; icon: IconName };
 export type NavGroup = { label: string; items: NavItem[] };
 
 export const NAV_GROUPS: NavGroup[] = [
-  { label: "Overview", items: [{ id: "dashboard", label: "Dashboard", icon: "dashboard" }] },
+  {
+    label: "Overview",
+    items: [
+      { id: "dashboard", label: "Dashboard", icon: "dashboard" },
+      { id: "reports", label: "Reports", icon: "chart" },
+    ],
+  },
   {
     label: "Sales",
     items: [

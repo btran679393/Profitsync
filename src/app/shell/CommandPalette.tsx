@@ -12,6 +12,7 @@ type Entry = { key: string; group: string; label: string; hint?: string; icon: I
 
 const PAGE_HINTS: Partial<Record<View, string>> = {
   dashboard: "G then D",
+  reports: "G then R",
   orders: "G then O",
   listings: "G then L",
   inventory: "G then I",

@@ -16,7 +16,7 @@ const PRICING_FAQ: Array<[string, string]> = [
   ["What happens on the Free plan?", "You get one eBay store and up to 50 orders a month from the last 90 days, with the full dashboard."],
   [
     "What does Pro add, and what does Ultimate add?",
-    "Pro adds unlimited orders, 2 years of history, your tax report and spreadsheets, Payouts, Inventory, and listing views and watchers. Ultimate has everything in Pro plus unlimited stores, mileage tracking and a Form 1099-K check for each eBay account.",
+    "Pro adds unlimited orders, 2 years of history, your tax report and spreadsheets, Reports, Payouts, Inventory, and listing views and watchers. Ultimate has everything in Pro plus unlimited stores, mileage tracking and a Form 1099-K check for each eBay account.",
   ],
   ["Can I switch between monthly and yearly?", "Any time. Stripe charges or credits the difference for you."],
   ["Is my payment information safe?", "Payments go through Stripe. ProfitSync never sees or stores your card number."],

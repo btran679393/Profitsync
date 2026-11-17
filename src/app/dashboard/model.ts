@@ -25,6 +25,10 @@ export type ApiListing = {
   impressions30?: number | null;
   sales30?: number | null;
   trafficUpdatedAt?: string | null;
+  // From eBay item details (for Reports): the most specific category, and
+  // the Brand the seller set.
+  categoryName?: string | null;
+  brand?: string | null;
 };
 
 export type Order = {
@@ -291,7 +295,7 @@ export function getOrderProfit(order: Order) {
 // so Back, refresh and shared links open the same view.
 // ============================================================
 
-export type View = "dashboard" | "orders" | "listings" | "inventory" | "payouts" | "expenses" | "taxes" | "billing" | "settings" | "help";
+export type View = "dashboard" | "reports" | "orders" | "listings" | "inventory" | "payouts" | "expenses" | "taxes" | "billing" | "settings" | "help";
 
 export function subscribeToHash(onChange: () => void) {
   window.addEventListener("hashchange", onChange);
@@ -299,6 +303,7 @@ export function subscribeToHash(onChange: () => void) {
 }
 
 export function viewFromHash(hash: string): View {
+  if (hash === "#reports") return "reports";
   if (hash === "#orders") return "orders";
   if (hash === "#listings") return "listings";
   if (hash === "#inventory") return "inventory";
@@ -315,6 +320,10 @@ export const VIEW_COPY: Record<View, { title: string; subtitle: string }> = {
   dashboard: {
     title: "Dashboard Overview",
     subtitle: "Understand your sales, expenses, and profitability.",
+  },
+  reports: {
+    title: "Reports",
+    subtitle: "How your business is doing over time: your best months, what sells best and who buys again.",
   },
   orders: {
     title: "Orders",

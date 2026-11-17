@@ -31,10 +31,12 @@ export async function GET() {
     const traffic = ["watchCount", "listedAt", "views30", "impressions30", "sales30", "trafficUpdatedAt"];
     // Views and watchers are part of Pro and Ultimate.
     const { limits } = await getUserPlan(pool, user.id);
-    const optional = await existingColumns(pool, "EbayListing", ["shippingCost", ...(limits.buyerInterest ? traffic : [])]);
+    // Category and brand come from docs/sql/2026-11-17_listing_details.sql.
+    const details = ["categoryName", "brand"];
+    const optional = await existingColumns(pool, "EbayListing", ["shippingCost", ...(limits.buyerInterest ? traffic : []), ...details]);
     const shipping =
       (optional.has("shippingCost") ? `"shippingCost",` : "") +
-      traffic.filter((column) => optional.has(column)).map((column) => `"${column}",`).join(" ");
+      [...traffic, ...details].filter((column) => optional.has(column)).map((column) => `"${column}",`).join(" ");
     const store = await resolveActiveEbayUserId(pool, user);
     const result = await pool.query(
       `

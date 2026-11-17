@@ -6,7 +6,7 @@ import { inDemo } from "@/lib/demo/shim";
 import type { PlanLimits } from "@/lib/billing/plans";
 
 // Bump this (and the list below) when there's something new to announce.
-const RELEASE = "2026-11-17";
+const RELEASE = "2026-11-17.2";
 const STORAGE_KEY = "profitsync:whats-new-seen";
 const EVENT = "profitsync:whats-new";
 
@@ -28,7 +28,7 @@ function subscribe(onChange: () => void) {
   };
 }
 
-type Target = "payouts" | "inventory" | "listings" | "expenses" | "taxes" | "billing";
+type Target = "reports" | "payouts" | "inventory" | "listings" | "expenses" | "taxes" | "billing";
 
 // A one-time note on the Dashboard about recent features. Hidden once
 // dismissed (remembered in this browser). Each line links to the page; a
@@ -38,7 +38,7 @@ export default function WhatsNew({
   limits,
 }: {
   onGo: (view: Target) => void;
-  limits: Pick<PlanLimits, "payouts" | "inventory" | "buyerInterest" | "mileage" | "form1099k">;
+  limits: Pick<PlanLimits, "reports" | "payouts" | "inventory" | "buyerInterest" | "mileage" | "form1099k">;
 }) {
   const seen = useSyncExternalStore(subscribe, readSeen, () => RELEASE);
   if (seen === RELEASE) return null;
@@ -51,6 +51,7 @@ export default function WhatsNew({
   }
 
   const items: Array<{ name: string; text: string; to: Target; allowed: boolean; plan: string }> = [
+    { name: "Reports", text: "your best months, profit by category and brand, and repeat buyers.", to: "reports", allowed: limits.reports, plan: "Pro" },
     { name: "Payouts", text: "money waiting at eBay and what's inside every payout.", to: "payouts", allowed: limits.payouts, plan: "Pro" },
     { name: "Inventory", text: "log what you buy, see unsold stock and which purchases paid off.", to: "inventory", allowed: limits.inventory, plan: "Pro" },
     { name: "Listings", text: "views and watchers from eBay, and the lowest offer you can accept.", to: "listings", allowed: limits.buyerInterest, plan: "Pro" },

@@ -16,6 +16,7 @@ const GROUPS: Array<{ title: string; rows: Array<[string[], string]> }> = [
     title: "Go to (press G, then the letter)",
     rows: [
       [["G", "D"], "Dashboard"],
+      [["G", "R"], "Reports"],
       [["G", "O"], "Orders"],
       [["G", "L"], "Listings"],
       [["G", "I"], "Inventory"],

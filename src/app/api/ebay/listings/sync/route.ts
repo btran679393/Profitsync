@@ -8,6 +8,8 @@ import { fetchSellerProfile, saveSellerProfile } from "@/lib/ebay/sellerProfile"
 import { pickConnection, storeAllowedByPlan, storeForSync } from "@/lib/ebay/activeStore";
 import { existingColumns } from "@/lib/db/optionalColumns";
 import { TrafficPermissionError, fetchListingTraffic } from "@/lib/ebay/traffic";
+import { appToken, fetchManyItemDetails } from "@/lib/ebay/itemDetails";
+import { ebayBases } from "@/lib/ebay/finances";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -388,6 +390,55 @@ async function syncListings(request: Request) {
       console.error("Saving listing watchers and traffic failed:", error);
     }
 
+    // Category and brand for the Reports page. Needs
+    // docs/sql/2026-11-17_listing_details.sql; skipped until then. Never
+    // fails the listing sync.
+    let detailsFilled = 0;
+    try {
+      const columns = await existingColumns(pool, "EbayListing", ["detailsCheckedAt"]);
+      if (columns.has("detailsCheckedAt")) {
+        const { rows } = await pool.query<{ ebayItemId: string }>(
+          `
+          SELECT "ebayItemId" FROM public."EbayListing"
+          WHERE "userId" = $1 AND "ebayUserId" = $2 AND environment = $3
+            AND ("detailsCheckedAt" IS NULL OR "detailsCheckedAt" < NOW() - INTERVAL '30 days')
+          ORDER BY status = 'ACTIVE' DESC, "updatedAt" DESC
+          LIMIT 60
+          `,
+          [user.id, connection.ebayUserId, environment]
+        );
+        const { api } = ebayBases();
+        const token = rows.length > 0 ? await appToken(api) : null;
+        if (token) {
+          const details = await fetchManyItemDetails(api, token, rows.map((r) => r.ebayItemId));
+          const ids = [...details.keys()];
+          await pool.query(
+            `
+            UPDATE public."EbayListing" l
+            SET "categoryName" = COALESCE(v.category, l."categoryName"),
+                "categoryPath" = COALESCE(v.path, l."categoryPath"),
+                "brand" = COALESCE(v.brand, l."brand"),
+                "detailsCheckedAt" = NOW()
+            FROM unnest($4::text[], $5::text[], $6::text[], $7::text[]) AS v(item_id, category, path, brand)
+            WHERE l."userId" = $1 AND l."ebayUserId" = $2 AND l.environment = $3 AND l."ebayItemId" = v.item_id
+            `,
+            [
+              user.id,
+              connection.ebayUserId,
+              environment,
+              ids,
+              ids.map((id) => details.get(id)?.category ?? null),
+              ids.map((id) => details.get(id)?.categoryPath ?? null),
+              ids.map((id) => details.get(id)?.brand ?? null),
+            ]
+          );
+          detailsFilled = ids.filter((id) => details.get(id)).length;
+        }
+      }
+    } catch (error) {
+      console.error("Loading listing categories and brands failed:", error);
+    }
+
     // Keep the seller's eBay username / store name current for the greeting.
     // Never fails the listing sync.
     try {
@@ -403,6 +454,7 @@ async function syncListings(request: Request) {
       active: listings.length,
       ended,
       trafficListings,
+      detailsFilled,
       // The store hasn't granted the analytics permission: reconnecting
       // eBay turns on views and impressions.
       trafficNeedsReconnect,
