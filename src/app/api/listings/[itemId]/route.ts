@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { setupNeeded } from "@/lib/setupNeeded";
-import { fullyRefundedSql, statusWithCostSql } from "@/lib/refunds";
+import { saveListingCost } from "@/lib/listingCost";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,52 +59,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ it
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const listing = await client.query<{ title: string; ebayUserId: string }>(
-      `
-      UPDATE public."EbayListing"
-      SET "${field}" = $1::numeric, "updatedAt" = NOW()
-      WHERE "userId" = $2 AND "ebayItemId" = $3 AND environment = 'PRODUCTION'
-      RETURNING title, "ebayUserId"
-      `,
-      [unitCost, user.id, itemId]
-    );
-    if (!listing.rowCount) {
+    const saved = await saveListingCost(client, { userId: user.id, itemId, field, value: unitCost, applyToPast });
+    if (!saved) {
       await client.query("ROLLBACK");
       return NextResponse.json({ error: "Listing not found. Try refreshing your listings." }, { status: 404 });
     }
-
-    let applied = 0;
-    if (applyToPast) {
-      // Same matching as the Listings page: the saved listing ID, or (for
-      // older orders without one) the exact same item title.
-      // Cost per item is multiplied by units sold; shipping is per order.
-      const setClause =
-        field === "unitCost"
-          ? `"productCost" = ROUND($1::numeric * GREATEST(COALESCE(o.quantity, 1), 1), 2), status = ${statusWithCostSql("o.")}`
-          : `"shippingCost" = $1::numeric`;
-      const target = field === "unitCost" ? `"productCost"` : `"shippingCost"`;
-      const result = await client.query(
-        `
-        UPDATE public."order" o
-        SET ${setClause},
-            "updatedAt" = NOW()
-        WHERE o."userId" = $2
-          AND o.environment = 'PRODUCTION'
-          AND o.${target} IS NULL
-          AND NOT ${fullyRefundedSql("o.")}
-          AND (
-            o."ebayItemId" = $3
-            OR (
-              o."ebayItemId" IS NULL
-              AND regexp_replace(lower(btrim(o.item)), '\\s+', ' ', 'g')
-                = regexp_replace(lower(btrim($4::text)), '\\s+', ' ', 'g')
-            )
-          )
-        `,
-        [unitCost, user.id, itemId, listing.rows[0].title]
-      );
-      applied = result.rowCount ?? 0;
-    }
+    const applied = saved.applied;
 
     await client.query("COMMIT");
     return NextResponse.json({ success: true, field, value: unitCost, applied });

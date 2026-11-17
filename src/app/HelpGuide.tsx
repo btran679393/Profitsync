@@ -12,6 +12,7 @@ const SECTIONS: ReadonlyArray<readonly [string, string]> = [
   ["guide-dashboard", "Dashboard"],
   ["guide-orders", "Orders"],
   ["guide-listings", "Listings"],
+  ["guide-inventory", "Inventory"],
   ["guide-expenses", "Expenses"],
   ["guide-taxes", "Taxes"],
   ["guide-stores", "Several stores"],
@@ -206,6 +207,26 @@ export default function HelpGuide({
             </li>
             <li>
               <B>Running low</B> and <B>Not selling</B> flag listings that need restocking or a price change. Change when they show in Settings.
+            </li>
+          </ul>
+        </Section>
+
+        <Section id="guide-inventory" title="Inventory">
+          <ul className="list-disc space-y-1.5 pl-5">
+            <li>
+              Press <B>Add purchase</B> for each sourcing trip, lot or single buy: the date, where, what you paid in total, and what&apos;s in it.
+            </li>
+            <li>
+              The total is shared across the items. Add what you expect each to sell for and pricier items carry more of the cost; leave it blank to
+              split evenly.
+            </li>
+            <li>
+              Link each item to its eBay listing. Its sales then count against that item (oldest purchase first), and its cost can become the
+              listing&apos;s cost for sales since you bought it.
+            </li>
+            <li>
+              You&apos;ll see what&apos;s still unsold and what it cost, how many days things take to sell, the share of each purchase that has sold, and
+              whether it has <B>paid off</B> (sales after fees and shipping cover what you spent).
             </li>
           </ul>
         </Section>

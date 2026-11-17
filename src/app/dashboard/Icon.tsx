@@ -18,6 +18,7 @@ export type IconName =
   | "close"
   | "arrow"
   | "box"
+  | "stack"
   | "calendar"
   | "alert"
   | "chevron"
@@ -148,6 +149,13 @@ export function Icon({
       <>
         <path d="m12 2 9 5v10l-9 5-9-5V7z" />
         <path d="m3 7 9 5 9-5M12 12v10" />
+      </>
+    ),
+    stack: (
+      <>
+        <path d="m12 3 9 4.5-9 4.5-9-4.5z" />
+        <path d="m3 12 9 4.5 9-4.5" />
+        <path d="m3 16.5 9 4.5 9-4.5" />
       </>
     ),
 

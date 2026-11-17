@@ -6,9 +6,10 @@
 import { PLANS, type BillingStatus } from "@/lib/billing/plans";
 import type { ApiOrder } from "@/app/dashboard/model";
 import type { Expense } from "@/app/ExpensesSection";
-import { DEMO_STORE_ID, DEMO_STORE_NAME, demoExpenses, demoListings, demoOrders } from "./data";
+import { DEMO_STORE_ID, DEMO_STORE_NAME, demoExpenses, demoInventory, demoListings, demoOrders } from "./data";
 import { demoPayouts } from "./payouts";
 import { breakdown } from "@/lib/ebay/payouts";
+import { splitPurchaseCost, type InventoryItem, type Purchase } from "@/lib/inventory";
 
 export const DEMO_MESSAGE = "This is a demo with sample data. Create a free account to do this with your own store.";
 
@@ -21,11 +22,21 @@ type Store = {
   listings: ReturnType<typeof demoListings>;
   expenses: Expense[];
   nextExpenseId: number;
+  purchases: Purchase[];
+  items: InventoryItem[];
+  nextInventoryId: number;
 };
 
 let store: Store | null = null;
 function data(): Store {
-  store ??= { orders: demoOrders(), listings: demoListings(), expenses: demoExpenses(), nextExpenseId: 100 };
+  store ??= {
+    orders: demoOrders(),
+    listings: demoListings(),
+    expenses: demoExpenses(),
+    nextExpenseId: 100,
+    ...demoInventory(),
+    nextInventoryId: 100,
+  };
   return store;
 }
 
@@ -104,6 +115,62 @@ async function handle(url: URL, init?: RequestInit): Promise<Response> {
       if (expense) Object.assign(expense, input);
     }
     return json({ success: true });
+  }
+  if (path === "/api/inventory") {
+    if (method === "GET") return json({ enabled: true, purchases: d.purchases, items: d.items });
+    const input = await body(init);
+    if (method === "POST" && input.purchaseId !== undefined) {
+      d.items.push({
+        id: d.nextInventoryId++,
+        purchaseId: Number(input.purchaseId),
+        name: String(input.name),
+        quantity: Number(input.quantity) || 1,
+        unitCost: Number(input.unitCost) || 0,
+        ebayItemId: input.ebayItemId ? String(input.ebayItemId) : null,
+      });
+    } else if (method === "POST") {
+      const purchaseId = d.nextInventoryId++;
+      const lines = Array.isArray(input.items) ? (input.items as Array<Record<string, unknown>>) : [];
+      const split = splitPurchaseCost(
+        Math.round(Number(input.totalPaid) * 100) || 0,
+        lines.map((line) => ({ quantity: Number(line.quantity) || 1, estimate: line.estimate ? Number(line.estimate) : null }))
+      );
+      d.purchases.push({
+        id: purchaseId,
+        ebayUserId: DEMO_STORE_ID,
+        purchasedOn: String(input.purchasedOn),
+        source: String(input.source),
+        note: input.note ? String(input.note) : null,
+      });
+      lines.forEach((line, i) =>
+        d.items.push({
+          id: d.nextInventoryId++,
+          purchaseId,
+          name: String(line.name),
+          quantity: Number(line.quantity) || 1,
+          unitCost: split[i]?.unitCost ?? 0,
+          ebayItemId: line.ebayItemId ? String(line.ebayItemId) : null,
+        })
+      );
+    } else if (method === "PATCH") {
+      const target =
+        input.purchaseId !== undefined
+          ? d.purchases.find((p) => p.id === Number(input.purchaseId))
+          : d.items.find((i) => i.id === Number(input.itemId));
+      const changes = { ...input };
+      delete changes.purchaseId;
+      delete changes.itemId;
+      delete changes.useAsListingCost;
+      if (target) Object.assign(target, changes);
+    } else if (method === "DELETE") {
+      if (input.purchaseId !== undefined) {
+        d.purchases = d.purchases.filter((p) => p.id !== Number(input.purchaseId));
+        d.items = d.items.filter((i) => i.purchaseId !== Number(input.purchaseId));
+      } else {
+        d.items = d.items.filter((i) => i.id !== Number(input.itemId));
+      }
+    }
+    return json({ success: true, costsApplied: 0 });
   }
   if (path === "/api/ebay/stores" && method === "GET") {
     return json({

@@ -28,6 +28,7 @@ import { buildInsights } from "@/lib/insights";
 import StoreSwitcher, { type EbayStore } from "./StoreSwitcher";
 import PayoutsSection from "./PayoutsSection";
 import OrderTools, { type ToolOrder } from "./OrderTools";
+import InventorySection from "./InventorySection";
 import ExpensesSection, {
   todayKey,
   type Expense,
@@ -310,7 +311,7 @@ function Dashboard() {
   const goPressedAt = useRef(0);
   useEffect(() => {
     const G_KEYS: Record<string, View> = {
-      d: "dashboard", o: "orders", l: "listings", p: "payouts", e: "expenses", t: "taxes", b: "billing", s: "settings", h: "help",
+      d: "dashboard", o: "orders", l: "listings", i: "inventory", p: "payouts", e: "expenses", t: "taxes", b: "billing", s: "settings", h: "help",
     };
     function onKey(event: KeyboardEvent) {
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "k") {
@@ -2120,6 +2121,20 @@ function Dashboard() {
               onSaveStoreShipping={saveStoreShipping}
               canSetStoreShipping={!allStores}
               staleAfterDays={preferences.staleAfterDays}
+            />
+          )}
+
+          {view === "inventory" && (
+            <InventorySection
+              // Reload when switching stores.
+              key={allStores ? "all" : activeStore?.id ?? "none"}
+              orders={orders}
+              listings={listings}
+              staleAfterDays={preferences.staleAfterDays}
+              onCostsApplied={() => {
+                void loadOrders();
+                void loadListings();
+              }}
             />
           )}
 
