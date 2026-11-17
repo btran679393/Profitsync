@@ -19,8 +19,6 @@ export type PlanLimits = {
   autoSync: boolean;
   // Combined "All stores" view.
   allStoresView: boolean;
-  // "Ask ProfitSync", the AI helper that answers questions about your numbers.
-  assistant: boolean;
 };
 
 export type Plan = {
@@ -48,7 +46,6 @@ export const PLANS: Record<PlanId, Plan> = {
       exports: false,
       autoSync: false,
       allStoresView: false,
-      assistant: false,
     },
     features: [
       "1 eBay store",
@@ -71,7 +68,6 @@ export const PLANS: Record<PlanId, Plan> = {
       exports: true,
       autoSync: true,
       allStoresView: true,
-      assistant: false,
     },
     features: [
       "Up to 3 eBay stores",
@@ -96,7 +92,6 @@ export const PLANS: Record<PlanId, Plan> = {
       exports: true,
       autoSync: true,
       allStoresView: true,
-      assistant: true,
     },
     features: [
       "Unlimited eBay stores",

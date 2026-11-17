@@ -25,8 +25,6 @@ import ListingsSection, { LISTING_RANGES, type ListingRange } from "./ListingsSe
 import StoreShippingSetting from "./StoreShippingSetting";
 import StoreReturnPolicySetting from "./StoreReturnPolicySetting";
 import { buildInsights } from "@/lib/insights";
-import { ASSISTANT_DAILY_LIMIT, buildAssistantSummary, type AssistantStatus } from "@/lib/assistant";
-import AssistantPanel from "./AssistantPanel";
 import StoreSwitcher, { type EbayStore } from "./StoreSwitcher";
 import OrderTools, { type ToolOrder } from "./OrderTools";
 import ExpensesSection, {
@@ -672,24 +670,6 @@ function Dashboard() {
       setBillingLoading(false);
     }
   }, []);
-
-  // "Ask ProfitSync": hidden until the site has it switched on. Checked
-  // again when the plan changes (e.g. after upgrading to Ultimate).
-  const [assistantStatus, setAssistantStatus] = useState<AssistantStatus | null>(null);
-  const [assistantOpen, setAssistantOpen] = useState(false);
-  const assistantPlan = billing?.plan;
-  useEffect(() => {
-    let active = true;
-    fetch("/api/assistant", { cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((status: AssistantStatus | null) => {
-        if (active) setAssistantStatus(status?.available ? status : null);
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, [assistantPlan]);
 
   // Until billing is switched on (or while it loads), nothing is limited.
   const limits = billing?.enabled ? billing.limits : PLANS.ultimate.limits;
@@ -1663,24 +1643,6 @@ function Dashboard() {
     [periodListingRows, preferences.staleAfterDays]
   );
 
-  // What "Ask ProfitSync" gets to look at: the same numbers this page shows.
-  const buildAskSummary = () => {
-    if (!now || loading) return null;
-    const byCategory = new Map<string, number>();
-    for (const expense of periodExpenses) byCategory.set(expense.category, (byCategory.get(expense.category) ?? 0) + Number(expense.amount));
-    return buildAssistantSummary({
-      periodLabel: dateRangeLabel(dateRange),
-      storeLabel: activeStore?.name ?? (allStores ? "All stores" : "This store"),
-      today: localDateKey(now),
-      totals,
-      previousTotals,
-      expensesByCategory: [...byCategory].map(([category, amount]) => ({ category, amount })),
-      listings: periodListingRows,
-      insights,
-      targetProfit: preferences.offerTargetProfit,
-    });
-  };
-
   // Where the money went in the chosen period.
   const costSlices = useMemo<CostSlice[]>(() => {
     const byCategory = new Map<string, number>();
@@ -1729,7 +1691,6 @@ function Dashboard() {
       },
     },
     { id: "pending", label: "Orders that need a cost", icon: "orders" as const, run: () => goToOrders("pending") },
-    ...(assistantStatus ? [{ id: "ask", label: "Ask ProfitSync about your numbers", icon: "sparkle" as const, run: () => setAssistantOpen(true) }] : []),
     { id: "shortcuts", label: "Keyboard shortcuts", hint: "?", icon: "info" as const, run: () => setShortcutsOpen(true) },
   ];
 
@@ -1809,7 +1770,6 @@ function Dashboard() {
           progressText={syncProgress}
           now={currentTime}
           onSearch={() => setPaletteOpen(true)}
-          onAsk={assistantStatus && stores.length > 0 ? () => setAssistantOpen(true) : undefined}
           switcher={
             <StoreSwitcher
               stores={stores}
@@ -2187,22 +2147,6 @@ function Dashboard() {
         onOpenOrder={setSelectedOrderId}
       />
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
-      {assistantStatus && (
-        <AssistantPanel
-          open={assistantOpen}
-          onClose={() => setAssistantOpen(false)}
-          status={assistantStatus}
-          getSummary={buildAskSummary}
-          scopeLabel={`${dateRangeLabel(dateRange)} · ${activeStore?.name ?? (allStores ? "All stores" : "This store")}`}
-          onUpgrade={() => {
-            setAssistantOpen(false);
-            goToPlans();
-          }}
-          onRemainingChange={(remaining) =>
-            setAssistantStatus((status) => (status ? { ...status, remaining: Math.max(0, Math.min(remaining, ASSISTANT_DAILY_LIMIT)) } : status))
-          }
-        />
-      )}
 
       {selectedOrder && (
         <OrderDetailsPanel

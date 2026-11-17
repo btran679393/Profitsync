@@ -6,7 +6,6 @@
 import { PLANS, type BillingStatus } from "@/lib/billing/plans";
 import type { ApiOrder } from "@/app/dashboard/model";
 import type { Expense } from "@/app/ExpensesSection";
-import { ASSISTANT_DAILY_LIMIT, type AssistantSummary } from "@/lib/assistant";
 import { DEMO_STORE_ID, DEMO_STORE_NAME, demoExpenses, demoListings, demoOrders } from "./data";
 
 export const DEMO_MESSAGE = "This is a demo with sample data. Create a free account to do this with your own store.";
@@ -125,17 +124,6 @@ async function handle(url: URL, init?: RequestInit): Promise<Response> {
   }
   if (path === "/api/ebay/profile") return json({ storeName: DEMO_STORE_NAME, username: "demo_collectibles" });
   if (path === "/api/billing" && method === "GET") return json(billing());
-  if (path === "/api/assistant" && method === "GET") {
-    return json({ available: true, allowed: true, remaining: assistantLeft, limit: ASSISTANT_DAILY_LIMIT });
-  }
-  if (path === "/api/assistant" && method === "POST") {
-    const { question, summary } = (await body(init)) as { question?: string; summary?: AssistantSummary };
-    if (!summary) return json({ error: "Your numbers are still loading. Try again in a moment." }, 400);
-    assistantLeft = Math.max(0, assistantLeft - 1);
-    // A short pause so it feels like the real thing.
-    await new Promise((resolve) => setTimeout(resolve, 900));
-    return json({ answer: demoAnswer(String(question ?? ""), summary), remaining: assistantLeft });
-  }
   if (path === "/api/ebay/sync" && url.searchParams.get("year")) {
     // The demo store only has recent orders: nothing older to bring in.
     return json({ success: true, mode: "history", found: 0, imported: 0, skipped: 0 });
@@ -146,56 +134,6 @@ async function handle(url: URL, init?: RequestInit): Promise<Response> {
   // Anything else (checkout, store changes, account deletion, eBay checks…)
   // needs a real account.
   return demoOnly();
-}
-
-// The demo doesn't call the AI: it gives a sample answer built from the
-// demo numbers, so visitors can see what Ask ProfitSync is like.
-let assistantLeft = ASSISTANT_DAILY_LIMIT;
-const usd = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
-
-function demoAnswer(question: string, summary: AssistantSummary): string {
-  const q = question.toLowerCase();
-  const t = summary.totals;
-  const note = "\n\n(This is a sample answer in the demo. With your own store, Ask ProfitSync answers any question about your numbers.)";
-  if (/price|lower|offer|cheap/.test(q)) {
-    const watched = summary.listings.filter((l) => l.status === "ACTIVE" && (l.watchers ?? 0) >= 2 && l.lowestOfferForTarget !== null);
-    const slow = summary.listings.filter((l) => l.status === "ACTIVE" && (l.views30Days ?? 0) >= 50 && (l.sales30Days ?? 0) === 0);
-    const lines = [
-      ...slow.slice(0, 2).map((l) => `- ${l.title}: ${l.views30Days} views in 30 days and no sale. Try a small price cut or better photos.`),
-      ...watched
-        .slice(0, 2)
-        .map((l) => `- ${l.title}: ${l.watchers} watching. You can offer as low as ${usd(l.lowestOfferForTarget ?? 0)} and still hit your target profit.`),
-    ];
-    const answer = lines.length
-      ? `These are the best places to start:\n${lines.join("\n")}`
-      : "Nothing stands out right now: your active listings are selling at a healthy pace.";
-    return answer + note;
-  }
-  if (/where|money|going|cost|fee/.test(q)) {
-    const parts: Array<[string, number]> = [
-      ["Product costs", t.productCosts],
-      ["eBay selling fees", t.ebaySellingFees],
-      ["Shipping", t.shipping],
-      ["Ads and other eBay fees", t.adAndOtherEbayFees],
-      ["Expenses", t.expenses],
-      ["Refund losses", t.refundLosses],
-    ];
-    const biggest = parts
-      .filter(([, value]) => value > 0)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 4)
-      .map(([label, value]) => `- ${label}: ${usd(value)} (${Math.round((value / Math.max(t.sales, 0.01)) * 100)}% of sales)`);
-    return `Out of ${usd(t.sales)} in sales (${summary.period.toLowerCase()}), the biggest costs were:\n${biggest.join("\n")}\nThat leaves ${usd(t.netProfit)} in profit.${note}`;
-  }
-  if (/why|down|lower than|last period|compare/.test(q) && summary.previousPeriod) {
-    const p = summary.previousPeriod;
-    const diff = t.netProfit - p.netProfit;
-    const missing = t.ordersWithoutCost > 0 ? `, and ${t.ordersWithoutCost} recent orders still need a product cost, so profit will change once you add them` : "";
-    return `Profit is ${usd(t.netProfit)}, ${diff >= 0 ? "up" : "down"} ${usd(Math.abs(diff))} from the period before (${usd(p.netProfit)}). Sales went from ${usd(p.sales)} to ${usd(t.sales)}${missing}.${note}`;
-  }
-  const first = summary.suggestions[0];
-  const tip = first ? `\n\nThis week, start here: ${first}` : "";
-  return `${summary.period}: ${usd(t.sales)} in sales across ${t.orders} orders, and ${usd(t.netProfit)} profit (${t.profitMarginPercent}% margin).${tip}${note}`;
 }
 
 let installed = false;
