@@ -41,6 +41,10 @@ export default function PrivacyPage() {
         your plan, your billing period and whether your subscription is active. We never see or store your full card number.
       </p>
       <p>
+        <strong>Ask ProfitSync.</strong> If your plan includes Ask ProfitSync and you use it, we keep a count of how many questions you
+        ask each day, so the daily limit works. We don&apos;t store your questions or the answers.
+      </p>
+      <p>
         <strong>Technical information.</strong> Basic logs (like time, page requested, browser type and IP address) that our hosting
         provider records to keep the service secure and working.
       </p>
@@ -64,6 +68,13 @@ export default function PrivacyPage() {
         <li><strong>Vercel</strong>: website and app hosting.</li>
         <li><strong>eBay</strong>: the source of your store information, which you connect yourself.</li>
         <li><strong>Stripe</strong>: payment processing for paid plans.</li>
+        <li>
+          <strong>Anthropic</strong>: the AI behind Ask ProfitSync. Only when you ask a question, we send it your question, your recent
+          questions and answers in that chat, and a summary of the numbers on your screen: totals for the period you chose, your
+          listings&apos; titles, prices, sales, costs, profit, views and watchers, and your expense categories. We never send your
+          password, eBay sign-in, payment details, email address or buyers&apos; names. Anthropic doesn&apos;t use this information to
+          train its AI models.
+        </li>
         <li><strong>Google, Microsoft and Facebook</strong>: only if you choose to sign in with them.</li>
         <li><strong>An email delivery provider</strong>: to send account emails.</li>
       </ul>

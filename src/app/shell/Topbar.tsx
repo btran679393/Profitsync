@@ -20,6 +20,7 @@ export default function Topbar({
   hasStore,
   progressText = null,
   onSearch,
+  onAsk,
 }: {
   onOpenMenu: () => void;
   switcher: ReactNode;
@@ -33,6 +34,8 @@ export default function Topbar({
   progressText?: string | null;
   // Opens the Ctrl+K quick-jump box.
   onSearch?: () => void;
+  // Opens "Ask ProfitSync" (only passed when the assistant is switched on).
+  onAsk?: () => void;
 }) {
   const isMac = useIsMac();
   const status = syncing ? progressText ?? "Syncing…" : lastSyncedAt && now ? `Synced ${timeAgo(lastSyncedAt, now.getTime())}` : null;
@@ -67,6 +70,13 @@ export default function Topbar({
         )}
 
         <div className="ml-auto flex min-w-0 items-center gap-2">
+          {onAsk && (
+            <Tooltip content="Ask ProfitSync about your numbers" side="bottom">
+              <Button variant="secondary" size="md" onClick={onAsk} aria-label="Ask ProfitSync" icon={<Icon name="sparkle" size={16} className="text-accent" />} className="max-sm:w-9 max-sm:px-0">
+                <span className="hidden sm:inline">Ask</span>
+              </Button>
+            </Tooltip>
+          )}
           {switcher}
           {hasStore && (
             <>
