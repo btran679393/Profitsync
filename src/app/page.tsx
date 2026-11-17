@@ -24,6 +24,7 @@ import { describeProgress, readSyncResponse } from "@/lib/ebay/readSync";
 import ListingsSection, { LISTING_RANGES, type ListingRange } from "./ListingsSection";
 import StoreShippingSetting from "./StoreShippingSetting";
 import StoreReturnPolicySetting from "./StoreReturnPolicySetting";
+import { buildInsights } from "@/lib/insights";
 import StoreSwitcher, { type EbayStore } from "./StoreSwitcher";
 import OrderTools, { type ToolOrder } from "./OrderTools";
 import ExpensesSection, {
@@ -1620,14 +1621,27 @@ function Dashboard() {
     return points;
   }, [periodOrders, periodExpenses, dateRange, now]);
 
+  // Every listing's figures for the chosen period.
+  const periodListingRows = useMemo(
+    () => (now ? buildListingRows(periodOrders, listings, orders, now, preferences, offerSettings) : []),
+    [periodOrders, listings, orders, now, preferences, offerSettings]
+  );
+
   // Top 5 listings by profit in the chosen period.
-  const topListings = useMemo(() => {
-    if (!now) return [];
-    return buildListingRows(periodOrders, listings, orders, now, preferences, offerSettings)
-      .filter((row) => row.netProfit > 0)
-      .sort((a, b) => b.netProfit - a.netProfit)
-      .slice(0, 5);
-  }, [periodOrders, listings, orders, now, preferences, offerSettings]);
+  const topListings = useMemo(
+    () =>
+      periodListingRows
+        .filter((row) => row.netProfit > 0)
+        .sort((a, b) => b.netProfit - a.netProfit)
+        .slice(0, 5),
+    [periodListingRows]
+  );
+
+  // "What to do this week" on the Dashboard.
+  const insights = useMemo(
+    () => buildInsights(periodListingRows, { staleAfterDays: preferences.staleAfterDays }),
+    [periodListingRows, preferences.staleAfterDays]
+  );
 
   // Where the money went in the chosen period.
   const costSlices = useMemo<CostSlice[]>(() => {
@@ -1948,6 +1962,7 @@ function Dashboard() {
               topListings={topListings}
               costs={costSlices}
               attention={attention}
+              insights={insights}
               recentOrders={recentOrders}
               onOpenOrder={(id) => setSelectedOrderId(id)}
               onGoOrders={(target) => goToOrders(target ?? "all")}

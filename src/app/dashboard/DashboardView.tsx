@@ -7,6 +7,7 @@ import { Icon } from "./Icon";
 import { ListingImage } from "./ListingImage";
 import { formatOrderDate, getOrderProfit, isCanceled, isFullyRefunded, money, percentChange, type Order, type Totals } from "./model";
 import TrendChart, { type TrendPoint } from "./TrendChart";
+import type { Insight } from "@/lib/insights";
 
 export type CostSlice = { label: string; amount: number; color: string };
 
@@ -65,6 +66,7 @@ export default function DashboardView({
   topListings,
   costs,
   attention,
+  insights,
   recentOrders,
   goal,
   hasOrders,
@@ -82,6 +84,8 @@ export default function DashboardView({
   topListings: ListingRow[];
   costs: CostSlice[];
   attention: Attention;
+  // "What to do this week" (lib/insights.ts).
+  insights: Insight[];
   recentOrders: Order[];
   goal: ReactNode;
   hasOrders: boolean;
@@ -234,6 +238,44 @@ export default function DashboardView({
           </Card>
         </div>
       </div>
+
+      {/* Suggestions worked out from the seller's own numbers */}
+      {!loading && insights.length > 0 && (
+        <Card>
+          <CardHeader
+            title="What to do this week"
+            description={`From your sales, fees and eBay traffic · ${rangeLabel.toLowerCase()}`}
+            actions={
+              <Button variant="ghost" size="sm" onClick={onGoListings}>
+                See listings
+              </Button>
+            }
+          />
+          <ul className="grid gap-3 px-5 pb-5 pt-3 md:grid-cols-2">
+            {insights.map((insight) => (
+              <li key={insight.key}>
+                <button
+                  type="button"
+                  onClick={onGoListings}
+                  className="flex h-full w-full items-start gap-3 rounded-lg border border-line bg-surface-2/40 p-3 text-left transition-colors hover:bg-surface-2"
+                >
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "mt-1.5 h-2 w-2 shrink-0 rounded-full",
+                      insight.tone === "loss" ? "bg-loss" : insight.tone === "warn" ? "bg-warn" : insight.tone === "profit" ? "bg-profit" : "bg-accent"
+                    )}
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-ink">{insight.title}</span>
+                    <span className="mt-0.5 block text-xs leading-5 text-muted">{insight.detail}</span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       {/* Top listings, where the money went, recent orders */}
       <div className="grid gap-5 lg:grid-cols-2 xl:grid-cols-3">
