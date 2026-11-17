@@ -20,12 +20,14 @@ import {
 import {
   LINE_TEXT,
   PAYOUT_RANGES,
+  payoutsCsv,
   statusText,
   type Payout,
   type PayoutBreakdown,
   type PayoutLine,
   type PayoutsResponse,
 } from "@/lib/ebay/payouts";
+import { toCsv } from "@/lib/taxReport";
 
 const money = (value: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
 const signed = (value: number) => (value < 0 ? `−${money(Math.abs(value))}` : money(value));
@@ -61,6 +63,9 @@ export default function PayoutsSection({
   hasStore,
   multiStore,
   reconnectHref = "/api/ebay/auth",
+  canExport = true,
+  onUpgrade,
+  businessName = "",
 }: {
   // Changes when the seller switches store, so the page reloads.
   storeKey: string;
@@ -68,6 +73,11 @@ export default function PayoutsSection({
   // "All stores" view: show which store each payout came from.
   multiStore: boolean;
   reconnectHref?: string;
+  // Spreadsheet downloads are part of Pro and Ultimate.
+  canExport?: boolean;
+  onUpgrade?: () => void;
+  // Shown at the top of the spreadsheet and in its file name.
+  businessName?: string;
 }) {
   const [days, setDays] = useState<RangeDays>("90");
   const [refreshes, setRefreshes] = useState(0);
@@ -84,6 +94,20 @@ export default function PayoutsSection({
   const data = result.data;
   const error = loading ? null : result.error;
   const load = () => setRefreshes((n) => n + 1);
+
+  function downloadCsv() {
+    if (!data) return;
+    const text = payoutsCsv(data.payouts, { business: businessName, from: data.from, to: data.to }, toCsv);
+    const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `ProfitSync payouts ${data.from.slice(0, 10)} to ${data.to.slice(0, 10)}${businessName ? ` - ${businessName.replace(/[\\/:*?"<>|]+/g, "")}` : ""}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 
   useEffect(() => {
     if (!hasStore) return;
@@ -146,9 +170,19 @@ export default function PayoutsSection({
           onChange={setDays}
           options={PAYOUT_RANGES.map((r) => ({ value: String(r.days) as RangeDays, label: r.label }))}
         />
-        <Button variant="secondary" onClick={() => void load()} loading={loading}>
-          Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => (canExport ? downloadCsv() : onUpgrade?.())}
+            disabled={canExport && (!data || data.payouts.length === 0)}
+            title={canExport ? "A spreadsheet of these payouts for your bookkeeping" : "Spreadsheet downloads come with Pro and Ultimate"}
+          >
+            Download CSV
+          </Button>
+          <Button variant="secondary" onClick={() => void load()} loading={loading}>
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {error && (

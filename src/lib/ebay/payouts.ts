@@ -232,3 +232,34 @@ export const PAYOUT_RANGES = [
   { days: 90, label: "90 days" },
   { days: 365, label: "12 months" },
 ] as const;
+
+// One line per payout, for bookkeeping. Amounts are numbers so they add up
+// in a spreadsheet.
+export function payoutsCsv(
+  payouts: Payout[],
+  { business, from, to, preparedOn = new Date() }: { business: string; from: string; to: string; preparedOn?: Date },
+  toCsv: (rows: Array<Array<string | number | null | undefined>>) => string
+): string {
+  const day = (iso: string | null) => (iso ? iso.slice(0, 10) : "");
+  const paid = payouts.filter((p) => p.status === "SUCCEEDED").reduce((sum, p) => sum + p.amount, 0);
+  return toCsv([
+    ["ProfitSync - eBay payouts"],
+    ["Business", business],
+    ["Period", `${day(from)} to ${day(to)}`],
+    ["Prepared", preparedOn.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })],
+    ["Currency", "US dollars (USD)"],
+    [],
+    ["Date", "Status", "Amount", "Bank account", "Items", "Store", "eBay payout ID"],
+    ...payouts.map((p) => [
+      day(p.date),
+      statusText(p.status).label,
+      p.amount,
+      [p.bankName, p.bankLast4 ? `ending ${p.bankLast4}` : null].filter(Boolean).join(" ") || "",
+      p.transactionCount === null ? "" : String(p.transactionCount),
+      p.storeName ?? "",
+      p.id,
+    ]),
+    [],
+    ["Total paid to your bank", "", Math.round(paid * 100) / 100],
+  ]);
+}

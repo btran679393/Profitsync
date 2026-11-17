@@ -2034,6 +2034,9 @@ function Dashboard() {
               storeKey={allStores ? "all" : activeStore?.id ?? "none"}
               hasStore={stores.length > 0}
               multiStore={allStores}
+              canExport={limits.exports}
+              onUpgrade={goToPlans}
+              businessName={allStores ? sellerName || "All stores" : activeStore?.name ?? sellerName}
             />
           )}
 

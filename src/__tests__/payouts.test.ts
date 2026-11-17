@@ -83,3 +83,25 @@ describe("demo payouts", () => {
     expect(response.funds.total).toBeCloseTo(response.funds.available + response.funds.processing, 2);
   });
 });
+
+describe("payouts spreadsheet", () => {
+  it("lists each payout with numbers that add up, and blocks formula tricks", async () => {
+    const { payoutsCsv } = await import("@/lib/ebay/payouts");
+    const { toCsv } = await import("@/lib/taxReport");
+    const csv = payoutsCsv(
+      [
+        { id: "P1", storeId: "s", storeName: "=Store", status: "SUCCEEDED", amount: 250, date: "2026-11-10T09:00:00Z", bankName: "Checking", bankLast4: "4821", transactionCount: 7 },
+        { id: "P2", storeId: "s", storeName: null, status: "INITIATED", amount: 80.5, date: "2026-11-16T09:00:00Z", bankName: null, bankLast4: null, transactionCount: null },
+      ],
+      { business: "Demo", from: "2026-08-19T00:00:00Z", to: "2026-11-17T00:00:00Z", preparedOn: new Date("2026-11-17T12:00:00Z") },
+      toCsv
+    );
+    const lines = csv.replace(/^﻿/, "").split("\r\n");
+    expect(lines).toContain("Period,2026-08-19 to 2026-11-17");
+    expect(lines).toContain("Date,Status,Amount,Bank account,Items,Store,eBay payout ID");
+    expect(lines).toContain("2026-11-10,Paid,250.00,Checking ending 4821,7,'=Store,P1");
+    expect(lines).toContain("2026-11-16,On its way,80.50,,,,P2");
+    // Only paid payouts count in the total.
+    expect(lines).toContain("Total paid to your bank,,250.00");
+  });
+});
