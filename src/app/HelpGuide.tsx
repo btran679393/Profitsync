@@ -13,6 +13,7 @@ const SECTIONS: ReadonlyArray<readonly [string, string]> = [
   ["guide-orders", "Orders"],
   ["guide-listings", "Listings"],
   ["guide-inventory", "Inventory"],
+  ["guide-payouts", "Payouts"],
   ["guide-expenses", "Expenses"],
   ["guide-taxes", "Taxes"],
   ["guide-stores", "Several stores"],
@@ -231,11 +232,34 @@ export default function HelpGuide({
           </ul>
         </Section>
 
+        <Section id="guide-payouts" title="Payouts">
+          <ul className="list-disc space-y-1.5 pl-5">
+            <li>
+              The top shows money still at eBay: <B>Ready for payout</B> (goes out with your next payout), <B>Processing</B> (recent sales eBay
+              hasn&apos;t released yet) and <B>On hold</B>. Next to it is what eBay has paid to your bank in the period you pick.
+            </li>
+            <li>
+              Click a payout to see where its money came from: sales, minus eBay fees, refunds, shipping labels and other eBay charges, and every
+              item in it.
+            </li>
+            <li>
+              A payout marked <B>Failed</B> or <B>Reversed</B> didn&apos;t reach your bank. Check your payout account in eBay Seller Hub → Payments.
+            </li>
+            <li>
+              <B>Download CSV</B> gives you the list for your bookkeeping. Payouts are read from eBay each time you open the page.
+            </li>
+          </ul>
+        </Section>
+
         <Section id="guide-expenses" title="Expenses">
           <p>
             For costs that aren&apos;t tied to one sale: packing supplies, your eBay Store subscription, software, sourcing trips. Press{" "}
             <B>Add expense</B>, pick a category (or type your own) and the amount. Expenses come off your net profit and show on your tax
             summary. Some, like a subscription, can be set to repeat every month.
+          </p>
+          <p>
+            Driving for the business? Pick <B>Mileage</B> and enter the miles instead of dollars. ProfitSync works out the amount at your rate per
+            mile (most sellers use the IRS standard mileage rate, which changes each year) and remembers the rate for next time.
           </p>
         </Section>
 
@@ -250,6 +274,10 @@ export default function HelpGuide({
             With several stores, it covers <B>all of them</B> by default, since you file one return; you can switch to one store. A{" "}
             <B>Before you file</B> box lists anything missing, like orders without a product cost or no shipping recorded, with a button to
             fix each.
+          </p>
+          <p>
+            The <B>Form 1099-K check</B> shows, for each eBay account, how close you are to getting a 1099-K from eBay for the year (federally:
+            more than $20,000 in sales <B>and</B> more than 200 sales; some states use lower amounts). Profit from selling is taxable either way.
           </p>
         </Section>
 
@@ -273,8 +301,8 @@ export default function HelpGuide({
               buyer, and runs actions like Sync.
             </li>
             <li>
-              Press <B>G</B> then a letter to go to a page: <B>G O</B> Orders, <B>G L</B> Listings, <B>G E</B> Expenses, <B>G T</B> Taxes,{" "}
-              <B>G D</B> Dashboard.
+              Press <B>G</B> then a letter to go to a page: <B>G O</B> Orders, <B>G L</B> Listings, <B>G I</B> Inventory, <B>G P</B> Payouts,{" "}
+              <B>G E</B> Expenses, <B>G T</B> Taxes, <B>G D</B> Dashboard.
             </li>
             <li>
               Press <B>?</B> to see every shortcut.
