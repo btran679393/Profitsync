@@ -3,6 +3,7 @@ import type { PoolClient } from "pg";
 import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { resolveActiveEbayUserId } from "@/lib/ebay/activeStore";
+import { getUserPlan } from "@/lib/billing/server";
 import { saveListingCost } from "@/lib/listingCost";
 import { setupNeeded } from "@/lib/setupNeeded";
 import {
@@ -87,10 +88,18 @@ function listingId(value: unknown): string | null | undefined {
   return undefined;
 }
 
+// Inventory is part of Pro and Ultimate.
+async function notOnPlan(userId: string) {
+  const { limits } = await getUserPlan(getPool(), userId);
+  return limits.inventory ? null : NextResponse.json({ error: "Inventory is part of Pro and Ultimate.", upgrade: true }, { status: 402 });
+}
+
 export async function GET() {
   const user = await signedInUser();
   if (!user) return bad("Authentication required.", 401);
   if (!process.env.DATABASE_URL) return NextResponse.json({ enabled: false, purchases: [], items: [] });
+  const locked = await notOnPlan(user.id);
+  if (locked) return locked;
 
   const pool = getPool();
   try {
@@ -136,6 +145,8 @@ export async function POST(request: Request) {
   const body = await readBody(request);
   if (!body) return bad("Invalid JSON body.");
   if (!process.env.DATABASE_URL) return bad("Database configuration unavailable.", 503);
+  const locked = await notOnPlan(user.id);
+  if (locked) return locked;
 
   const pool = getPool();
   const client = await pool.connect();
@@ -248,6 +259,8 @@ export async function PATCH(request: Request) {
   const body = await readBody(request);
   if (!body) return bad("Invalid JSON body.");
   if (!process.env.DATABASE_URL) return bad("Database configuration unavailable.", 503);
+  const locked = await notOnPlan(user.id);
+  if (locked) return locked;
 
   const sets: string[] = [];
   const values: unknown[] = [];
@@ -385,6 +398,8 @@ export async function DELETE(request: Request) {
   const body = await readBody(request);
   if (!body) return bad("Invalid JSON body.");
   if (!process.env.DATABASE_URL) return bad("Database configuration unavailable.", 503);
+  const locked = await notOnPlan(user.id);
+  if (locked) return locked;
 
   const pool = getPool();
   try {

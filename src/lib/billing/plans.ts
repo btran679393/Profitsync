@@ -19,6 +19,16 @@ export type PlanLimits = {
   autoSync: boolean;
   // Combined "All stores" view.
   allStoresView: boolean;
+  // Pro and up: the Payouts page (money waiting at eBay, every payout).
+  payouts: boolean;
+  // Pro and up: the Inventory page (purchases, unsold stock, payback).
+  inventory: boolean;
+  // Pro and up: listing views and watchers from eBay.
+  buyerInterest: boolean;
+  // Ultimate: mileage expenses (miles × rate).
+  mileage: boolean;
+  // Ultimate: the Form 1099-K check on the Taxes page.
+  form1099k: boolean;
 };
 
 export type Plan = {
@@ -46,6 +56,11 @@ export const PLANS: Record<PlanId, Plan> = {
       exports: false,
       autoSync: false,
       allStoresView: false,
+      payouts: false,
+      inventory: false,
+      buyerInterest: false,
+      mileage: false,
+      form1099k: false,
     },
     features: [
       "1 eBay store",
@@ -68,6 +83,11 @@ export const PLANS: Record<PlanId, Plan> = {
       exports: true,
       autoSync: true,
       allStoresView: true,
+      payouts: true,
+      inventory: true,
+      buyerInterest: true,
+      mileage: false,
+      form1099k: false,
     },
     features: [
       "Up to 3 eBay stores",
@@ -77,6 +97,9 @@ export const PLANS: Record<PlanId, Plan> = {
       "CSV download and shipping-cost import",
       "Automatic sync every 30 minutes, plus daily",
       "The All stores view",
+      "Payouts: money waiting at eBay and what's in every payout",
+      "Inventory: purchases, unsold stock and what paid off",
+      "Listing views and watchers from eBay",
     ],
   },
   ultimate: {
@@ -92,10 +115,17 @@ export const PLANS: Record<PlanId, Plan> = {
       exports: true,
       autoSync: true,
       allStoresView: true,
+      payouts: true,
+      inventory: true,
+      buyerInterest: true,
+      mileage: true,
+      form1099k: true,
     },
     features: [
-      "Unlimited eBay stores",
       "Everything in Pro",
+      "Unlimited eBay stores",
+      "Mileage tracking for your tax deduction",
+      "Form 1099-K check for each eBay account",
       "Priority email support",
     ],
   },

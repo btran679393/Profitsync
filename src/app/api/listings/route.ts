@@ -3,6 +3,7 @@ import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { existingColumns } from "@/lib/db/optionalColumns";
 import { resolveActiveEbayUserId } from "@/lib/ebay/activeStore";
+import { getUserPlan } from "@/lib/billing/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,7 +29,9 @@ export async function GET() {
     // "shippingCost" is added by docs/sql/2026-11-07_shipping_cost.sql.
     // Watchers and 30-day traffic come from docs/sql/2026-11-16_listing_traffic.sql.
     const traffic = ["watchCount", "listedAt", "views30", "impressions30", "sales30", "trafficUpdatedAt"];
-    const optional = await existingColumns(pool, "EbayListing", ["shippingCost", ...traffic]);
+    // Views and watchers are part of Pro and Ultimate.
+    const { limits } = await getUserPlan(pool, user.id);
+    const optional = await existingColumns(pool, "EbayListing", ["shippingCost", ...(limits.buyerInterest ? traffic : [])]);
     const shipping =
       (optional.has("shippingCost") ? `"shippingCost",` : "") +
       traffic.filter((column) => optional.has(column)).map((column) => `"${column}",`).join(" ");

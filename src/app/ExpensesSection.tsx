@@ -111,6 +111,8 @@ export default function ExpensesSection({
   onDelete,
   mileageRate = 0.7,
   onMileageRateChange,
+  mileageAllowed = true,
+  onUpgrade,
 }: {
   expenses: ExpenseEntry[]; // already filtered to the chosen date range
   categories: string[]; // every category the seller has used (for suggestions)
@@ -125,6 +127,9 @@ export default function ExpensesSection({
   // Dollars per mile for Mileage expenses, and saving a new one.
   mileageRate?: number;
   onMileageRateChange?: (rate: number) => void;
+  // Mileage is part of Ultimate (existing trips can still be edited).
+  mileageAllowed?: boolean;
+  onUpgrade?: () => void;
 }) {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Expense | null>(null);
@@ -158,13 +163,14 @@ export default function ExpensesSection({
 
   const chosenCategory = category === CUSTOM ? customCategory.trim() : category;
   const isMileage = chosenCategory === MILEAGE_CATEGORY;
+  const mileageLocked = isMileage && !mileageAllowed && !editing;
   const milesValue = cleanMiles(miles);
   const rateValue = cleanRate(rate);
   const mileageTotal = milesValue !== null && rateValue !== null ? mileageAmount(milesValue, rateValue) : null;
   // What gets saved: typed dollars, or miles × rate for Mileage.
   const finalAmount = isMileage ? mileageTotal ?? "" : amount.trim();
   const finalNote = isMileage && milesValue !== null && rateValue !== null ? mileageNote(milesValue, rateValue, note) : note;
-  const amountValid = /^\d+(\.\d{1,2})?$/.test(finalAmount) && (!isMileage || Number(finalAmount) > 0);
+  const amountValid = !mileageLocked && /^\d+(\.\d{1,2})?$/.test(finalAmount) && (!isMileage || Number(finalAmount) > 0);
   const categoryValid = chosenCategory.length > 0 && chosenCategory.length <= MAX_CATEGORY_LENGTH;
 
   const shown = useMemo(() => {
@@ -358,7 +364,9 @@ export default function ExpensesSection({
     >
       <form id="expense-form" onSubmit={submit} className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
-          {isMileage ? (
+          {mileageLocked ? (
+            <div />
+          ) : isMileage ? (
             <Field label="Miles driven">
               <Input
                 data-autofocus
@@ -407,13 +415,26 @@ export default function ExpensesSection({
           ) : (
             <Select value={category} onChange={(e) => setCategory(e.target.value)}>
               {options.map((c) => (
-                <option key={c} value={c}>{c}</option>
+                <option key={c} value={c}>
+                  {c === MILEAGE_CATEGORY && !mileageAllowed ? `${c} (Ultimate)` : c}
+                </option>
               ))}
               <option value={CUSTOM}>+ Your own category…</option>
             </Select>
           )}
         </Field>
-        {isMileage && (
+        {mileageLocked && (
+          <div className="space-y-2 rounded-lg border border-accent/30 bg-accent-soft p-3 text-sm">
+            <p className="font-medium text-ink">Mileage tracking is part of Ultimate</p>
+            <p className="text-muted">Type the miles you drive for the business and ProfitSync works out the deduction at your rate per mile.</p>
+            {onUpgrade && (
+              <Button size="sm" variant="primary" onClick={onUpgrade}>
+                See plans
+              </Button>
+            )}
+          </div>
+        )}
+        {isMileage && !mileageLocked && (
           <div className="space-y-2 rounded-lg border border-line bg-surface-2 p-3">
             <div className="flex items-end gap-3">
               <Field label="Rate per mile" className="w-28">

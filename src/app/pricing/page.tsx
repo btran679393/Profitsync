@@ -14,6 +14,10 @@ const PRICING_FAQ: Array<[string, string]> = [
   ["Do I need a card for the Free plan?", "No. Sign up, connect one eBay store and use the full dashboard for free, for as long as you like."],
   ["Can I cancel any time?", "Yes. Cancel from Plan & billing and keep your plan until the end of the period you paid for."],
   ["What happens on the Free plan?", "You get one eBay store and up to 50 orders a month from the last 90 days, with the full dashboard."],
+  [
+    "What does Pro add, and what does Ultimate add?",
+    "Pro adds unlimited orders, 2 years of history, your tax report and spreadsheets, Payouts, Inventory, and listing views and watchers. Ultimate has everything in Pro plus unlimited stores, mileage tracking and a Form 1099-K check for each eBay account.",
+  ],
   ["Can I switch between monthly and yearly?", "Any time. Stripe charges or credits the difference for you."],
   ["Is my payment information safe?", "Payments go through Stripe. ProfitSync never sees or stores your card number."],
   ["Can I get a refund?", "If you buy a yearly plan for the first time, you can ask for a full refund within 14 days. See the refund policy for the details."],
@@ -28,7 +32,7 @@ export default function PricingPage() {
         <h1 className="text-4xl font-bold tracking-tight text-ink sm:text-5xl">Simple pricing for eBay sellers</h1>
         <p className="mx-auto mt-4 max-w-2xl text-base text-muted">
           See your real profit after eBay fees, shipping and product costs. Start free, and upgrade when you need more stores,
-          unlimited orders or your tax report.
+          unlimited orders, your tax report, payouts or inventory.
         </p>
 
         <PricingCards />

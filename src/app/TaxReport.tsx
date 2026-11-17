@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { ExpenseEntry } from "./ExpensesSection";
 import TaxPrintout from "./TaxPrintout";
+import LockedFeature from "./LockedFeature";
 import { Button, LoadingRegion, Menu, Notice, SegmentedControl, Select, Skeleton } from "@/components/ui";
 import {
   FORM_1099K_DOLLARS,
@@ -51,6 +52,7 @@ export default function TaxReport({
   currentStoreName = "This store",
   onFix,
   stores = [],
+  form1099kAllowed = true,
 }: {
   orders: TaxOrder[];
   expenses: ExpenseEntry[];
@@ -69,6 +71,8 @@ export default function TaxReport({
   // The stores in this report, with the earliest day ProfitSync has their
   // orders from (warns when the year starts before that).
   stores?: Array<{ name: string; dataFrom?: string | null }>;
+  // The Form 1099-K check is part of Ultimate.
+  form1099kAllowed?: boolean;
 }) {
   const years = useMemo(() => {
     const found = new Set<number>([new Date().getFullYear()]);
@@ -380,7 +384,14 @@ export default function TaxReport({
       </div>
       )}
 
-      {!loading && form1099k.length > 0 && <Form1099kCard stores={form1099k} year={year} />}
+      {!loading && form1099k.length > 0 && form1099kAllowed && <Form1099kCard stores={form1099k} year={year} />}
+      {!loading && !form1099kAllowed && (
+        <div className="no-print">
+          <LockedFeature title="Form 1099-K check" plan="Ultimate" onUpgrade={onUpgrade} compact>
+            See how close each eBay account is to getting a 1099-K from eBay this year.
+          </LockedFeature>
+        </div>
+      )}
 
       {/* Only appears when printing. */}
       {allowed && !loading && <TaxPrintout report={report} business={storeLabel} notes={warnings.map((w) => w.text)} />}

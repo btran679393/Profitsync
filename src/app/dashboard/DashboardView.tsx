@@ -67,6 +67,7 @@ export default function DashboardView({
   costs,
   attention,
   insights,
+  money: moneyCards,
   recentOrders,
   goal,
   hasOrders,
@@ -86,6 +87,8 @@ export default function DashboardView({
   attention: Attention;
   // "What to do this week" (lib/insights.ts).
   insights: Insight[];
+  // Money waiting at eBay and unsold stock (dashboard/MoneyCards.tsx).
+  money?: ReactNode;
   recentOrders: Order[];
   goal: ReactNode;
   hasOrders: boolean;
@@ -164,6 +167,8 @@ export default function DashboardView({
           note={totals.totalOtherFees > 0 ? `incl. ${money(totals.totalOtherFees)} ads & other` : undefined}
         />
       </div>
+
+      {moneyCards}
 
       {/* Chart + goal and to-dos */}
       <div className="grid gap-5 xl:grid-cols-3">

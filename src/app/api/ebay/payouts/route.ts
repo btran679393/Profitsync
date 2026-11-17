@@ -77,6 +77,9 @@ export async function GET(request: Request) {
 
   const params = new URL(request.url).searchParams;
   const pool = getPool();
+  if (!(await getUserPlan(pool, user.id)).limits.payouts) {
+    return NextResponse.json({ error: "Payouts are part of Pro and Ultimate.", upgrade: true }, { status: 402 });
+  }
   const { finances } = ebayBases();
 
   try {

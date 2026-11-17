@@ -466,8 +466,16 @@ const OFFER_HELP =
 
 // Buyer interest from eBay: views (30 days), watchers, and how low an offer
 // can go. Only for listings that are still for sale.
-function InterestCell({ row, viewsOff, compact = false }: { row: ListingRow; viewsOff: boolean; compact?: boolean }) {
+function InterestCell({ row, viewsOff, compact = false, locked = false }: { row: ListingRow; viewsOff: boolean; compact?: boolean; locked?: boolean }) {
   if (row.status !== "ACTIVE") return compact ? null : <span className="text-xs text-subtle">—</span>;
+  if (locked) {
+    if (row.lowestOffer === null) return compact ? null : <span className="text-xs text-subtle">—</span>;
+    return (
+      <span className="ps-num text-xs text-accent-ink" title={OFFER_HELP}>
+        Lowest offer {money(row.lowestOffer)}
+      </span>
+    );
+  }
   const watchers = row.watchers ?? 0;
   const conversion = conversionText(row.views30, row.sales30);
   const views =
@@ -548,6 +556,8 @@ export default function ListingsSection({
   canSetStoreShipping = true,
   staleAfterDays = 60,
   reconnectHref = "/api/ebay/auth",
+  showInterest = true,
+  onUpgrade,
 }: {
   rows: ListingRow[];
   loading: boolean;
@@ -565,6 +575,9 @@ export default function ListingsSection({
   staleAfterDays?: number;
   // Where "Reconnect eBay" goes (turns on listing views).
   reconnectHref?: string;
+  // Views and watchers from eBay (Pro and Ultimate).
+  showInterest?: boolean;
+  onUpgrade?: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -678,7 +691,7 @@ export default function ListingsSection({
     return `Updated ${ids.length} listing${ids.length === 1 ? "" : "s"}` + (filled > 0 ? ` · filled ${filled} past sale${filled === 1 ? "" : "s"}` : "");
   }
 
-  const statusOptions = FILTERS.map(([value, label]) => ({ value, label, count: filterCounts[value] }));
+  const statusOptions = FILTERS.filter(([value]) => showInterest || value !== "watched").map(([value, label]) => ({ value, label, count: filterCounts[value] }));
 
   return (
     <div className="space-y-5">
@@ -693,9 +706,13 @@ export default function ListingsSection({
         <StatCard
           label="Buyer interest"
           loading={loading}
-          value={hasSyncedListings ? `${summary.watchers.toLocaleString("en-US")} watching` : "—"}
+          value={!showInterest ? "Pro" : hasSyncedListings ? `${summary.watchers.toLocaleString("en-US")} watching` : "—"}
           note={
-            !hasSyncedListings
+            !showInterest ? (
+              <button type="button" onClick={onUpgrade} className="text-left font-medium text-accent-ink hover:underline">
+                See views and watchers for every listing →
+              </button>
+            ) : !hasSyncedListings
               ? "Watchers and views from eBay"
               : summary.viewsOff
                 ? `On ${summary.watchedCount} listing${summary.watchedCount === 1 ? "" : "s"} · views off`
@@ -724,7 +741,7 @@ export default function ListingsSection({
         />
       </div>
 
-      {hasSyncedListings && !loading && summary.viewsOff && (
+      {showInterest && hasSyncedListings && !loading && summary.viewsOff && (
         <Notice
           tone="accent"
           title="Turn on listing views"
@@ -759,8 +776,8 @@ export default function ListingsSection({
                 <option value="margin">Best margin</option>
                 <option value="recent">Recently sold</option>
                 <option value="stock">Most stock left</option>
-                <option value="watchers">Most watchers</option>
-                {!summary.viewsOff && <option value="views">Most views</option>}
+                {showInterest && <option value="watchers">Most watchers</option>}
+                {showInterest && !summary.viewsOff && <option value="views">Most views</option>}
               </Select>
             </span>
             {shippingEnabled && canSetStoreShipping && <StoreShippingSetting value={storeShipping} onSave={onSaveStoreShipping} />}
@@ -845,7 +862,7 @@ export default function ListingsSection({
                     <th scope="col">Listing</th>
                     <th scope="col" className="text-right">Price · stock</th>
                     <th scope="col" className="hidden xl:table-cell" title="From eBay: views in the last 30 days, watchers, and the lowest offer you can accept">
-                      Buyer interest
+                      {showInterest ? "Buyer interest" : "Lowest offer"}
                     </th>
                     <th scope="col">Costs</th>
                     <th scope="col" className="text-right">Sold</th>
@@ -881,7 +898,7 @@ export default function ListingsSection({
                               <ListingMeta row={row} staleAfterDays={staleAfterDays} />
                               {row.status === "ACTIVE" && (
                                 <div className="mt-1.5 xl:hidden">
-                                  <InterestCell row={row} viewsOff={summary.viewsOff} compact />
+                                  <InterestCell row={row} viewsOff={summary.viewsOff} compact locked={!showInterest} />
                                 </div>
                               )}
                             </div>
@@ -892,7 +909,7 @@ export default function ListingsSection({
                           <p className="mt-0.5 text-xs text-subtle">{row.available === null ? "" : row.available === 0 ? "Out of stock" : `${row.available} left`}</p>
                         </td>
                         <td className="hidden xl:table-cell">
-                          <InterestCell row={row} viewsOff={summary.viewsOff} />
+                          <InterestCell row={row} viewsOff={summary.viewsOff} locked={!showInterest} />
                         </td>
                         <td>
                           <CostsCell row={row} onSave={onSaveCost} shippingEnabled={shippingEnabled} storeShipping={storeShipping} />
@@ -966,7 +983,7 @@ export default function ListingsSection({
                     </dl>
                     {row.status === "ACTIVE" && (
                       <div className="mt-3 pl-7">
-                        <InterestCell row={row} viewsOff={summary.viewsOff} compact />
+                        <InterestCell row={row} viewsOff={summary.viewsOff} compact locked={!showInterest} />
                       </div>
                     )}
                     <div className="mt-3 pl-7">

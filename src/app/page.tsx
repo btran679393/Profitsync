@@ -27,6 +27,8 @@ import StoreReturnPolicySetting from "./StoreReturnPolicySetting";
 import { buildInsights } from "@/lib/insights";
 import StoreSwitcher, { type EbayStore } from "./StoreSwitcher";
 import PayoutsSection from "./PayoutsSection";
+import LockedFeature from "./LockedFeature";
+import MoneyCards from "./dashboard/MoneyCards";
 import OrderTools, { type ToolOrder } from "./OrderTools";
 import InventorySection from "./InventorySection";
 import ExpensesSection, {
@@ -854,7 +856,7 @@ function Dashboard() {
       } catch {
         // Private browsing: just say it.
       }
-      if (trafficNeedsReconnect && !told) {
+      if (trafficNeedsReconnect && !told && limits.buyerInterest) {
         toast.info(
           "See views for every listing",
           "Reconnect eBay once to add listing views and impressions to the Listings page. Your data stays as it is.",
@@ -1751,6 +1753,8 @@ function Dashboard() {
         onNavigate={(target) => (target === "orders" ? goToOrders() : navigate(target))}
         badges={{
           taxes: onFreePlan ? <Badge tone="accent">Pro</Badge> : null,
+          inventory: limits.inventory ? null : <Badge tone="accent">Pro</Badge>,
+          payouts: limits.payouts ? null : <Badge tone="accent">Pro</Badge>,
           billing: billing?.enabled ? (
             <Badge tone={billing.plan === "free" ? "neutral" : "profit"}>{PLANS[billing.plan].name}</Badge>
           ) : null,
@@ -1937,7 +1941,7 @@ function Dashboard() {
           )}
 
           {view === "dashboard" && !showSetup && orders.length > 0 && (
-            <WhatsNew onShortcuts={() => setShortcutsOpen(true)} onGo={(target) => (target === "orders" ? goToOrders() : navigate(target))} />
+            <WhatsNew limits={limits} onGo={(target) => navigate(target)} />
           )}
 
           {view === "help" && (
@@ -1970,6 +1974,17 @@ function Dashboard() {
               onGoOrders={(target) => goToOrders(target ?? "all")}
               onGoListings={() => navigate("listings")}
               onSync={() => void syncEbayOrders()}
+              money={
+                <MoneyCards
+                  storeKey={allStores ? "all" : activeStore?.id ?? "none"}
+                  hasStore={stores.length > 0}
+                  payoutsAllowed={limits.payouts}
+                  inventoryAllowed={limits.inventory}
+                  orders={orders}
+                  staleAfterDays={preferences.staleAfterDays}
+                  onGo={navigate}
+                />
+              }
               goal={
                 monthStats ? (
                   <MonthlyGoal
@@ -2029,7 +2044,22 @@ function Dashboard() {
               LISTINGS
           ================================================= */}
 
-          {view === "payouts" && (
+          {view === "payouts" && !limits.payouts && (
+            <LockedFeature
+              title="See every payout and the money still at eBay"
+              plan="Pro"
+              onUpgrade={goToPlans}
+              points={[
+                "What's ready for payout, processing or on hold",
+                "Every payout to your bank, with its sales, fees, refunds and labels",
+                "Alerts when a payout fails or is sent back",
+              ]}
+            >
+              Know exactly when money is coming and why a payout is the amount it is.
+            </LockedFeature>
+          )}
+
+          {view === "payouts" && limits.payouts && (
             <PayoutsSection
               storeKey={allStores ? "all" : activeStore?.id ?? "none"}
               hasStore={stores.length > 0}
@@ -2049,6 +2079,7 @@ function Dashboard() {
                   ? `All stores (${stores.filter((s) => !s.locked).length})`
                   : activeStore?.name ?? "Your store"
               }
+              form1099kAllowed={limits.form1099k}
               allowed={limits.exports}
               onUpgrade={goToPlans}
               loading={useBusiness && (businessLoading || !businessData)}
@@ -2108,6 +2139,8 @@ function Dashboard() {
               onDelete={deleteExpense}
               mileageRate={preferences.mileageRate}
               onMileageRateChange={(mileageRate) => void savePreferences({ mileageRate }).catch(() => {})}
+              mileageAllowed={limits.mileage}
+              onUpgrade={goToPlans}
             />
           )}
 
@@ -2126,10 +2159,27 @@ function Dashboard() {
               onSaveStoreShipping={saveStoreShipping}
               canSetStoreShipping={!allStores}
               staleAfterDays={preferences.staleAfterDays}
+              showInterest={limits.buyerInterest}
+              onUpgrade={goToPlans}
             />
           )}
 
-          {view === "inventory" && (
+          {view === "inventory" && !limits.inventory && (
+            <LockedFeature
+              title="Track what you buy and what it earns"
+              plan="Pro"
+              onUpgrade={goToPlans}
+              points={[
+                "Log sourcing trips, lots and single buys",
+                "See unsold stock and what it cost you",
+                "Days to sell, sell-through and which purchases paid off",
+              ]}
+            >
+              Inventory shows which sourcing trips make you money, and which stock is sitting still.
+            </LockedFeature>
+          )}
+
+          {view === "inventory" && limits.inventory && (
             <InventorySection
               // Reload when switching stores.
               key={allStores ? "all" : activeStore?.id ?? "none"}
