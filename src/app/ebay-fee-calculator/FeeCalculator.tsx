@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Checkbox, Field, Input, MoneyInput, Select, buttonClasses } from "@/components/ui";
-import { FEE_CATEGORIES, INTERNATIONAL_FEE_PERCENT, calculateFees, feeCategory } from "@/lib/feeCalculator";
+import { FEES_CHECKED, FEE_CATEGORIES, INTERNATIONAL_FEE_PERCENT, calculateFees, feeCategory } from "@/lib/feeCalculator";
 
 const money = (value: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
@@ -23,7 +23,8 @@ function Row({ label, value, tone, strong }: { label: string; value: string; ton
   );
 }
 
-export default function FeeCalculator() {
+// `inApp`: inside ProfitSync for signed-in sellers (no sign-up pitch).
+export default function FeeCalculator({ inApp = false }: { inApp?: boolean }) {
   const [categoryId, setCategoryId] = useState("most");
   const [itemPrice, setItemPrice] = useState("50");
   const [shippingCharged, setShippingCharged] = useState("0");
@@ -125,6 +126,12 @@ export default function FeeCalculator() {
           </div>
         </div>
 
+        {inApp ? (
+          <p className="mt-auto pt-4 text-xs leading-5 text-subtle">
+            An estimate from eBay&apos;s US fee rates, checked {FEES_CHECKED}. Store subscriptions and Top Rated discounts
+            aren&apos;t included. Your Orders page shows the real fees eBay charged on each sale.
+          </p>
+        ) : (
         <div className="mt-auto rounded-xl bg-accent-soft p-4 pt-4">
           <p className="text-sm font-semibold text-ink">Want this for every sale, automatically?</p>
           <p className="mt-1 text-xs leading-5 text-muted">
@@ -139,6 +146,7 @@ export default function FeeCalculator() {
             </Link>
           </div>
         </div>
+        )}
       </section>
     </div>
   );

@@ -23,6 +23,7 @@ const GROUPS: Array<{ title: string; rows: Array<[string[], string]> }> = [
       [["G", "P"], "Payouts"],
       [["G", "E"], "Expenses"],
       [["G", "T"], "Taxes"],
+      [["G", "C"], "Fee calculator"],
       [["G", "B"], "Plan & billing"],
       [["G", "S"], "Settings"],
       [["G", "H"], "Help & guide"],

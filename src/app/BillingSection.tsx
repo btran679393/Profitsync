@@ -5,6 +5,7 @@ import { useConfirm } from "@/components/ui";
 import {
   PLANS,
   TRIAL_DAYS,
+  TRIAL_PLAN,
   yearlySavingsCents,
   type BillingInterval,
   type BillingStatus,
@@ -299,6 +300,27 @@ export default function BillingSection({
             );
           } else if (comped) {
             action = <span className="block py-2.5 text-center text-sm text-subtle">Included on your account</span>;
+          } else if (id === TRIAL_PLAN && trialEligible) {
+            action = (
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => void beginTrial()}
+                  disabled={busy !== null}
+                  className="w-full rounded-xl bg-accent py-2.5 text-sm font-semibold text-on-accent shadow-lg shadow-accent/20 transition hover:bg-accent-hover disabled:opacity-50"
+                >
+                  {busy === "trial" ? "Starting…" : `Start ${TRIAL_DAYS}-day free trial`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void choose(id)}
+                  disabled={busy !== null}
+                  className="w-full py-1 text-xs font-medium text-muted transition hover:text-ink disabled:opacity-50"
+                >
+                  {working ? "One moment…" : `Or get ${info.name} now`}
+                </button>
+              </div>
+            );
           } else if (id === "free" && trialActive) {
             action = <span className="block py-2.5 text-center text-sm text-subtle">Where you land after the trial</span>;
           } else if (id === "free") {

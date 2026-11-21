@@ -295,7 +295,7 @@ export function getOrderProfit(order: Order) {
 // so Back, refresh and shared links open the same view.
 // ============================================================
 
-export type View = "dashboard" | "reports" | "orders" | "listings" | "inventory" | "payouts" | "expenses" | "taxes" | "billing" | "settings" | "help";
+export type View = "dashboard" | "reports" | "orders" | "listings" | "inventory" | "payouts" | "expenses" | "taxes" | "calculator" | "billing" | "settings" | "help";
 
 export function subscribeToHash(onChange: () => void) {
   window.addEventListener("hashchange", onChange);
@@ -310,6 +310,7 @@ export function viewFromHash(hash: string): View {
   if (hash === "#payouts") return "payouts";
   if (hash === "#expenses") return "expenses";
   if (hash === "#taxes") return "taxes";
+  if (hash === "#calculator") return "calculator";
   if (hash === "#billing") return "billing";
   if (hash === "#settings") return "settings";
   if (hash === "#help") return "help";
@@ -348,6 +349,10 @@ export const VIEW_COPY: Record<View, { title: string; subtitle: string }> = {
   taxes: {
     title: "Taxes",
     subtitle: "Your yearly profit and loss, ready for tax time.",
+  },
+  calculator: {
+    title: "Fee calculator",
+    subtitle: "Check eBay's fees and your profit before you list or price an item.",
   },
   billing: {
     title: "Plan & billing",

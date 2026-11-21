@@ -18,6 +18,7 @@ import OrdersView from "./dashboard/OrdersView";
 import SetupChecklist, { type SetupStep } from "./dashboard/SetupChecklist";
 import WhatsNew from "./dashboard/WhatsNew";
 import HelpGuide from "./HelpGuide";
+import FeeCalculator from "./ebay-fee-calculator/FeeCalculator";
 import type { TrendPoint } from "./dashboard/TrendChart";
 import { SYNC_EVENT, useLastSynced } from "./shell/useShell";
 import { describeProgress, readSyncResponse } from "@/lib/ebay/readSync";
@@ -341,7 +342,7 @@ function Dashboard() {
   const goPressedAt = useRef(0);
   useEffect(() => {
     const G_KEYS: Record<string, View> = {
-      d: "dashboard", r: "reports", o: "orders", l: "listings", i: "inventory", p: "payouts", e: "expenses", t: "taxes", b: "billing", s: "settings", h: "help",
+      d: "dashboard", r: "reports", o: "orders", l: "listings", i: "inventory", p: "payouts", e: "expenses", t: "taxes", c: "calculator", b: "billing", s: "settings", h: "help",
     };
     function onKey(event: KeyboardEvent) {
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "k") {
@@ -2040,7 +2041,7 @@ function Dashboard() {
             </Notice>
           )}
 
-          {ordersProgress && view !== "settings" && view !== "help" && view !== "billing" && (
+          {ordersProgress && view !== "settings" && view !== "help" && view !== "billing" && view !== "calculator" && (
             <Notice className="mb-6" title="Loading your order history">
               <span className="ps-num">
                 {ordersProgress.loaded.toLocaleString()} of {ordersProgress.total.toLocaleString()}
@@ -2107,6 +2108,8 @@ function Dashboard() {
           {view === "dashboard" && !showSetup && orders.length > 0 && (
             <WhatsNew limits={limits} onGo={(target) => navigate(target)} />
           )}
+
+          {view === "calculator" && <FeeCalculator inApp />}
 
           {view === "help" && (
             <HelpGuide
