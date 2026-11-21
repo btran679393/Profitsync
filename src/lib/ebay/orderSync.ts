@@ -35,7 +35,7 @@ import {
   parseMoney,
   sellerSaleCents,
 } from "@/lib/ebay/money";
-import { ANALYTICS_SCOPE } from "@/lib/ebay/traffic";
+import { renewAccessToken } from "@/lib/ebay/scopes";
 
 // Listing photos for new orders are looked up one by one. On a first sync
 // of thousands of orders that alone could hit the time limit, so each run
@@ -1181,53 +1181,18 @@ export async function syncOrders(
           { status: 500 }
         );
       }
-      const credentials = Buffer.from(
-        `${clientId}:${clientSecret}`
-      ).toString("base64");
-      const scopes = [
-        "https\://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly",
-        "https\://api.ebay.com/oauth/api_scope/commerce.identity.readonly",
-        "https\://api.ebay.com/oauth/api_scope/sell.finances",
-      ];
-      const requestToken = async (scopeList: string[]) => {
-        const response = await fetch(
-          `${ebayApiBase}/identity/v1/oauth2/token`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type":
-                "application/x-www-form-urlencoded",
-              Authorization:
-                `Basic ${credentials}`,
-            },
-            body: new URLSearchParams({
-              grant_type: "refresh_token",
-              refresh_token: decryptToken(connection.refreshToken),
-              scope: scopeList.join(" "),
-            }).toString(),
-            cache: "no-store",
-          }
-        );
-        return { response, data: (await response.json()) as EbayTokenResponse };
-      };
-      // Listing views and impressions need the analytics permission, which
-      // stores connected before it was added haven't granted. eBay refuses
-      // a renewal that asks for more than was granted, so try with it and
-      // fall back to the original permissions (those stores just don't get
-      // traffic numbers until they reconnect).
-      let { response: tokenResponse, data: tokenData } = await requestToken([...scopes, ANALYTICS_SCOPE]);
-      if (!tokenResponse.ok && tokenData.error === "invalid_scope") {
-        ({ response: tokenResponse, data: tokenData } = await requestToken(scopes));
-      }
+      // Asks for the analytics permission too, falling back for stores
+      // that never granted it (see renewAccessToken).
+      const tokenData = await renewAccessToken(ebayApiBase, decryptToken(connection.refreshToken));
       if (
-        !tokenResponse.ok ||
+        !tokenData.ok ||
         !tokenData.access_token ||
         !tokenData.expires_in
       ) {
         console.error(
           "eBay token refresh failed:",
           {
-            status: tokenResponse.status,
+            status: tokenData.status,
             error: tokenData.error,
             description:
               tokenData.error_description,

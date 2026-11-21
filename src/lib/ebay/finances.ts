@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from "pg";
 import { decryptToken, encryptToken } from "@/lib/ebay/tokenCrypto";
+import { renewAccessToken } from "@/lib/ebay/scopes";
 
 // Read-only helpers for eBay's Finances API (the payments records behind
 // your payouts) plus a valid access token for a store.
@@ -95,28 +96,11 @@ export async function storeAccessToken(db: Pool | PoolClient, userId: string, eb
   if (new Date(connection.accessTokenExpiresAt).getTime() > Date.now() + 60_000) return { token: decryptToken(connection.accessToken) };
   if (new Date(connection.refreshTokenExpiresAt).getTime() <= Date.now()) return { reconnect: true };
 
-  const clientId = process.env.EBAY_CLIENT_ID;
-  const clientSecret = process.env.EBAY_CLIENT_SECRET;
-  if (!clientId || !clientSecret) return { error: "eBay isn't configured." };
-  const response = await fetch(`${api}/identity/v1/oauth2/token`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
-    },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: decryptToken(connection.refreshToken),
-      scope: [
-        "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly",
-        "https://api.ebay.com/oauth/api_scope/commerce.identity.readonly",
-        "https://api.ebay.com/oauth/api_scope/sell.finances",
-      ].join(" "),
-    }).toString(),
-    cache: "no-store",
-  });
-  const data = (await response.json().catch(() => ({}))) as { access_token?: string; expires_in?: number };
-  if (!response.ok || !data.access_token || !data.expires_in) return { reconnect: true };
+  if (!process.env.EBAY_CLIENT_ID || !process.env.EBAY_CLIENT_SECRET) return { error: "eBay isn't configured." };
+  // Same permissions as the order sync asks for, so a renewal here doesn't
+  // take away listing traffic until the next order sync.
+  const data = await renewAccessToken(api, decryptToken(connection.refreshToken));
+  if (!data.ok || !data.access_token || !data.expires_in) return { reconnect: true };
   await db.query(`UPDATE public."ebayConnection" SET "accessToken" = $1, "accessTokenExpiresAt" = $2 WHERE id = $3`, [
     encryptToken(data.access_token),
     new Date(Date.now() + data.expires_in * 1000).toISOString(),

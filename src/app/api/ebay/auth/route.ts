@@ -2,7 +2,7 @@ import { createHmac, randomBytes } from "crypto";
 import { NextResponse } from "next/server";
 import { rateLimit } from "@/lib/rateLimit";
 import { createClient } from "@/lib/supabase/server";
-import { ANALYTICS_SCOPE } from "@/lib/ebay/traffic";
+import { CONNECT_SCOPES } from "@/lib/ebay/scopes";
 
 export const runtime = "nodejs";
 
@@ -42,23 +42,8 @@ export async function GET() {
       );
     }
 
-    // STEP 3: Request eBay API permissions.
-    const scopes = [
-      // Read seller orders.
-      "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly",
-
-      // Retrieve verified eBay seller identity.
-      "https://api.ebay.com/oauth/api_scope/commerce.identity.readonly",
-
-      // Access eBay financial transactions and fees.
-      "https://api.ebay.com/oauth/api_scope/sell.finances",
-
-      // NEW: Retrieve and synchronize active eBay listings.
-      "https://api.ebay.com/oauth/api_scope/sell.inventory",
-
-      // Listing views, impressions and sales from views (read-only).
-      ANALYTICS_SCOPE,
-    ];
+    // STEP 3: Request eBay API permissions (read-only; see scopes.ts).
+    const scopes = CONNECT_SCOPES;
 
     // STEP 4: Generate a secure OAuth state.
     const state = randomBytes(32).toString("hex");
