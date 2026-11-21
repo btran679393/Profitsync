@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { rateLimit } from "@/lib/rateLimit";
 import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { resolveActiveEbayUserId, storeAllowedByPlan } from "@/lib/ebay/activeStore";
@@ -73,6 +74,8 @@ async function signedInUser() {
 export async function GET(request: Request) {
   const user = await signedInUser();
   if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const limited = await rateLimit("ebayApiRead", user.id);
+  if (limited) return limited;
   if (!process.env.DATABASE_URL) return NextResponse.json({ error: "Database configuration unavailable." }, { status: 503 });
 
   const params = new URL(request.url).searchParams;

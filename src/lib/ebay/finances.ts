@@ -1,4 +1,5 @@
 import type { Pool, PoolClient } from "pg";
+import { decryptToken, encryptToken } from "@/lib/ebay/tokenCrypto";
 
 // Read-only helpers for eBay's Finances API (the payments records behind
 // your payouts) plus a valid access token for a store.
@@ -91,7 +92,7 @@ export async function storeAccessToken(db: Pool | PoolClient, userId: string, eb
   );
   const connection = rows[0];
   if (!connection) return { error: "That store isn't connected." };
-  if (new Date(connection.accessTokenExpiresAt).getTime() > Date.now() + 60_000) return { token: connection.accessToken };
+  if (new Date(connection.accessTokenExpiresAt).getTime() > Date.now() + 60_000) return { token: decryptToken(connection.accessToken) };
   if (new Date(connection.refreshTokenExpiresAt).getTime() <= Date.now()) return { reconnect: true };
 
   const clientId = process.env.EBAY_CLIENT_ID;
@@ -105,7 +106,7 @@ export async function storeAccessToken(db: Pool | PoolClient, userId: string, eb
     },
     body: new URLSearchParams({
       grant_type: "refresh_token",
-      refresh_token: connection.refreshToken,
+      refresh_token: decryptToken(connection.refreshToken),
       scope: [
         "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly",
         "https://api.ebay.com/oauth/api_scope/commerce.identity.readonly",
@@ -117,7 +118,7 @@ export async function storeAccessToken(db: Pool | PoolClient, userId: string, eb
   const data = (await response.json().catch(() => ({}))) as { access_token?: string; expires_in?: number };
   if (!response.ok || !data.access_token || !data.expires_in) return { reconnect: true };
   await db.query(`UPDATE public."ebayConnection" SET "accessToken" = $1, "accessTokenExpiresAt" = $2 WHERE id = $3`, [
-    data.access_token,
+    encryptToken(data.access_token),
     new Date(Date.now() + data.expires_in * 1000).toISOString(),
     connection.id,
   ]);

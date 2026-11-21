@@ -4,6 +4,7 @@ import { getPool } from "@/lib/db/pool";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getUserPlan } from "@/lib/billing/server";
+import { encryptToken } from "@/lib/ebay/tokenCrypto";
 
 type EbayTokenResponse = {
   access_token?: string;
@@ -315,7 +316,9 @@ export async function GET(request: NextRequest) {
         tokenData.refresh_token_expires_in * 1000
     ).toISOString();
 
-    // STEP 9: Save the connection securely.
+    // STEP 9: Save the connection securely (tokens encrypted).
+    const storedAccessToken = encryptToken(tokenData.access_token);
+    const storedRefreshToken = encryptToken(tokenData.refresh_token);
     const pool = getPool();
 
     try {
@@ -387,8 +390,8 @@ export async function GET(request: NextRequest) {
                 AND "userId" = $6
             `,
             [
-              tokenData.access_token,
-              tokenData.refresh_token,
+              storedAccessToken,
+              storedRefreshToken,
               accessTokenExpiresAt,
               refreshTokenExpiresAt,
               existing.id,
@@ -437,8 +440,8 @@ export async function GET(request: NextRequest) {
               user.id,
               ebayUserId,
               environment,
-              tokenData.access_token,
-              tokenData.refresh_token,
+              storedAccessToken,
+              storedRefreshToken,
               accessTokenExpiresAt,
               refreshTokenExpiresAt,
             ]

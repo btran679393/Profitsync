@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { rateLimit } from "@/lib/rateLimit";
 import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { isMissingColumn } from "@/lib/db/optionalColumns";
@@ -31,6 +32,8 @@ export async function POST(request: Request) {
   if (error || !user) {
     return NextResponse.json({ error: "Authentication required." }, { status: 401 });
   }
+  const limited = await rateLimit("listingBulk", user.id);
+  if (limited) return limited;
 
   let body: Record<string, unknown>;
   try {

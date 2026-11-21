@@ -3,6 +3,7 @@ import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { fetchSellerProfile, isMissingColumn, saveSellerProfile } from "@/lib/ebay/sellerProfile";
 import { activeStoreId } from "@/lib/ebay/activeStore";
+import { decryptToken } from "@/lib/ebay/tokenCrypto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -68,7 +69,7 @@ export async function GET() {
       return NextResponse.json(empty, noCache);
     }
 
-    const profile = await fetchSellerProfile(connection.accessToken);
+    const profile = await fetchSellerProfile(decryptToken(connection.accessToken));
     if (!profile) return NextResponse.json(empty, noCache);
     await saveSellerProfile(pool, connection.id, user.id, profile);
     return NextResponse.json(profile, { headers: { "Cache-Control": "private, max-age=3600" } });

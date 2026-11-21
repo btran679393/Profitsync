@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { rateLimit } from "@/lib/rateLimit";
 import { createClient } from "@/lib/supabase/server";
 import { tryAcquireSyncLock } from "@/lib/db/syncLock";
 import { syncOrders } from "@/lib/ebay/orderSync";
@@ -19,6 +20,8 @@ export async function POST(request: Request) {
   if (!user) {
     return NextResponse.json({ error: "Authentication required." }, { status: 401 });
   }
+  const limited = await rateLimit("orderSync", user.id);
+  if (limited) return limited;
   const lock = await tryAcquireSyncLock(`orders:${user.id}`);
   if (lock === "busy") {
     return NextResponse.json(

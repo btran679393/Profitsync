@@ -5,6 +5,7 @@ import { existingColumns } from "@/lib/db/optionalColumns";
 import { tryAcquireSyncLock } from "@/lib/db/syncLock";
 import { getUserPlan } from "@/lib/billing/server";
 import { syncOrders } from "@/lib/ebay/orderSync";
+import { encryptStoredTokens } from "@/lib/ebay/tokenCrypto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,6 +48,14 @@ export async function GET(request: Request) {
 
   const started = Date.now();
   const pool = getPool();
+  // Encrypt any eBay tokens still saved as plain text (from before
+  // encryption was added). Never blocks the sync.
+  try {
+    const encrypted = await encryptStoredTokens(pool);
+    if (encrypted) console.log(`Encrypted saved eBay tokens for ${encrypted} store(s).`);
+  } catch (error) {
+    console.error("Encrypting saved eBay tokens failed:", error);
+  }
   const environment = process.env.EBAY_ENVIRONMENT === "PRODUCTION" ? "PRODUCTION" : "SANDBOX";
   const tracksSyncs = (await existingColumns(pool, "ebayConnection", ["lastOrderSyncAt"])).has("lastOrderSyncAt");
   const { rows } = await pool.query<StoreRow>(

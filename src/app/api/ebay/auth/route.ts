@@ -1,5 +1,6 @@
 import { createHmac, randomBytes } from "crypto";
 import { NextResponse } from "next/server";
+import { rateLimit } from "@/lib/rateLimit";
 import { createClient } from "@/lib/supabase/server";
 import { ANALYTICS_SCOPE } from "@/lib/ebay/traffic";
 
@@ -21,6 +22,8 @@ export async function GET() {
         { status: 401 }
       );
     }
+    const limited = await rateLimit("ebayConnect", user.id);
+    if (limited) return limited;
 
     // STEP 2: Determine the eBay environment.
     const environment =

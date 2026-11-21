@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { rateLimit } from "@/lib/rateLimit";
 import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { isMissingColumn } from "@/lib/db/optionalColumns";
@@ -20,6 +21,8 @@ export async function POST(request: Request) {
     error,
   } = await supabase.auth.getUser();
   if (error || !user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const limited = await rateLimit("shippingImport", user.id);
+  if (limited) return limited;
 
   let body: { items?: unknown; overwrite?: unknown };
   try {

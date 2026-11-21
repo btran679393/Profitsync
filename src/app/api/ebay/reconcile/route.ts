@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { rateLimit } from "@/lib/rateLimit";
 import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { resolveActiveEbayUserId } from "@/lib/ebay/activeStore";
@@ -17,6 +18,8 @@ export async function GET(request: Request) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  const limited = await rateLimit("ebayApiRead", user.id);
+  if (limited) return limited;
 
   const month = new URL(request.url).searchParams.get("month") ?? "";
   const range = monthRange(month);

@@ -40,9 +40,19 @@ export async function GET(request: NextRequest) {
     return loginRedirect(origin, "auth_failed", error.message);
   }
 
-  // Only allow same-site relative paths as the post-login destination.
-  const next = params.get("next");
-  const destination = next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
+  // Only allow pages on this site as the post-login destination. Checking
+  // the finished address (not just the text) also catches tricks like
+  // "/\evil.com", which browsers treat as another site.
+  return NextResponse.redirect(safeDestination(params.get("next"), origin));
+}
 
-  return NextResponse.redirect(new URL(destination, origin));
+function safeDestination(next: string | null, origin: string): URL {
+  const home = new URL("/", origin);
+  if (!next || !next.startsWith("/") || next.startsWith("//") || next.includes("\\")) return home;
+  try {
+    const url = new URL(next, origin);
+    return url.origin === home.origin ? url : home;
+  } catch {
+    return home;
+  }
 }

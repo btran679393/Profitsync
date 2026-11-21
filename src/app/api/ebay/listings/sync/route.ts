@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { rateLimit } from "@/lib/rateLimit";
 import { getPool } from "@/lib/db/pool";
 import type { Pool } from "pg";
 import { createClient } from "@/lib/supabase/server";
@@ -10,6 +11,7 @@ import { existingColumns } from "@/lib/db/optionalColumns";
 import { TrafficPermissionError, fetchListingTraffic } from "@/lib/ebay/traffic";
 import { appToken, fetchManyItemDetails } from "@/lib/ebay/itemDetails";
 import { ebayBases } from "@/lib/ebay/finances";
+import { decryptToken } from "@/lib/ebay/tokenCrypto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -184,6 +186,8 @@ export async function POST(request: Request) {
   if (!user) {
     return NextResponse.json({ error: "Authentication required." }, { status: 401 });
   }
+  const limited = await rateLimit("listingSync", user.id);
+  if (limited) return limited;
   const lock = await tryAcquireSyncLock(`listings:${user.id}`);
   if (lock === "busy") {
     return NextResponse.json(
@@ -259,11 +263,12 @@ async function syncListings(request: Request) {
         { status: 401 }
       );
     }
+    const accessToken = decryptToken(connection.accessToken);
 
     // STEP 5: Retrieve every active listing from eBay
     let listings: ParsedListing[];
     try {
-      listings = await fetchActiveListings(connection.accessToken);
+      listings = await fetchActiveListings(accessToken);
     } catch (error) {
       if (error instanceof EbayTradingError) {
         return NextResponse.json(
@@ -361,7 +366,7 @@ async function syncListings(request: Request) {
       }
       if (columns.has("views30") && listings.length > 0) {
         try {
-          const traffic = await fetchListingTraffic(connection.accessToken, listings.map((l) => l.itemId));
+          const traffic = await fetchListingTraffic(accessToken, listings.map((l) => l.itemId));
           const ids = [...traffic.keys()];
           await pool.query(
             `
@@ -447,7 +452,7 @@ async function syncListings(request: Request) {
     // Keep the seller's eBay username / store name current for the greeting.
     // Never fails the listing sync.
     try {
-      const profile = await fetchSellerProfile(connection.accessToken);
+      const profile = await fetchSellerProfile(accessToken);
       if (profile) await saveSellerProfile(pool, connection.id, user.id, profile);
     } catch (error) {
       console.error("Refreshing eBay store name failed:", error);

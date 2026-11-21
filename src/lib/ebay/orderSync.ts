@@ -9,6 +9,7 @@ import type { PlanLimits } from "@/lib/billing/plans";
 import { createClient } from "@/lib/supabase/server";
 import type { User } from "@supabase/supabase-js";
 import { existingColumns } from "@/lib/db/optionalColumns";
+import { decryptToken, encryptToken } from "@/lib/ebay/tokenCrypto";
 import {
   ORDER_HISTORY_DAYS,
   financeCovers,
@@ -1138,7 +1139,7 @@ export async function syncOrders(
       // The shared pool stays open for the next request.
     }
     let accessToken =
-      connection.accessToken;
+      decryptToken(connection.accessToken);
     // --------------------------------------------------------
     // STEP 5: Refresh access token if expired
     // --------------------------------------------------------
@@ -1201,7 +1202,7 @@ export async function syncOrders(
             },
             body: new URLSearchParams({
               grant_type: "refresh_token",
-              refresh_token: connection.refreshToken,
+              refresh_token: decryptToken(connection.refreshToken),
               scope: scopeList.join(" "),
             }).toString(),
             cache: "no-store",
@@ -1253,7 +1254,7 @@ export async function syncOrders(
         id: connection.id,
         userId,
       }).update({
-        accessToken,
+        accessToken: encryptToken(accessToken),
         accessTokenExpiresAt:
           newExpiration,
       });
