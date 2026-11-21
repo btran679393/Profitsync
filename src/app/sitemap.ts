@@ -8,6 +8,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${base}/`, changeFrequency: "weekly", priority: 1 },
     { url: `${base}/demo`, changeFrequency: "monthly", priority: 0.7 },
     { url: `${base}/pricing`, changeFrequency: "monthly", priority: 0.8 },
+    { url: `${base}/ebay-fee-calculator`, changeFrequency: "monthly", priority: 0.9 },
     { url: `${base}/contact`, changeFrequency: "yearly", priority: 0.5 },
     { url: `${base}/terms`, changeFrequency: "yearly", priority: 0.3 },
     { url: `${base}/refunds`, changeFrequency: "yearly", priority: 0.3 },

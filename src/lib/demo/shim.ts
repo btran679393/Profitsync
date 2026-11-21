@@ -65,6 +65,7 @@ function billing(): BillingStatus {
     // No automatic sync in the demo: there's no eBay account behind it.
     limits: { ...PLANS.ultimate.limits, autoSync: false },
     usage: { stores: 1, ordersThisMonth: 0 },
+    trial: { active: false, endsAt: null, eligible: false },
   };
 }
 

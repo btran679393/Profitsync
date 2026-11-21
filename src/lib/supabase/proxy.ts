@@ -3,7 +3,16 @@ import { createServerClient } from "@supabase/ssr";
 import { NextRequest, NextResponse } from "next/server";
 
 // The public website pages anyone can open without signing in.
-const PUBLIC_SITE_PAGES = new Set(["/welcome", "/demo", "/pricing", "/contact", "/terms", "/refunds", "/privacy"]);
+const PUBLIC_SITE_PAGES = new Set([
+  "/welcome",
+  "/demo",
+  "/pricing",
+  "/ebay-fee-calculator",
+  "/contact",
+  "/terms",
+  "/refunds",
+  "/privacy",
+]);
 
 export async function updateSession(request: NextRequest) {
   // Pages that finish a sign-in (social login callback, password-reset link)

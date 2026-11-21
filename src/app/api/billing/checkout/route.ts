@@ -84,13 +84,21 @@ export async function POST(request: Request) {
 
     const customerId = await ensureCustomer(pool, user, current.row);
     const origin = siteOrigin(request);
+    // Paying during the free trial: the first charge waits until the trial
+    // would have ended, so nobody loses trial days by paying early. Stripe
+    // needs the date at least 48 hours away; closer than that, billing starts now.
+    const trialEnd = current.trialActive && current.row?.trialEndsAt ? new Date(current.row.trialEndsAt).getTime() : 0;
+    const keepTrial = trialEnd > Date.now() + 49 * 60 * 60 * 1000;
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
       client_reference_id: user.id,
       line_items: [{ price: priceId, quantity: 1 }],
       allow_promotion_codes: true,
-      subscription_data: { metadata: { profitsyncUserId: user.id } },
+      subscription_data: {
+        metadata: { profitsyncUserId: user.id },
+        ...(keepTrial ? { trial_end: Math.floor(trialEnd / 1000) } : {}),
+      },
       success_url: `${origin}/?billing=success#billing`,
       cancel_url: `${origin}/?billing=cancelled#billing`,
     });

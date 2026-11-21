@@ -32,6 +32,9 @@ export function SiteHeader() {
           <Link href="/pricing" className="hidden rounded-lg px-3 py-2 text-sm text-muted hover:text-ink sm:inline-block">
             Pricing
           </Link>
+          <Link href="/ebay-fee-calculator" className="hidden rounded-lg px-3 py-2 text-sm text-muted hover:text-ink md:inline-block">
+            Fee calculator
+          </Link>
           <Link href="/contact" className="hidden rounded-lg px-3 py-2 text-sm text-muted hover:text-ink sm:inline-block">
             Contact
           </Link>
@@ -44,6 +47,7 @@ export function SiteHeader() {
 
 const FOOTER_LINKS = [
   ["Pricing", "/pricing"],
+  ["eBay fee calculator", "/ebay-fee-calculator"],
   ["Contact", "/contact"],
   ["Terms", "/terms"],
   ["Refunds", "/refunds"],

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowedNewOrderIds, lockedStoreIds } from "@/lib/billing/server";
+import { allowedNewOrderIds, lockedStoreIds, planForRow, trialEligible, type SubscriptionRow } from "@/lib/billing/server";
 import { PLANS, priceCents, yearlySavingsCents } from "@/lib/billing/plans";
 
 const now = new Date("2026-11-20T12:00:00Z");
@@ -57,6 +57,52 @@ describe("allowedNewOrderIds", () => {
     const { allowed, overLimit } = allowedNewOrderIds(orders(500, "2026-11-05T00:00:00Z"), new Map(), pro, now);
     expect(allowed.size).toBe(500);
     expect(overLimit).toBe(0);
+  });
+});
+
+function row(fields: Partial<SubscriptionRow>): SubscriptionRow {
+  return {
+    userId: "u1",
+    stripeCustomerId: null,
+    stripeSubscriptionId: null,
+    plan: "free",
+    billingInterval: null,
+    status: null,
+    currentPeriodEnd: null,
+    cancelAtPeriodEnd: false,
+    comped: false,
+    trialEndsAt: null,
+    ...fields,
+  };
+}
+
+describe("free trial", () => {
+  const future = "2026-11-25T12:00:00Z";
+  const past = "2026-11-10T12:00:00Z";
+
+  it("a running trial gives Pro", () => {
+    expect(planForRow(row({ trialEndsAt: future }), now)).toEqual({ plan: "pro", trialActive: true });
+  });
+  it("an ended trial goes back to Free", () => {
+    expect(planForRow(row({ trialEndsAt: past }), now)).toEqual({ plan: "free", trialActive: false });
+  });
+  it("a payment wins over the trial", () => {
+    const paid = row({ trialEndsAt: future, plan: "ultimate", status: "active", stripeSubscriptionId: "sub_1" });
+    expect(planForRow(paid, now)).toEqual({ plan: "ultimate", trialActive: false });
+  });
+  it("a cancelled payment falls back to a trial that's still running", () => {
+    expect(planForRow(row({ trialEndsAt: future, plan: "pro", status: "canceled" }), now).trialActive).toBe(true);
+  });
+  it("comped accounts are never in a trial", () => {
+    expect(planForRow(row({ comped: true, plan: "ultimate", trialEndsAt: future }), now)).toEqual({ plan: "ultimate", trialActive: false });
+  });
+  it("only one trial per account, and never after paying", () => {
+    expect(trialEligible(null, "free")).toBe(true);
+    expect(trialEligible(row({}), "free")).toBe(true);
+    expect(trialEligible(row({ trialEndsAt: past }), "free")).toBe(false);
+    expect(trialEligible(row({ stripeSubscriptionId: "sub_old", status: "canceled" }), "free")).toBe(false);
+    expect(trialEligible(row({ comped: true }), "free")).toBe(false);
+    expect(trialEligible(row({}), "pro")).toBe(false);
   });
 });
 

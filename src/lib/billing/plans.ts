@@ -139,6 +139,10 @@ export const PLANS: Record<PlanId, Plan> = {
 
 export const PAID_PLANS: PaidPlanId[] = ["pro", "ultimate"];
 
+// Free trial of Pro: one click, no card, once per account.
+export const TRIAL_DAYS = 14;
+export const TRIAL_PLAN: PaidPlanId = "pro";
+
 export function isPaidPlan(value: unknown): value is PaidPlanId {
   return value === "pro" || value === "ultimate";
 }
@@ -179,5 +183,13 @@ export type BillingStatus = {
   usage: {
     stores: number;
     ordersThisMonth: number;
+  };
+  trial: {
+    // True while the plan comes from the free trial (not a payment).
+    active: boolean;
+    // When the trial ends (or ended); null = never started.
+    endsAt: string | null;
+    // Can start the trial now: billing on, on Free, never trialled or paid.
+    eligible: boolean;
   };
 };

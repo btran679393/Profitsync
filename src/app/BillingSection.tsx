@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useConfirm } from "@/components/ui";
 import {
   PLANS,
+  TRIAL_DAYS,
   yearlySavingsCents,
   type BillingInterval,
   type BillingStatus,
@@ -38,6 +39,13 @@ function Check() {
       <path d="M5 12l4 4L19 6" />
     </svg>
   );
+}
+
+// Whole days left until `iso` (at least 1 while it's still in the future).
+export function daysLeft(iso: string | null, now = Date.now()) {
+  if (!iso) return 0;
+  const ms = new Date(iso).getTime() - now;
+  return ms > 0 ? Math.max(1, Math.ceil(ms / 86_400_000)) : 0;
 }
 
 function UsageBar({
@@ -97,8 +105,27 @@ export default function BillingSection({
   const plan: PlanId = billing?.enabled ? billing.plan : "free";
   const enabled = Boolean(billing?.enabled);
   const comped = Boolean(billing?.comped);
-  const paying = enabled && plan !== "free" && !comped;
+  const trialActive = enabled && Boolean(billing?.trial.active);
+  const trialEligible = enabled && Boolean(billing?.trial.eligible);
+  const paying = enabled && plan !== "free" && !comped && !trialActive;
+  // On Free or in the trial: every paid plan is a fresh checkout.
+  const shopping = plan === "free" || trialActive;
   const limits = billing?.limits ?? PLANS.free.limits;
+
+  async function beginTrial() {
+    setError("");
+    setMessage("");
+    setBusy("trial");
+    try {
+      await postJson("/api/billing/trial");
+      await onChanged();
+      setMessage(`Your ${TRIAL_DAYS}-day Pro trial has started. Everything in Pro is unlocked, no card needed.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't start the trial.");
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function choose(target: PaidPlanId) {
     setError("");
@@ -143,7 +170,9 @@ export default function BillingSection({
     ? "Payments aren't switched on yet, so every feature is open for now."
     : comped
       ? "Included free on your account."
-      : plan === "free"
+      : trialActive
+        ? `Free trial: ${daysLeft(billing?.trial.endsAt ?? null)} ${daysLeft(billing?.trial.endsAt ?? null) === 1 ? "day" : "days"} left, until ${prettyDate(billing?.trial.endsAt ?? null)}. Then you move back to Free unless you pick a plan.${daysLeft(billing?.trial.endsAt ?? null) > 2 ? " Pick one now and your first payment still waits until the trial ends." : ""}`
+        : plan === "free"
         ? "Upgrade any time to unlock more stores, unlimited orders and the tax report."
         : billing?.status === "past_due"
           ? "Your last payment didn't go through. Update your card to keep your plan."
@@ -166,6 +195,26 @@ export default function BillingSection({
         </div>
       )}
 
+      {trialEligible && (
+        <section className="flex flex-col gap-4 rounded-xl border border-accent/40 bg-gradient-to-br from-accent-soft to-surface p-6 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-ink">Try Pro free for {TRIAL_DAYS} days</h3>
+            <p className="mt-1 max-w-xl text-sm text-muted">
+              See your Payouts, Reports, Inventory and tax report with your own numbers. No card needed, and you go back to Free
+              by yourself when it ends.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void beginTrial()}
+            disabled={busy !== null}
+            className="shrink-0 rounded-xl bg-accent px-5 py-2.5 text-sm font-semibold text-on-accent shadow-lg shadow-accent/20 transition hover:bg-accent-hover disabled:opacity-50"
+          >
+            {busy === "trial" ? "Starting…" : "Start free trial"}
+          </button>
+        </section>
+      )}
+
       {/* Current plan + usage */}
       <section className="grid gap-6 rounded-xl border border-line bg-surface p-6 lg:grid-cols-[1fr_minmax(16rem,22rem)]">
         <div>
@@ -176,6 +225,9 @@ export default function BillingSection({
               <span className="rounded-full bg-accent-soft px-3 py-1 text-xs font-semibold text-accent-ink">
                 {billing.interval === "year" ? "Yearly" : "Monthly"}
               </span>
+            )}
+            {trialActive && (
+              <span className="rounded-full bg-profit-soft px-3 py-1 text-xs font-semibold text-profit">Free trial</span>
             )}
             {billing?.status === "past_due" && (
               <span className="rounded-full bg-warn-soft px-3 py-1 text-xs font-semibold text-warn">Payment due</span>
@@ -229,8 +281,8 @@ export default function BillingSection({
       <div className="grid gap-5 lg:grid-cols-3">
         {PLAN_ORDER.map((id) => {
           const info = PLANS[id];
-          const isCurrent = enabled && id === plan && (id === "free" || comped || billing?.interval === interval);
-          const isCurrentOtherPeriod = enabled && id === plan && id !== "free" && !comped && billing?.interval !== interval;
+          const isCurrent = enabled && !trialActive && id === plan && (id === "free" || comped || billing?.interval === interval);
+          const isCurrentOtherPeriod = enabled && !trialActive && id === plan && id !== "free" && !comped && billing?.interval !== interval;
           const featured = id === "pro";
           const cents = id === "free" ? 0 : interval === "year" ? info.yearlyCents : info.monthlyCents;
           const higher = PLAN_ORDER.indexOf(id) > PLAN_ORDER.indexOf(plan);
@@ -247,6 +299,8 @@ export default function BillingSection({
             );
           } else if (comped) {
             action = <span className="block py-2.5 text-center text-sm text-subtle">Included on your account</span>;
+          } else if (id === "free" && trialActive) {
+            action = <span className="block py-2.5 text-center text-sm text-subtle">Where you land after the trial</span>;
           } else if (id === "free") {
             action = (
               <button
@@ -274,7 +328,7 @@ export default function BillingSection({
                   ? "One moment…"
                   : isCurrentOtherPeriod
                     ? `Switch to ${interval === "year" ? "yearly" : "monthly"}`
-                    : plan === "free"
+                    : shopping
                       ? `Get ${info.name}`
                       : `${higher ? "Upgrade" : "Switch"} to ${info.name}`}
               </button>

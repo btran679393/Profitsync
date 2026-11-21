@@ -22,6 +22,7 @@ export const LIMITS = {
   ebayConnect: { limit: 10, windowSeconds: 600 },
   billing: { limit: 10, windowSeconds: 600 },
   accountDelete: { limit: 5, windowSeconds: 3600 },
+  numberReport: { limit: 20, windowSeconds: 3600 },
 } satisfies Record<string, Limit>;
 
 let warnedMissingTable = false;

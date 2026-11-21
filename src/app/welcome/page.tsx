@@ -86,6 +86,7 @@ const FAQ: Array<[string, string]> = [
   ["Is my eBay account safe?", "You connect through eBay's own sign-in, so ProfitSync never sees your eBay password. ProfitSync only reads your information; it can't change listings, orders, refunds or payouts. You can disconnect any time."],
   ["Do I need a credit card to start?", "No. The Free plan covers one eBay store and up to 50 orders a month, with the full dashboard. Upgrade only if you need more."],
   ["Where do the numbers come from?", "Sales, fees, shipping labels and refunds come straight from eBay. You add what you paid for your items and any other business expenses."],
+  ["Can I try Pro before paying?", "Yes. Every account can try Pro free for 14 days, once. No card needed, and when the trial ends you simply go back to Free unless you choose a plan."],
   ["Can I cancel a paid plan?", "Yes, any time, in a couple of clicks. You keep your plan until the end of the period you paid for and won't be charged again."],
   ["Is the tax summary tax advice?", "No. It's a clear profit and loss summary to give your accountant or use when you file. Always check with a tax professional."],
   ["What happens to my data if I leave?", "You can download your orders as a spreadsheet, and deleting your account removes your data from ProfitSync."],

@@ -3,6 +3,8 @@ import type { User } from "@supabase/supabase-js";
 import type { Pool, PoolClient } from "pg";
 import {
   PLANS,
+  TRIAL_DAYS,
+  TRIAL_PLAN,
   UNLIMITED_LIMITS,
   isBillingInterval,
   isPaidPlan,
@@ -110,24 +112,35 @@ export type SubscriptionRow = {
   currentPeriodEnd: string | null;
   cancelAtPeriodEnd: boolean;
   comped: boolean;
+  // Free Pro trial end (docs/sql/2026-11-21_trial.sql); null = never started.
+  trialEndsAt: string | Date | null;
 };
 
-function isMissingTable(error: unknown) {
-  return typeof error === "object" && error !== null && (error as { code?: string }).code === "42P01";
+function errorCode(error: unknown) {
+  return typeof error === "object" && error !== null ? (error as { code?: string }).code : undefined;
 }
+
+const SUBSCRIPTION_COLUMNS = `"userId", "stripeCustomerId", "stripeSubscriptionId", plan, "billingInterval", status,
+              "currentPeriodEnd", "cancelAtPeriodEnd", comped`;
 
 // null row = no subscription yet. tableMissing = the billing SQL hasn't run.
 export async function loadSubscription(db: Db, userId: string): Promise<{ row: SubscriptionRow | null; tableMissing: boolean }> {
   try {
     const result = await db.query<SubscriptionRow>(
-      `SELECT "userId", "stripeCustomerId", "stripeSubscriptionId", plan, "billingInterval", status,
-              "currentPeriodEnd", "cancelAtPeriodEnd", comped
-       FROM public."subscription" WHERE "userId" = $1`,
+      `SELECT ${SUBSCRIPTION_COLUMNS}, "trialEndsAt" FROM public."subscription" WHERE "userId" = $1`,
       [userId]
     );
     return { row: result.rows[0] ?? null, tableMissing: false };
   } catch (error) {
-    if (isMissingTable(error)) return { row: null, tableMissing: true };
+    if (errorCode(error) === "42P01") return { row: null, tableMissing: true };
+    // The trial column hasn't been added yet: everything else still works.
+    if (errorCode(error) === "42703") {
+      const result = await db.query<SubscriptionRow>(
+        `SELECT ${SUBSCRIPTION_COLUMNS}, NULL::timestamptz AS "trialEndsAt" FROM public."subscription" WHERE "userId" = $1`,
+        [userId]
+      );
+      return { row: result.rows[0] ?? null, tableMissing: false };
+    }
     throw error;
   }
 }
@@ -136,11 +149,21 @@ export async function loadSubscription(db: Db, userId: string): Promise<{ row: S
 // while Stripe retries the card.
 const PAID_STATUSES = new Set(["active", "trialing", "past_due"]);
 
-function effectivePlan(row: SubscriptionRow | null): PlanId {
-  if (!row) return "free";
-  if (row.comped && isPaidPlan(row.plan)) return row.plan;
-  if (isPaidPlan(row.plan) && row.status && PAID_STATUSES.has(row.status)) return row.plan;
-  return "free";
+// Which plan a subscription row gives, and whether it comes from the free
+// trial. A real payment or a comped plan always wins over the trial.
+export function planForRow(row: SubscriptionRow | null, now = new Date()): { plan: PlanId; trialActive: boolean } {
+  if (!row) return { plan: "free", trialActive: false };
+  if (row.comped && isPaidPlan(row.plan)) return { plan: row.plan, trialActive: false };
+  if (isPaidPlan(row.plan) && row.status && PAID_STATUSES.has(row.status)) return { plan: row.plan, trialActive: false };
+  if (row.trialEndsAt && new Date(row.trialEndsAt).getTime() > now.getTime()) return { plan: TRIAL_PLAN, trialActive: true };
+  return { plan: "free", trialActive: false };
+}
+
+// The free trial is for accounts on Free that have never trialled or paid.
+export function trialEligible(row: SubscriptionRow | null, plan: PlanId): boolean {
+  if (plan !== "free") return false;
+  if (!row) return true;
+  return !row.trialEndsAt && !row.stripeSubscriptionId && !row.comped;
 }
 
 export type UserPlan = {
@@ -149,14 +172,35 @@ export type UserPlan = {
   plan: PlanId;
   limits: PlanLimits;
   row: SubscriptionRow | null;
+  trialActive: boolean;
 };
 
 export async function getUserPlan(db: Db, userId: string): Promise<UserPlan> {
-  if (!stripeConfigured()) return { enabled: false, plan: "ultimate", limits: UNLIMITED_LIMITS, row: null };
+  const unlimited = { enabled: false, plan: "ultimate" as const, limits: UNLIMITED_LIMITS, row: null, trialActive: false };
+  if (!stripeConfigured()) return unlimited;
   const { row, tableMissing } = await loadSubscription(db, userId);
-  if (tableMissing) return { enabled: false, plan: "ultimate", limits: UNLIMITED_LIMITS, row: null };
-  const plan = effectivePlan(row);
-  return { enabled: true, plan, limits: PLANS[plan].limits, row };
+  if (tableMissing) return unlimited;
+  const { plan, trialActive } = planForRow(row);
+  return { enabled: true, plan, limits: PLANS[plan].limits, row, trialActive };
+}
+
+// Starts the free trial. Returns its end, or null when the account can't
+// have one (already trialled, has paid, or is comped). The WHERE makes it
+// impossible to start twice, even with two clicks at once.
+export async function startTrial(db: Db, userId: string): Promise<Date | null> {
+  const result = await db.query<{ trialEndsAt: Date }>(
+    `
+    INSERT INTO public."subscription" ("userId", plan, "trialEndsAt", "updatedAt")
+    VALUES ($1, 'free', now() + make_interval(days => $2), now())
+    ON CONFLICT ("userId") DO UPDATE SET "trialEndsAt" = EXCLUDED."trialEndsAt", "updatedAt" = now()
+    WHERE public."subscription"."trialEndsAt" IS NULL
+      AND public."subscription"."stripeSubscriptionId" IS NULL
+      AND NOT public."subscription".comped
+    RETURNING "trialEndsAt"
+    `,
+    [userId, TRIAL_DAYS]
+  );
+  return result.rows[0]?.trialEndsAt ?? null;
 }
 
 // Save what Stripe says about a subscription.
@@ -293,13 +337,18 @@ export async function billingStatus(db: Db, userId: string): Promise<BillingStat
   return {
     enabled: userPlan.enabled,
     plan: userPlan.plan,
-    interval: userPlan.plan === "free" ? null : row?.billingInterval ?? null,
+    interval: userPlan.plan === "free" || userPlan.trialActive ? null : row?.billingInterval ?? null,
     status: row?.status ?? null,
     currentPeriodEnd: row?.currentPeriodEnd ? new Date(row.currentPeriodEnd).toISOString() : null,
     cancelAtPeriodEnd: Boolean(row?.cancelAtPeriodEnd),
     comped: Boolean(row?.comped),
     limits: userPlan.limits,
     usage: { stores, ordersThisMonth: monthOrders },
+    trial: {
+      active: userPlan.trialActive,
+      endsAt: row?.trialEndsAt ? new Date(row.trialEndsAt).toISOString() : null,
+      eligible: userPlan.enabled && trialEligible(row, userPlan.plan),
+    },
   };
 }
 

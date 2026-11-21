@@ -51,7 +51,8 @@ import {
 import MonthlyGoal from "./MonthlyGoal";
 import BillingSection from "./BillingSection";
 import TaxReport, { type TaxOrder } from "./TaxReport";
-import { PLANS, type BillingStatus } from "@/lib/billing/plans";
+import { PLANS, TRIAL_DAYS, type BillingStatus } from "@/lib/billing/plans";
+import { daysLeft } from "./BillingSection";
 
 import { type ApiListing, type Order, type ApiOrder, type SyncResponse, type OrderFilter, type DateRange, money, isValidCost, formatOrders, isFullyRefunded, isCanceled, refundNeedsReview, isReturnPolicy, type ReturnPolicy, getRefundLoss, isPartiallyRefunded, hasRecordedCost, getShippingCost, getOrderProfit, type View, subscribeToHash, viewFromHash, VIEW_COPY, isOrderInListingRange, normalizeTitle, buildListingRows, getDateRangeStart, getDateRangeEnd, rangeYear, isOrderInDateRange, dateRangeLabel, localDateKey, startOfLocalDay, computeTotals, previousRange, feesPending } from "./dashboard/model";
 import { OrderDetailsPanel } from "./dashboard/OrderParts";
@@ -708,6 +709,29 @@ function Dashboard() {
   const limits = billing?.enabled ? billing.limits : PLANS.ultimate.limits;
   const onFreePlan = Boolean(billing?.enabled && billing.plan === "free");
   const goToPlans = () => navigate("billing");
+
+  // Free Pro trial: one click from any locked Pro feature or the Free banner.
+  const trialEligible = Boolean(billing?.enabled && billing.trial.eligible);
+  const trialActive = Boolean(billing?.enabled && billing.trial.active);
+  const [startingTrial, setStartingTrial] = useState(false);
+  async function startTrial() {
+    if (startingTrial) return;
+    setStartingTrial(true);
+    try {
+      const response = await fetch("/api/billing/trial", { method: "POST" });
+      const data = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+      if (!response.ok) throw new Error(data.message || data.error || "Couldn't start the trial.");
+      await loadBilling();
+      toast.success(`Your ${TRIAL_DAYS}-day Pro trial has started`, "Everything in Pro is unlocked. No card needed.");
+      // More orders and stores are allowed now: bring them in.
+      await Promise.all([loadStores(), loadOrders()]);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't start the trial.");
+    } finally {
+      setStartingTrial(false);
+    }
+  }
+  const tryPro = trialEligible ? () => void startTrial() : undefined;
 
   // Coming back from Stripe checkout or the billing portal.
   useEffect(() => {
@@ -2035,9 +2059,15 @@ function Dashboard() {
             <Notice
               className="mb-6"
               action={
-                <Button variant="primary" size="sm" onClick={goToPlans}>
-                  Unlock unlimited orders
-                </Button>
+                trialEligible ? (
+                  <Button variant="primary" size="sm" onClick={() => void startTrial()} disabled={startingTrial}>
+                    {startingTrial ? "Starting…" : `Try Pro free for ${TRIAL_DAYS} days`}
+                  </Button>
+                ) : (
+                  <Button variant="primary" size="sm" onClick={goToPlans}>
+                    Unlock unlimited orders
+                  </Button>
+                )
               }
             >
               <span className="font-semibold text-ink">Free plan</span> ·{" "}
@@ -2045,6 +2075,21 @@ function Dashboard() {
                 {Math.min(billing.usage.ordersThisMonth, billing.limits.monthlyOrders ?? 0)} of {billing.limits.monthlyOrders}
               </span>{" "}
               orders this month · last {billing.limits.historyDays} days of history
+            </Notice>
+          )}
+
+          {trialActive && billing && view === "dashboard" && daysLeft(billing.trial.endsAt) <= 5 && (
+            <Notice
+              tone="warn"
+              className="mb-6"
+              action={
+                <Button variant="primary" size="sm" onClick={goToPlans}>
+                  Keep Pro
+                </Button>
+              }
+            >
+              <span className="font-semibold text-ink">Your Pro trial ends in {daysLeft(billing.trial.endsAt)} {daysLeft(billing.trial.endsAt) === 1 ? "day" : "days"}.</span>{" "}
+              After that you move back to Free: 1 store, 50 orders a month and 90 days of history.
             </Notice>
           )}
 
@@ -2169,6 +2214,7 @@ function Dashboard() {
               title="See how your business is doing over time"
               plan="Pro"
               onUpgrade={goToPlans}
+              onTrial={tryPro}
               points={[
                 "Your best and slowest months, month by month",
                 "Profit by eBay category and by brand",
@@ -2196,6 +2242,7 @@ function Dashboard() {
               title="See every payout and the money still at eBay"
               plan="Pro"
               onUpgrade={goToPlans}
+              onTrial={tryPro}
               points={[
                 "What's ready for payout, processing or on hold",
                 "Every payout to your bank, with its sales, fees, refunds and labels",
@@ -2317,6 +2364,7 @@ function Dashboard() {
               title="Track what you buy and what it earns"
               plan="Pro"
               onUpgrade={goToPlans}
+              onTrial={tryPro}
               points={[
                 "Log sourcing trips, lots and single buys",
                 "See unsold stock and what it cost you",

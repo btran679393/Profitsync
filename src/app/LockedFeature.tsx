@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { Button, Card } from "@/components/ui";
+import { TRIAL_DAYS } from "@/lib/billing/plans";
 
 // Shown in place of a feature the seller's plan doesn't include: what it
 // does, which plan has it, and a button to the plans.
@@ -11,6 +12,7 @@ export default function LockedFeature({
   children,
   points = [],
   onUpgrade,
+  onTrial,
   compact = false,
 }: {
   title: string;
@@ -18,6 +20,8 @@ export default function LockedFeature({
   children: ReactNode;
   points?: string[];
   onUpgrade: () => void;
+  // Set when the seller can start the free Pro trial (Pro features only).
+  onTrial?: () => void;
   // A smaller box for inside another page.
   compact?: boolean;
 }) {
@@ -41,9 +45,21 @@ export default function LockedFeature({
             </ul>
           )}
         </div>
-        <Button variant="primary" size={compact ? "sm" : "md"} onClick={onUpgrade} className={compact ? "" : "mt-5"}>
-          See plans
-        </Button>
+        {onTrial && plan === "Pro" ? (
+          <div className={compact ? "flex gap-2" : "mt-5 flex flex-wrap justify-center gap-2"}>
+            <Button variant="primary" size={compact ? "sm" : "md"} onClick={onTrial}>
+              Try Pro free for {TRIAL_DAYS} days
+            </Button>
+            <Button variant="secondary" size={compact ? "sm" : "md"} onClick={onUpgrade}>
+              See plans
+            </Button>
+          </div>
+        ) : (
+          <Button variant="primary" size={compact ? "sm" : "md"} onClick={onUpgrade} className={compact ? "" : "mt-5"}>
+            See plans
+          </Button>
+        )}
+        {onTrial && plan === "Pro" && !compact && <p className="mt-2 text-xs text-subtle">No card needed.</p>}
       </div>
     </Card>
   );

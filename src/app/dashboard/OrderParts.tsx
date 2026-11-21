@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Badge, Button, Drawer, Field, MoneyInput, Select, cn, useConfirm } from "@/components/ui";
+import { Badge, Button, Drawer, Field, MoneyInput, Select, Textarea, cn, useConfirm } from "@/components/ui";
+import { REPORT_FIELDS, REPORT_MESSAGE_MAX, type ReportField } from "@/lib/numberReports";
 import { type Order, money, isValidCost, isCanceled, isFullyRefunded, isPartiallyRefunded, getRefundLoss, getShippingCost, formatOrderDate, refundNeedsReview, feesPending } from "./model";
 import { Icon } from "./Icon";
 import { ListingImage } from "./ListingImage";
@@ -18,6 +19,94 @@ function SavingMark({ state }: { state: "saving" | "saved" | null }) {
         <Icon name="check" size={12} className="text-profit" />
       ) : null}
     </span>
+  );
+}
+
+// ============================================================
+// "THIS NUMBER LOOKS WRONG"
+// ============================================================
+
+// A seller flags a number on this order. The server saves the report with a
+// copy of the order's numbers, so it can be checked against eBay later.
+function ReportNumber({ orderId }: { orderId: number }) {
+  const [open, setOpen] = useState(false);
+  const [field, setField] = useState<ReportField>("ebay_fees");
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const [sent, setSent] = useState(false);
+
+  async function send() {
+    if (sending) return;
+    setSending(true);
+    setError("");
+    try {
+      const response = await fetch("/api/number-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId, field, message }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+      if (!response.ok) throw new Error(data.message || data.error || "Couldn't send that. Please try again.");
+      setSent(true);
+      setOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't send that. Please try again.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  if (sent) {
+    return (
+      <p role="status" className="mt-4 flex items-center gap-2 text-xs text-profit">
+        <Icon name="check" size={14} /> Thanks! We got your report and will look into this order.
+      </p>
+    );
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mt-4 text-xs font-medium text-muted underline-offset-2 hover:text-ink hover:underline"
+      >
+        Does a number here look wrong? Tell us
+      </button>
+    );
+  }
+
+  return (
+    <section className="mt-4 rounded-xl border border-line p-4" aria-label="Report a number that looks wrong">
+      <h4 className="text-sm font-semibold text-ink">Which number looks wrong?</h4>
+      <p className="mt-1 text-xs leading-5 text-muted">
+        We&apos;ll check this order against eBay. Your report includes this order&apos;s numbers as they are now.
+      </p>
+      <div className="mt-3 space-y-3">
+        <Field label="What looks wrong">
+          <Select value={field} onChange={(e) => setField(e.target.value as ReportField)}>
+            {REPORT_FIELDS.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="What did you expect?" optional hint={`For example: "eBay shows $6.12 in fees". Up to ${REPORT_MESSAGE_MAX} characters.`}>
+          <Textarea value={message} maxLength={REPORT_MESSAGE_MAX} onChange={(e) => setMessage(e.target.value)} rows={3} />
+        </Field>
+      </div>
+      {error && <p role="alert" className="mt-2 text-xs text-loss">{error}</p>}
+      <div className="mt-3 flex justify-end gap-2">
+        <Button variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={sending}>
+          Cancel
+        </Button>
+        <Button variant="primary" size="sm" loading={sending} onClick={() => void send()}>
+          Send report
+        </Button>
+      </div>
+    </section>
   );
 }
 
@@ -570,6 +659,8 @@ export function OrderDetailsPanel({
               : `Margin ${profitMargin.toFixed(1)}%`}
         </p>
       </section>
+
+      <ReportNumber orderId={order.id} />
     </Drawer>
   );
 }

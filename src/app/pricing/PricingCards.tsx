@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { PLANS, yearlySavingsCents, type BillingInterval, type PaidPlanId, type PlanId } from "@/lib/billing/plans";
+import { PLANS, TRIAL_DAYS, TRIAL_PLAN, yearlySavingsCents, type BillingInterval, type PaidPlanId, type PlanId } from "@/lib/billing/plans";
 import { useSignedIn } from "@/components/site/useSignedIn";
 
 const dollars = (cents: number) =>
@@ -91,8 +91,11 @@ export default function PricingCards() {
                     : `Choose ${plan.name}`
                   : id === "free"
                     ? "Start free"
-                    : `Start with ${plan.name}`}
+                    : id === TRIAL_PLAN
+                      ? `Try ${plan.name} free for ${TRIAL_DAYS} days`
+                      : `Start with ${plan.name}`}
               </Link>
+              {!signedIn && id === TRIAL_PLAN && <p className="mt-2 text-center text-xs text-subtle">No card needed</p>}
             </section>
           );
         })}
