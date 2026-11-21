@@ -3,18 +3,10 @@ import { getPool } from "@/lib/db/pool";
 import { createClient } from "@/lib/supabase/server";
 import { setupNeeded } from "@/lib/setupNeeded";
 import { fullyRefundedSql, statusWithCostSql } from "@/lib/refunds";
+import { parseMoney } from "@/lib/parseMoney";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function parseMoney(value: unknown): number | null {
-  if (typeof value !== "number" && typeof value !== "string") return null;
-  if (typeof value === "string" && !/^\d+(\.\d{1,2})?$/.test(value)) return null;
-  const n = Number(value);
-  if (!Number.isFinite(n) || n < 0 || !Number.isSafeInteger(Math.round(n * 100))) return null;
-  if (Math.abs(n * 100 - Math.round(n * 100)) > 0.000001) return null;
-  return Math.round(n * 100) / 100;
-}
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const supabase = await createClient();

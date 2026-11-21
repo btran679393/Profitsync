@@ -4,11 +4,13 @@ import Link from "next/link";
 import { useEffect } from "react";
 import { ProblemPage } from "@/components/site/ProblemPage";
 import { Button, buttonClasses } from "@/components/ui";
+import { reportClientError } from "@/lib/reportClientError";
 
 // Shown when a page hits an unexpected error.
 export default function ErrorPage({ error, retry }: { error: unknown; retry: () => void }) {
   useEffect(() => {
     console.error(error);
+    reportClientError(error, "page");
   }, [error]);
 
   return (

@@ -4,6 +4,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { THEME_BOOT_SCRIPT } from "@/lib/preferences";
 import { SITE_DESCRIPTION, SITE_NAME, siteUrl } from "@/lib/site";
+import { ErrorReporter } from "@/components/site/ErrorReporter";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -62,6 +63,9 @@ export default function RootLayout({
       </head>
       <body className="min-h-full flex flex-col">
         {children}
+        <ErrorReporter />
+        {/* Vercel Web Analytics (visits, no cookies), live site only. */}
+        {process.env.VERCEL_ENV === "production" && <script defer src="/_vercel/insights/script.js" />}
       </body>
     </html>
   );

@@ -39,7 +39,7 @@ import ExpensesSection, {
   type ExpenseEntry,
   type NewExpense,
 } from "./ExpensesSection";
-import { repeatDates } from "@/lib/expenses";
+import { EXPENSE_CATEGORIES, MILEAGE_CATEGORY, repeatDates } from "@/lib/expenses";
 import SettingsSection from "./SettingsSection";
 import {
   DEFAULT_PREFERENCES,
@@ -57,6 +57,7 @@ import { type ApiListing, type Order, type ApiOrder, type SyncResponse, type Ord
 import { OrderDetailsPanel } from "./dashboard/OrderParts";
 import CommandPalette, { type PaletteAction } from "./shell/CommandPalette";
 import ShortcutsDialog from "./shell/ShortcutsDialog";
+import { QuickAdd } from "./shell/QuickAdd";
 import { Icon } from "./dashboard/Icon";
 
 // ============================================================
@@ -626,6 +627,8 @@ function Dashboard() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [expensesEnabled, setExpensesEnabled] = useState(true);
   const [expensesLoading, setExpensesLoading] = useState(true);
+  // The phone "+" button asking the Expenses page to open its add form.
+  const [quickAddExpense, setQuickAddExpense] = useState<{ category: string; nonce: number } | null>(null);
   const [expensesCanRepeat, setExpensesCanRepeat] = useState(false);
 
   // One entry per expense, or per month for a repeating one, up to today.
@@ -1041,6 +1044,37 @@ function Dashboard() {
     } finally {
       savingRef.current = false;
       setSavingId(null);
+    }
+  }
+
+  // "Fill in suggested costs": saves many costs at once. The server only
+  // fills orders that still have no cost.
+  async function fillSuggestedCosts(items: { id: number; productCost: number }[]) {
+    try {
+      const response = await fetch("/api/orders/bulk-cost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { updated?: number[]; error?: string; message?: string };
+      if (!response.ok || !Array.isArray(data.updated)) throw new Error(data.message ?? data.error ?? "Please try again.");
+      const filled = new Set(data.updated);
+      const costs = new Map(items.map((item) => [item.id, item.productCost.toFixed(2)]));
+      setOrders((current) =>
+        current.map((order) =>
+          filled.has(order.id)
+            ? {
+                ...order,
+                productCost: costs.get(order.id)!,
+                savedProductCost: costs.get(order.id)!,
+                status: isPartiallyRefunded(order) ? "PARTIALLY_REFUNDED" : "COMPLETED",
+              }
+            : order
+        )
+      );
+      toast.success(`Filled in ${filled.size} cost${filled.size === 1 ? "" : "s"}`, "Change any of them by typing a new cost.");
+    } catch (error) {
+      toast.error("Couldn't fill in the costs", error instanceof Error ? error.message : undefined);
     }
   }
 
@@ -2107,6 +2141,7 @@ function Dashboard() {
               suggestedCost={suggestedCost}
               onOpenOrder={(id) => setSelectedOrderId(id)}
               onSync={() => void syncEbayOrders()}
+              onFillSuggested={fillSuggestedCosts}
               tools={
                 <>
                   {!allStores && <StoreShippingSetting value={storeShipping} onSave={saveStoreShipping} />}
@@ -2253,6 +2288,7 @@ function Dashboard() {
               onMileageRateChange={(mileageRate) => void savePreferences({ mileageRate }).catch(() => {})}
               mileageAllowed={limits.mileage}
               onUpgrade={goToPlans}
+              quickAdd={quickAddExpense}
             />
           )}
 
@@ -2324,6 +2360,15 @@ function Dashboard() {
         </div>
       </main>
       </div>
+
+      {expensesEnabled && (
+        <QuickAdd
+          onAdd={(kind) => {
+            setQuickAddExpense({ category: kind === "mileage" ? MILEAGE_CATEGORY : EXPENSE_CATEGORIES[0], nonce: Date.now() });
+            navigate("expenses");
+          }}
+        />
+      )}
 
       {/* =====================================================
           ORDER DETAILS PANEL

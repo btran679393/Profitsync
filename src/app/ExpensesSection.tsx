@@ -113,6 +113,7 @@ export default function ExpensesSection({
   onMileageRateChange,
   mileageAllowed = true,
   onUpgrade,
+  quickAdd = null,
 }: {
   expenses: ExpenseEntry[]; // already filtered to the chosen date range
   categories: string[]; // every category the seller has used (for suggestions)
@@ -130,8 +131,11 @@ export default function ExpensesSection({
   // Mileage is part of Ultimate (existing trips can still be edited).
   mileageAllowed?: boolean;
   onUpgrade?: () => void;
+  // The phone "+" button: opens the add form (a new nonce each tap).
+  quickAdd?: { category: string; nonce: number } | null;
 }) {
   const [formOpen, setFormOpen] = useState(false);
+  const [handledQuickAdd, setHandledQuickAdd] = useState<number | null>(null);
   const [editing, setEditing] = useState<Expense | null>(null);
   const [spentOn, setSpentOn] = useState(todayKey);
   const [category, setCategory] = useState<string>(EXPENSE_CATEGORIES[0]);
@@ -214,6 +218,15 @@ export default function ExpensesSection({
 
   function openNew() {
     resetForm();
+    setFormOpen(true);
+  }
+
+  // Opened from the phone "+" button: start a new expense in that category.
+  // (Adjusting state while rendering, as React recommends for prop changes.)
+  if (quickAdd && quickAdd.nonce !== handledQuickAdd && enabled) {
+    setHandledQuickAdd(quickAdd.nonce);
+    resetForm();
+    setCategory(quickAdd.category);
     setFormOpen(true);
   }
 

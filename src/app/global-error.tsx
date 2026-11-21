@@ -1,8 +1,14 @@
 "use client"; // Error boundaries must be Client Components
 
+import { useEffect } from "react";
+import { reportClientError } from "@/lib/reportClientError";
+
 // Last-resort error page, used only if the whole site layout fails.
 // It can't use the site's styles, so it's styled inline.
-export default function GlobalError({ retry }: { error: unknown; retry: () => void }) {
+export default function GlobalError({ error, retry }: { error: unknown; retry: () => void }) {
+  useEffect(() => {
+    reportClientError(error, "layout");
+  }, [error]);
   return (
     <html lang="en">
       <body

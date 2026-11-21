@@ -16,6 +16,8 @@ export const LIMITS = {
   listingSync: { limit: 60, windowSeconds: 3600 },
   shippingImport: { limit: 30, windowSeconds: 3600 },
   listingBulk: { limit: 60, windowSeconds: 600 },
+  orderBulk: { limit: 30, windowSeconds: 600 },
+  clientError: { limit: 20, windowSeconds: 600 },
   ebayApiRead: { limit: 120, windowSeconds: 600 },
   ebayConnect: { limit: 10, windowSeconds: 600 },
   billing: { limit: 10, windowSeconds: 600 },

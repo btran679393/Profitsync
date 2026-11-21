@@ -53,6 +53,7 @@ export default function OrdersView({
   suggestedCost,
   onOpenOrder,
   onSync,
+  onFillSuggested,
   tools,
 }: {
   orders: Order[]; // already filtered by period, search and status
@@ -74,10 +75,28 @@ export default function OrdersView({
   suggestedCost: (order: Order) => number | null;
   onOpenOrder: (id: number) => void;
   onSync: () => void;
+  // Saves the suggested cost on many orders at once.
+  onFillSuggested?: (items: { id: number; productCost: number }[]) => Promise<void>;
   // Store shipping default + import/export, shown in the toolbar.
   tools?: ReactNode;
 }) {
   const [sort, setSort] = useState<SortKey>("newest");
+  const [filling, setFilling] = useState(false);
+
+  // Orders shown right now that have no cost yet but a suggestion from the
+  // same listing or earlier sales of the same item.
+  const fillable = useMemo(() => {
+    if (!onFillSuggested) return [];
+    const list: { id: number; productCost: number }[] = [];
+    for (const order of orders) {
+      if (isFullyRefunded(order) || isCanceled(order) || order.savedProductCost !== "") continue;
+      const perUnit = suggestedCost(order);
+      if (perUnit === null) continue;
+      list.push({ id: order.id, productCost: Math.round(perUnit * order.quantity * 100) / 100 });
+    }
+    return list;
+  }, [orders, suggestedCost, onFillSuggested]);
+  const fillTotal = fillable.reduce((sum, item) => sum + item.productCost, 0);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(25);
   // Back to page 1 whenever what's shown changes.
   const signature = `${search}|${filter}|${sort}|${pageSize}|${orders.length}`;
@@ -184,6 +203,34 @@ export default function OrdersView({
   return (
     <Card className="overflow-hidden">
       {toolbar}
+
+      {!loading && fillable.length > 0 && onFillSuggested && (
+        <div className="flex flex-col gap-3 border-b border-line bg-accent/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-ink">
+            <span className="font-medium">
+              {fillable.length} order{fillable.length === 1 ? "" : "s"} can use a cost you&apos;ve entered before
+            </span>
+            <span className="block text-xs text-muted">
+              From the same listing or earlier sales of the same item ({money(fillTotal)} in total). You can still change any of them after.
+            </span>
+          </p>
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={filling || inputsDisabled}
+            onClick={async () => {
+              setFilling(true);
+              try {
+                await onFillSuggested(fillable);
+              } finally {
+                setFilling(false);
+              }
+            }}
+          >
+            {filling ? "Filling in…" : `Fill in ${fillable.length} cost${fillable.length === 1 ? "" : "s"}`}
+          </Button>
+        </div>
+      )}
 
       {loading ? (
         <LoadingRegion label="Loading orders">

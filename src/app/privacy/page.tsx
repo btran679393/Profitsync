@@ -81,6 +81,11 @@ export default function PrivacyPage() {
         ProfitSync uses only essential cookies, to keep you signed in. Your browser also remembers display choices, like light or dark
         mode and whether the sidebar is collapsed. We don&apos;t use advertising or tracking cookies.
       </p>
+      <p>
+        To see how many people visit and which pages they use, we use Vercel Web Analytics, which counts visits without cookies and
+        without identifying you. If something breaks in your browser, the error message and the page it happened on are sent to us so
+        we can fix it.
+      </p>
 
       <h2>5. How long we keep it</h2>
       <p>

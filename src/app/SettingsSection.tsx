@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import AccountBadge from "./AccountBadge";
+import { EmailPreferenceSetting } from "./EmailPreferenceSetting";
 import type { EbayStore } from "./StoreSwitcher";
 import { timeAgo } from "./shell/useShell";
 import { historyYears } from "@/lib/ebay/syncWindow";
@@ -418,6 +419,7 @@ export default function SettingsSection({
               Plan &amp; billing
             </button>
           </Row>
+          <EmailPreferenceSetting />
           <Row title="Sign out" hint="Sign out of ProfitSync on this device.">
             <button type="button" onClick={onSignOut} className={`${field} font-semibold hover:border-accent/40`}>
               Sign out

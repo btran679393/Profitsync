@@ -61,7 +61,7 @@ export type ListingRow = {
 };
 
 type SortKey = "profit" | "units" | "revenue" | "margin" | "recent" | "stock" | "watchers" | "views";
-type StatusFilter = "all" | "ACTIVE" | "selling" | "unsold" | "watched" | "ENDED" | "low" | "stale";
+type StatusFilter = "all" | "ACTIVE" | "selling" | "unsold" | "watched" | "ENDED" | "low" | "stale" | "viewsNoSales";
 
 export type ListingRange = "all" | "year" | "90d" | "30d" | "7d";
 
@@ -91,6 +91,7 @@ const FILTERS: ReadonlyArray<readonly [StatusFilter, string]> = [
   ["ENDED", "Ended"],
   ["low", "Running low"],
   ["stale", "Not selling"],
+  ["viewsNoSales", "Views, no sales"],
 ];
 
 const PAGE_SIZES = [25, 50, 100] as const;
@@ -618,6 +619,7 @@ export default function ListingsSection({
       ENDED: rows.filter((r) => r.status !== "ACTIVE").length,
       low: rows.filter((r) => r.alert === "low").length,
       stale: rows.filter((r) => r.alert === "stale").length,
+      viewsNoSales: rows.filter((r) => listingSignals(r).includes("viewsNoSales")).length,
     }),
     [rows]
   );
@@ -633,6 +635,7 @@ export default function ListingsSection({
       if (status === "watched") return r.status === "ACTIVE" && (r.watchers ?? 0) > 0;
       if (status === "low") return r.alert === "low";
       if (status === "stale") return r.alert === "stale";
+      if (status === "viewsNoSales") return listingSignals(r).includes("viewsNoSales");
       return true;
     });
     const by: Record<SortKey, (r: ListingRow) => number> = {
@@ -691,7 +694,7 @@ export default function ListingsSection({
     return `Updated ${ids.length} listing${ids.length === 1 ? "" : "s"}` + (filled > 0 ? ` · filled ${filled} past sale${filled === 1 ? "" : "s"}` : "");
   }
 
-  const statusOptions = FILTERS.filter(([value]) => showInterest || value !== "watched").map(([value, label]) => ({ value, label, count: filterCounts[value] }));
+  const statusOptions = FILTERS.filter(([value]) => showInterest || (value !== "watched" && value !== "viewsNoSales")).map(([value, label]) => ({ value, label, count: filterCounts[value] }));
 
   return (
     <div className="space-y-5">

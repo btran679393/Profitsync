@@ -78,6 +78,22 @@ async function handle(url: URL, init?: RequestInit): Promise<Response> {
     const offset = Number(url.searchParams.get("offset") ?? 0) || 0;
     return json(d.orders.slice(offset, offset + limit), 200, { "X-Total-Count": String(d.orders.length) });
   }
+  if (path === "/api/email/preferences") {
+    if (method === "PUT") return json({ success: false, message: DEMO_MESSAGE }, 403);
+    return json({ weeklySummary: true, sending: false });
+  }
+  if (path === "/api/orders/bulk-cost" && method === "POST") {
+    const { items } = (await body(init)) as { items?: { id: number; productCost: number }[] };
+    const updated: number[] = [];
+    for (const item of items ?? []) {
+      const order = d.orders.find((o) => o.id === item.id);
+      if (order && (order.productCost === null || order.productCost === undefined)) {
+        Object.assign(order, { productCost: item.productCost });
+        updated.push(item.id);
+      }
+    }
+    return json({ updated });
+  }
   const orderMatch = /^\/api\/orders\/(\d+)$/.exec(path);
   if (orderMatch && method === "PATCH") {
     const changes = await body(init);

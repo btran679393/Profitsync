@@ -188,3 +188,13 @@ BEGIN
     EXECUTE format('REVOKE ALL ON public.%I FROM anon, authenticated', t);
   END LOOP;
 END $$;
+
+-- Weekly summary emails (docs/sql/2026-11-21_email.sql).
+CREATE TABLE IF NOT EXISTS public."emailPreference" (
+  "userId"            text PRIMARY KEY,
+  "weeklySummary"     boolean NOT NULL DEFAULT true,
+  "lastWeeklyEmailAt" timestamptz NULL,
+  "updatedAt"         timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public."emailPreference" ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public."emailPreference" FROM anon, authenticated;
